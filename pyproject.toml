@@ -68,6 +68,7 @@ skip_covered = true
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+extend-exclude = ["docs"]  # design docs hold illustrative sketches, not code
 
 [tool.ruff.lint]
 select = [
@@ -83,7 +84,7 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is how pytest works
+"tests/**" = ["S101", "S311"]  # pytest asserts; seeded shuffles are not crypto
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # Never execute what we inspect, and never phone home.

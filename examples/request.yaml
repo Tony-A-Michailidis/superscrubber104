@@ -1,0 +1,30 @@
+# Example transfer request: initial delivery of a small local RAG assistant.
+apiVersion: airlock/v1alpha1
+kind: TransferRequest
+metadata:
+  id: TR-2026-0001
+  title: Initial delivery of example RAG assistant
+spec:
+  purpose: Deploy example RAG assistant v1.0 to a disconnected enclave
+  owner:
+    name: Example Owner
+    contact: owner@example.org
+  source: dev-unclass
+  destination: enclave-b
+  direction: low-to-high
+  approvers:
+    - name: Example Reviewer
+      role: security
+  allowUndeclared: false
+  contents:
+    - name: chat-model
+      unit: model-package
+      paths: ["models/tiny-chat/**"]
+      upstream:
+        huggingface: example-org/tiny-chat
+        revision: 0123456789abcdef0123456789abcdef01234567
+    - name: app
+      paths: ["app/**"]
+    - name: wheelhouse
+      unit: python-environment
+      paths: ["wheels/**", "app/requirements.lock"]

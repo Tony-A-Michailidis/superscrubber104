@@ -1,0 +1,49 @@
+"""Shared test data for core tests."""
+
+from airlock.core.model import Severity, ToolRef
+from airlock.core.rules import RuleSpec
+
+TOOL = ToolRef("airlock-test", "0")
+
+RULES = (
+    RuleSpec(
+        "model.pickle.dangerous-import",
+        "1",
+        "Pickle imports a dangerous callable",
+        Severity.CRITICAL,
+        ("SI-3", "SR-10"),
+        "Unpickling runs arbitrary code.",
+    ),
+    RuleSpec(
+        "container.user.root",
+        "1",
+        "Container runs as root",
+        Severity.MEDIUM,
+        ("CM-7",),
+        "Least functionality.",
+    ),
+    RuleSpec(
+        "offline.telemetry.enabled",
+        "1",
+        "Telemetry enabled",
+        Severity.HIGH,
+        ("SC-7",),
+        "Egress path.",
+    ),
+    RuleSpec(
+        "malware.scan.detected",
+        "1",
+        "Malware detected",
+        Severity.CRITICAL,
+        ("SI-3",),
+        "Malicious code.",
+    ),
+    RuleSpec(
+        "document.metadata.author",
+        "1",
+        "Document metadata names an author",
+        Severity.LOW,
+        ("CM-8",),
+        "Metadata leakage.",
+    ),
+)

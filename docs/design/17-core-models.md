@@ -306,7 +306,7 @@ licences:
 
 allowlists:                       # anti-slopsquatting / approved sources; mode: enforce | report
   python: { mode: enforce, file: allow/python.txt, sha256: "…" }   # name==ver or name specifiers
-  npm:    { mode: report,  packages: ["react@^18", "zod"] }
+  npm:    { mode: report,  entries: ["react@^18", "zod"] }
   models:
     mode: enforce
     entries:
@@ -334,32 +334,34 @@ freshness:                        # 1c; parsed now so the schema is stable
 
 controls:
   framework: nist-800-53r5        # built-in catalogue; ITSG-33 aligns
-  overrides:                      # add or replace control IDs per rule
+  overrides:                      # first matching glob replaces the rule's own control IDs
     "offline.*": ["SC-7", "AC-4", "CM-6"]
 ```
 
-**Evaluation order for each finding:** a `PASS` is always `ALLOW`. Otherwise, apply the first matching unexpired **waiver** whose sha256 still matches. If there is none, apply the first matching **rule**. If no rule matches, use **defaults**: `severity` for a `FAIL`, `notAssessed`/`error` otherwise. The decision records which entry matched (`rules[3]`), so every outcome can be traced back to one policy line.
+**Evaluation order for each finding:** a `PASS` is always `ALLOW`. Otherwise, apply the first matching unexpired **waiver** whose sha256 (if it sets one) still matches. If there is none, apply the first **rule** that matches *and* sets an outcome for this result (`disposition` for `FAIL`, `notAssessed`, `error`), so a rule that only sets `notAssessed` never swallows a `FAIL`. If no rule applies, use **defaults**: `severity` for a `FAIL`, `notAssessed`/`error` otherwise. The decision records which entry matched (`rules[3]`), so every outcome can be traced back to one policy line.
 
-**Policy hygiene:** referenced files (`keys/…`, `allow/…`) resolve relative to the policy file and **must** be pinned by sha256. The policy digest covers the policy file and every file it references. Unknown keys are an error, not ignored, because a typo like `dispositon: block` must not silently weaken a policy.
+**Policy hygiene:** referenced files (`keys/…`, `allow/…`) resolve relative to the policy file and **must** be pinned by sha256. The policy digest covers the policy file and every file it references. Unknown keys are an error, not ignored, because a typo like `dispositon: block` must not silently weaken a policy. Duplicate keys are also an error (plain YAML loaders keep the last one silently). Hashes must be quoted, because YAML reads an all-digit hash as an integer. Every waiver must have an `expires` date.
 
 I'll also generate JSON Schema for the policy and the transfer request, so editors can validate them while they're being written.
 
-## 17.11 Proposed module placement
+## 17.11 Module placement
 
 ```
-src/airlock/
-  core/
-    model.py        # Artifact, Component, Unit, Finding, Decision, Assessment, enums
-    request.py      # TransferRequest + loader/validator
-    policy.py       # Policy + loader/validator + evaluator
-    rules.py        # rule registry, RuleSpec
-    controls.py     # control catalogue + mapping (data in core/data/nist-800-53r5.yaml)
-    canonical.py    # canonical JSON
-    signing.py      # ed25519 keys, DSSE
-    custody.py      # hash-chained log
-    receipt.py
-    interfaces.py   # ArtifactView, Handler, UnitAssembler, Plugin, Stager, Context
+src/airlock/core/
+  model.py        # Artifact, Component, Unit, Finding, Decision, Assessment, Manifest, Receipt, enums
+  request.py      # TransferRequest: loader, validator, path -> content entry matching
+  policy.py       # Policy: loader, validator, pinned-file checks, evaluator, licence decisions
+  rules.py        # RuleSpec, RuleRegistry, FindingFactory
+  controls.py     # control catalogue and rule-to-control mapping (data/nist-800-53r5.yaml)
+  canonical.py    # canonical JSON and digests
+  serde.py        # strict dataclass <-> JSON conversion (camelCase on the wire)
+  paths.py        # bundle path rules and glob matching
+  yamlio.py       # strict YAML loading (duplicate keys, unknown keys, sizes, durations)
+  interfaces.py   # ArtifactView, Handler, UnitAssembler, Plugin, Stager, Context
+  errors.py
 ```
+
+Signing (DSSE), the custody log and the receipt signing flow arrive with keygen/pack/verify in task 4. `Unit.id` is computed from `kind` and `root` and is not stored separately.
 
 ## Decisions (Q1–Q8, recommendations adopted)
 

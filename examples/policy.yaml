@@ -1,0 +1,70 @@
+# Example import policy. Trust keys are omitted here because they must point at real,
+# sha256-pinned key files; see docs/design/17-core-models.md for the full schema.
+apiVersion: airlock/v1alpha1
+kind: Policy
+metadata:
+  name: example-import
+  version: "2026.11.1"
+
+defaults:
+  severity:
+    critical: block
+    high: block
+    medium: require-approval
+    low: warn
+    info: allow
+  notAssessed: warn
+  error: require-approval
+  approvals: 1
+
+rules:
+  - rule: "model.pickle.*"
+    disposition: block
+  - rule: "model.remote-code.required"
+    disposition: require-approval
+    approvals: 2
+  - rule: "offline.*"
+    paths: ["dev-tools/**"]
+    disposition: warn
+  - rule: "malware.*"
+    notAssessed: block
+
+licences:
+  allow: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, PSF-2.0]
+  requireApproval: [LicenseRef-*, MPL-2.0, LGPL-*]
+  deny: [AGPL-*, SSPL-1.0]
+  unknown: require-approval
+
+allowlists:
+  npm:
+    mode: report
+    entries: ["react@^18", "zod"]
+  models:
+    mode: enforce
+    entries:
+      - id: huggingface:example-org/tiny-chat
+        revision: 0123456789abcdef0123456789abcdef01234567
+
+limits:
+  archive:
+    maxDepth: 4
+    maxMembers: 200000
+    maxRatio: 200
+    maxExpandedBytes: 500GiB
+  maxArtifactBytes: 1TiB
+  maxPathLength: 1024
+
+plugins:
+  clamav:
+    required: false
+    maxDbAge: 7d
+
+freshness:
+  feeds:
+    default: 7d
+    kev: 2d
+
+controls:
+  framework: nist-800-53r5
+  overrides:
+    "offline.*": [SC-7, AC-4, CM-6]
