@@ -22,3 +22,4 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [16-open-decisions.md](16-open-decisions.md) | §21 | Unresolved decisions |
 | [17-core-models.md](17-core-models.md) | new | Core data models, policy schema, keys, logs and interfaces (implemented) |
 | [18-bundle-and-verification.md](18-bundle-and-verification.md) | new | Bundle layout, signed statement, pack and verify steps, archive inspection, known limits (implemented) |
+| [19-model-packages.md](19-model-packages.md) | new | Model formats, model packages, pickle classification, provenance and trust levels, known limits (implemented) |

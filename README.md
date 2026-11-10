@@ -47,6 +47,19 @@ Two kinds of failure are kept strictly apart:
 
 See [examples/policy.yaml](examples/policy.yaml) and [examples/request.yaml](examples/request.yaml), and the [bundle format and verification steps](docs/design/18-bundle-and-verification.md), including its list of known limits.
 
+```console
+$ airlock model inspect ./models/tiny-chat
+model package  .  (example-org/tiny-chat)
+  architecture   LlamaForCausalLM, 1.2B parameters
+  weights        safetensors, 4 file(s), BF16 x291
+  tokenizer      BPE, 128256 tokens
+  chat template  sha256:5f1b6c0e4a1d2b3c... (tokenizer_config.json#chat_template)
+  licence        LicenseRef-llama3.1 (gated)
+  provenance     huggingface-download-record example-org/tiny-chat@0123abc..., 6 file(s) verified
+```
+
+`airlock model inspect` records and checks model packages in place: safetensors, GGUF, PyTorch and other pickle-based formats (statically; nothing is ever unpickled), Keras, ONNX, Ollama stores, adapters and sentence-transformers. It checks shards against indexes, configs against tensors, tokenizers against vocabularies, chat templates, `trust_remote_code`, licences and publisher checksums. See [model packages](docs/design/19-model-packages.md).
+
 `airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 
 Planned: `airlock report`, `airlock model inspect`, `airlock offline-check`, `airlock stage`, `airlock patch`, `airlock eval`.

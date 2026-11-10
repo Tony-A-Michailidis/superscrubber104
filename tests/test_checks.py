@@ -65,6 +65,7 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
     assert final - {r for r in final if r.startswith(("integrity.", "replay.", "transfer."))} == {
         "delta.base.unknown",
         "path.name.unsafe",  # the file cannot be stored at all, so there is nothing to approve
+        "model.provenance.checksum-mismatch",  # a hash mismatch against the publisher's record
     }
     assert all(r.rationale for r in registry)
 

@@ -8,15 +8,16 @@ from datetime import datetime
 from pathlib import Path
 
 from airlock import bundle as layout
+from airlock.analysis import finish
 from airlock.analyzer import TOOL, Analyzer
 from airlock.checks.inventory import check_paths, check_request
 from airlock.checks.transfer import check_policy
+from airlock.checks.units import check_request_units
 from airlock.core import chainlog
 from airlock.core.canonical import canonical_bytes, sha256_digest
 from airlock.core.errors import ConfigError
 from airlock.core.interfaces import Handler
 from airlock.core.model import (
-    Analysis,
     ArtifactRef,
     Assessment,
     BundleDescriptor,
@@ -31,9 +32,10 @@ from airlock.core.model import (
 from airlock.core.policy import Policy
 from airlock.core.request import TransferRequest, load_request
 from airlock.core.signing import Signer, sign_envelope
-from airlock.handlers.generic import GenericHandler
+from airlock.handlers import default_handlers
 from airlock.hashing import CHUNK_SIZE, hash_stream
 from airlock.session import Session, utc_now
+from airlock.units import default_assemblers
 from airlock.walker import FileView, plan_inputs, scan
 
 
@@ -43,11 +45,6 @@ class PackResult:
     assessment: Assessment
     manifest_digest: str
     signed: bool  # False when blocking findings stopped the bundle from being signed
-
-
-def default_handlers() -> tuple[Handler, ...]:
-    """Handlers in dispatch order. The generic handler goes last and accepts everything."""
-    return (GenericHandler(),)
 
 
 def _prepare_output(output: Path, inputs: Sequence[Path]) -> None:
@@ -130,16 +127,17 @@ def pack(
 
         for view in files.values():
             analyzer.analyze(view)
+        analysis = finish(analyzer, default_assemblers())
 
     check_paths(entries, ctx)
     check_request(request, entries, ctx)
+    check_request_units(request, analysis.units, ctx)
     check_policy(ctx)
 
     manifest = Manifest.create(entries, chunk_size=chunk_size)
     subjects = {layout.MANIFEST: layout.write(output / layout.MANIFEST, manifest)}
     manifest_digest = sha256_digest(subjects[layout.MANIFEST])
 
-    analysis = Analysis.create(TOOL, analyzer.artifacts, components=analyzer.components)
     subjects[layout.ANALYSIS] = layout.write(output / layout.ANALYSIS, analysis)
 
     assessment = session.finish(

@@ -88,8 +88,13 @@ allowlists:
   models:
     mode: enforce
     entries:
+      # By identity and revision (asserted), or by unit digest from `airlock model inspect --json`
+      # (pins every file of the package).
       - id: huggingface:example-org/tiny-chat
         revision: 0123456789abcdef0123456789abcdef01234567
+  pickle-globals:              # classes trusted to run when a pickle is loaded
+    mode: report
+    entries: ["sklearn.*"]
 
 limits:
   archive:

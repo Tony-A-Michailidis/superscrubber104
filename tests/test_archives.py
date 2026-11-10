@@ -164,7 +164,7 @@ def test_zip_path_traversal_is_reported_and_nothing_is_written(tmp_path: Path) -
         "bad.zip!/../../evil.txt",
         "bad.zip!//abs/evil.txt",
     ]
-    assert all(f.result is Result.FAIL and f.subject.artifact.unsafe for f in hits)  # type: ignore[union-attr]
+    assert all(f.result is Result.FAIL and f.subject.artifact.unsafe for f in hits)
     # The members are still inventoried and hashed, under their escaped names.
     assert out.artifacts["bad.zip!/../../evil.txt"].sha256 == hashlib.sha256(b"evil").hexdigest()
     assert out.artifacts["bad.zip!/ok.txt"].ref.unsafe is False

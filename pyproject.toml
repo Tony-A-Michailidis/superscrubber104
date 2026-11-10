@@ -84,7 +84,8 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S311"]  # pytest asserts; seeded shuffles are not crypto
+# pytest asserts; seeded shuffles are not crypto; fixture literals (bytes, JSON) run long
+"tests/**" = ["S101", "S311", "E501"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # Never execute what we inspect, and never phone home.
@@ -100,3 +101,8 @@ python_version = "3.11"
 strict = true
 warn_unreachable = true
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# Tests dig into free-form JSON records (unit attributes, finding details) by key.
+module = "tests.*"
+disable_error_code = ["index", "call-overload", "union-attr", "operator"]

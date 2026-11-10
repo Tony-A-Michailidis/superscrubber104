@@ -29,7 +29,7 @@ def zip_bytes(files: Mapping[str, bytes], compression: int = zipfile.ZIP_DEFLATE
 
 def tar_bytes(files: Mapping[str, bytes], mode: str = "w") -> bytes:
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode=mode) as archive:  # type: ignore[call-overload]
+    with tarfile.open(fileobj=buffer, mode=mode) as archive:
         for name, data in files.items():
             info = tarfile.TarInfo(name)
             info.size = len(data)

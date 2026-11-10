@@ -22,6 +22,7 @@ from airlock.core.model import (
     Unit,
     UnitClaim,
     UnitKind,
+    Verification,
 )
 from airlock.core.policy import Policy
 from airlock.core.rules import Recorder
@@ -107,11 +108,25 @@ class Handler(Protocol):
 
 @runtime_checkable
 class UnitAssembler(Protocol):
+    name: str
+    version: str
     kind: UnitKind
 
-    def assemble(self, claims: Sequence[UnitClaim], lookup: Lookup, ctx: Context) -> Iterable[Unit]:
-        """Group claims by root into units and record completeness and consistency findings."""
+    def assemble(self, claims: Sequence[UnitClaim], ctx: Context) -> Iterable["Assembly"]:
+        """Group claims by root into units and record completeness and consistency findings.
+
+        Works from the claims' facts alone, so units inside archives assemble like any other.
+        """
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class Assembly:
+    """One unit, the SBOM components it contributes, and what was verified about its members."""
+
+    unit: Unit
+    components: tuple[Component, ...] = ()
+    verifications: Mapping[ArtifactRef, tuple[Verification, ...]] = field(default_factory=dict)
 
 
 @runtime_checkable

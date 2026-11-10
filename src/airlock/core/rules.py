@@ -9,7 +9,7 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 
-from airlock.core.canonical import JSON, digest
+from airlock.core.canonical import digest, jsonable
 from airlock.core.controls import ControlCatalog, ControlMapping
 from airlock.core.errors import RuleError
 from airlock.core.model import (
@@ -118,7 +118,7 @@ class FindingFactory:
         result: Result,
         *,
         tool: ToolRef,
-        detail: Mapping[str, JSON] | None = None,
+        detail: Mapping[str, object] | None = None,
         attributes: Mapping[str, str] | None = None,
         title: str | None = None,
         severity: Severity | None = None,
@@ -142,7 +142,7 @@ class FindingFactory:
             title=title or spec.title,
             controls=self.controls_for(rule),
             tool=tool,
-            detail=dict(detail or {}),
+            detail={key: jsonable(value) for key, value in (detail or {}).items()},
             attributes=dict(attributes or {}),
             not_assessed_reason=reason,
         )
@@ -170,9 +170,10 @@ class Recorder:
         subject: Subject,
         *,
         tool: ToolRef,
-        detail: Mapping[str, JSON] | None = None,
+        detail: Mapping[str, object] | None = None,
         attributes: Mapping[str, str] | None = None,
         discriminator: str = "",
+        severity: Severity | None = None,
     ) -> Finding:
         return self.record(
             self.factory(
@@ -183,6 +184,7 @@ class Recorder:
                 detail=detail,
                 attributes=attributes,
                 discriminator=discriminator,
+                severity=severity,
             )
         )
 

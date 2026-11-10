@@ -11,6 +11,7 @@ Two classes of rule, with different rules of engagement:
   signed evidence.
 """
 
+from airlock.catalog_models import MODEL_RULES
 from airlock.core.controls import ControlCatalog
 from airlock.core.model import Severity
 from airlock.core.rules import RuleRegistry, RuleSpec
@@ -397,7 +398,7 @@ ARCHIVE = (
 # Checks on archive members; reported "not assessed" for any archive that could not be opened.
 ARCHIVE_MEMBER_RULES = tuple(r.id for r in ARCHIVE if r.id.startswith("archive.member."))
 
-ALL = (*INTEGRITY, *TRANSFER, *REQUEST, *PATHS, *ARCHIVE)
+ALL = (*INTEGRITY, *TRANSFER, *REQUEST, *PATHS, *ARCHIVE, *MODEL_RULES)
 
 
 def builtin_registry(catalog: ControlCatalog | None = None) -> RuleRegistry:

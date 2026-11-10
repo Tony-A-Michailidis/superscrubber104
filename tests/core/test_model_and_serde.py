@@ -317,6 +317,6 @@ def test_floats_and_naive_timestamps_are_rejected() -> None:
 )
 def test_strict_decoding(mutate: object, message: str) -> None:
     data = to_data(Manifest.create([entry("a")], chunk_size=64))
-    mutate(data)  # type: ignore[operator]
+    mutate(data)
     with pytest.raises(SerializationError, match=message):
         from_data(Manifest, data)

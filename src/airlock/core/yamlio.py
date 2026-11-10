@@ -50,6 +50,24 @@ def load_yaml(text: str | bytes, source: str) -> object:
         raise ConfigError(f"invalid YAML: {exc}", source=source) from exc
 
 
+class _UntrustedLoader(yaml.SafeLoader):
+    """For YAML found in deliveries (model cards). Aliases are refused: a few lines of nested
+    aliases expand into billions of nodes for any code that walks the result."""
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(yaml.events.AliasEvent):
+            event = self.peek_event()  # type: ignore[no-untyped-call]
+            raise yaml.composer.ComposerError(
+                None, None, "aliases are not allowed", event.start_mark
+            )
+        return super().compose_node(parent, index)
+
+
+def load_untrusted_yaml(text: str) -> object:
+    """Parse YAML from a delivery. Raises yaml.YAMLError on anything unusual."""
+    return yaml.load(text, Loader=_UntrustedLoader)  # noqa: S506 - SafeLoader subclass
+
+
 def load_yaml_file(path: Path) -> tuple[object, bytes]:
     """Load a YAML file; also return its raw bytes for digesting."""
     try:

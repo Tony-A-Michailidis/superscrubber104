@@ -106,7 +106,7 @@ def test_approve_command_clears_a_finding(tmp_path: Path) -> None:
     for name in ("pack", "reviewer"):
         code, output = run("keygen", "-o", keys, "--name", name)
         assert code == 0
-        key_ids[name] = re.search(r"key id: (ed25519:[0-9a-f]{64})", output).group(1)  # type: ignore[union-attr]
+        key_ids[name] = re.search(r"key id: (ed25519:[0-9a-f]{64})", output).group(1)
 
     signers = "".join(
         f'    - keyId: "{key_ids[name]}"\n'

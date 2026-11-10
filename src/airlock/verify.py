@@ -14,10 +14,12 @@ from datetime import datetime
 from pathlib import Path
 
 from airlock import bundle as layout
+from airlock.analysis import finish
 from airlock.analyzer import TOOL, Analyzer
 from airlock.approvals import count_approvals
 from airlock.checks.inventory import check_paths, check_request
 from airlock.checks.transfer import check_policy, check_transfer
+from airlock.checks.units import check_request_units
 from airlock.core import chainlog
 from airlock.core.canonical import canonical_bytes, sha256_digest
 from airlock.core.errors import AirlockError, ConfigError
@@ -39,10 +41,11 @@ from airlock.core.policy import KeyRole, Policy
 from airlock.core.request import TransferRequest, parse_request
 from airlock.core.serde import from_data
 from airlock.core.signing import Envelope, Signer, VerifyKey, sign_envelope
+from airlock.handlers import default_handlers
 from airlock.hashing import hash_stream
 from airlock.ledger import Ledger
-from airlock.pack import default_handlers
 from airlock.session import Session, utc_now
+from airlock.units import default_assemblers
 from airlock.walker import FileView, scan
 
 _CONTENT_RULES = (
@@ -290,9 +293,11 @@ class _Verifier:
             analyzer = Analyzer(self.ctx, handlers, Path(scratch))
             for view in self.files.values():
                 analyzer.analyze(view)
+            analysis = finish(analyzer, default_assemblers())
         if self.manifest is not None:
             check_paths(self.manifest.entries, self.ctx)
             check_request(self.request, self.manifest.entries, self.ctx)
+            check_request_units(self.request, analysis.units, self.ctx)
 
     # --- history --------------------------------------------------------------------------------
 

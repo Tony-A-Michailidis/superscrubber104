@@ -200,6 +200,9 @@ class ArtifactRef:
     ``unsafe`` marks a reference whose last part is a hostile or unrepresentable name
     (``../../etc/passwd``, a backslash, undecodable bytes) recorded in escaped form. Such a
     reference can be inventoried and reported on, but is never turned into a filesystem path.
+
+    ``ArtifactRef(".")`` (``BUNDLE_ROOT``) stands for the top of the delivery. It is only used as
+    a unit root, for a model package that is the delivery itself.
     """
 
     path: str
@@ -211,6 +214,8 @@ class ArtifactRef:
         if self.unsafe:
             if not all(parts) or any("\x00" in p for p in parts):
                 raise ValueError("unsafe references still need non-empty, NUL-free parts")
+            return
+        if self.path == "." and not self.member:
             return
         for part in parts:
             validate_bundle_path(part)

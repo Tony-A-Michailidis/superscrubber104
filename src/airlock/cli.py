@@ -1,6 +1,7 @@
 """Command-line entry point."""
 
 import functools
+import json
 import os
 import sys
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from airlock import __version__
 from airlock.approvals import approve as run_approve
 from airlock.core.errors import AirlockError, ConfigError
 from airlock.core.policy import Policy, load_policy
+from airlock.core.serde import to_data
 from airlock.core.signing import (
     SigningKey,
     generate_key,
@@ -21,6 +23,8 @@ from airlock.core.signing import (
     save_key,
 )
 from airlock.ledger import Ledger
+from airlock.model_inspect import inspect_paths
+from airlock.model_summary import render_packages
 from airlock.pack import pack as run_pack
 from airlock.session import EXIT_USAGE, exit_code, utc_now
 from airlock.summary import render
@@ -282,3 +286,36 @@ def adjust_clock(state: Path, reason: str, key: Path | None, passphrase_env: str
     click.echo(
         f"recorded clock adjustment to {now.isoformat()}" + ("" if signer else " (unsigned)")
     )
+
+
+@main.group()
+def model() -> None:
+    """Inspect AI models."""
+
+
+@model.command("inspect")
+@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--policy", type=_FILE, help="Policy file (default: built-in defaults).")
+@click.option("--json", "as_json", is_flag=True, help="Print the records and findings as JSON.")
+@click.option("-v", "--verbose", is_flag=True, help="Also list allowed findings.")
+@_reports_errors
+def model_inspect(
+    inputs: tuple[Path, ...], policy: Path | None, as_json: bool, verbose: bool
+) -> None:
+    """Record and check the model packages in INPUTS, in place, without packing.
+
+    Exit codes are those of 'airlock verify'.
+    """
+    result = inspect_paths(inputs, policy=_policy(policy))
+    if as_json:
+        document = {
+            "units": [to_data(u) for u in result.analysis.units],
+            "components": [to_data(c) for c in result.analysis.components],
+            "assessment": to_data(result.assessment),
+        }
+        click.echo(json.dumps(document, indent=2, sort_keys=True))
+    else:
+        click.echo(render_packages(result.analysis.units))
+        click.echo()
+        click.echo(render(result.assessment, verbose=verbose))
+    sys.exit(exit_code(result.assessment))
