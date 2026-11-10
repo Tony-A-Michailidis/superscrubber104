@@ -1,11 +1,187 @@
 """Command-line entry point."""
 
+import functools
+import os
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import ParamSpec
+
 import click
 
 from airlock import __version__
+from airlock.core.errors import AirlockError, ConfigError
+from airlock.core.policy import Policy, load_policy
+from airlock.core.signing import (
+    SigningKey,
+    generate_key,
+    load_signing_key,
+    load_verify_key,
+    save_key,
+)
+from airlock.pack import pack as run_pack
+from airlock.session import EXIT_USAGE, exit_code
+from airlock.summary import render
+from airlock.verify import verify as run_verify
+
+P = ParamSpec("P")
+_FILE = click.Path(exists=True, dir_okay=False, path_type=Path)
+_PASSPHRASE = click.option(
+    "--passphrase-env",
+    metavar="VAR",
+    help="Environment variable holding the private key's passphrase.",
+)
+
+
+def _reports_errors(command: Callable[P, None]) -> Callable[P, None]:
+    """Turn expected failures (bad input, bad config) into a message and exit code 2."""
+
+    @functools.wraps(command)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
+        try:
+            command(*args, **kwargs)
+        except AirlockError as exc:
+            click.echo(f"error: {exc}", err=True)
+            sys.exit(EXIT_USAGE)
+
+    return wrapper
+
+
+def _passphrase(variable: str | None) -> bytes | None:
+    if variable is None:
+        return None
+    value = os.environ.get(variable)
+    if not value:
+        raise ConfigError(f"environment variable {variable} is not set")
+    return value.encode("utf-8")
+
+
+def _policy(path: Path | None) -> Policy:
+    return load_policy(path) if path else Policy.default()
+
+
+def _key(path: Path | None, variable: str | None) -> SigningKey | None:
+    return load_signing_key(path, _passphrase(variable)) if path else None
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(__version__, prog_name="airlock")
 def main() -> None:
     """Prepare, inspect, sign and verify deliveries for transfer across an air gap."""
+
+
+@main.command()
+@click.option("-o", "--out", type=click.Path(file_okay=False, path_type=Path), default=Path())
+@click.option("--name", default="signing", show_default=True, help="Base name of the key files.")
+@click.option("--holder", default="CHANGE-ME", help="Who holds this key (for the policy snippet).")
+@_PASSPHRASE
+@_reports_errors
+def keygen(out: Path, name: str, holder: str, passphrase_env: str | None) -> None:
+    """Create an Ed25519 key pair: NAME.key (private) and NAME.pub."""
+    out.mkdir(parents=True, exist_ok=True)
+    key = generate_key()
+    public = out / f"{name}.pub"
+    passphrase = _passphrase(passphrase_env)
+    save_key(key, out / f"{name}.key", public, passphrase)
+    import hashlib
+
+    pin = hashlib.sha256(public.read_bytes()).hexdigest()
+    click.echo(f"key id: {key.key_id}")
+    if passphrase is None:
+        click.echo("warning: the private key is not encrypted; protect the file", err=True)
+    click.echo("\nTo trust this key, add it to the receiving side's policy:\n")
+    click.echo(
+        "trust:\n  signers:\n"
+        f'    - keyId: "{key.key_id}"\n'
+        f"      publicKey: {public.name}\n"
+        f'      sha256: "{pin}"\n'
+        f"      holder: {holder}\n"
+        "      roles: [pack]"
+    )
+
+
+@main.command()
+@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("-o", "--out", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--key", required=True, type=_FILE, help="Private signing key.")
+@click.option("--policy", type=_FILE, help="Policy file (default: built-in defaults).")
+@click.option("--request", type=_FILE, help="Transfer request.")
+@click.option("-v", "--verbose", is_flag=True, help="Also list allowed findings.")
+@_PASSPHRASE
+@_reports_errors
+def pack(
+    inputs: tuple[Path, ...],
+    out: Path,
+    key: Path,
+    policy: Path | None,
+    request: Path | None,
+    verbose: bool,
+    passphrase_env: str | None,
+) -> None:
+    """Inventory, inspect and sign INPUTS into a bundle.
+
+    A single directory becomes the bundle root. Several inputs are each placed under their own
+    name. Exits 1, without signing, if any finding is decided 'block'.
+    """
+    signer = _key(key, passphrase_env)
+    assert signer is not None  # noqa: S101
+    result = run_pack(inputs, out, signer=signer, policy=_policy(policy), request_path=request)
+    click.echo(render(result.assessment, verbose=verbose))
+    click.echo(f"manifest: {result.manifest_digest}")
+    if result.signed:
+        click.echo(f"bundle:   {result.bundle} (signed by {signer.key_id})")
+    else:
+        click.echo(f"bundle:   {result.bundle} (NOT SIGNED: blocking findings)")
+    sys.exit(exit_code(result.assessment))
+
+
+@main.command()
+@click.argument("bundle", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--policy", type=_FILE, help="This side's policy (default: built-in defaults).")
+@click.option("--pubkey", type=_FILE, help="Packer's public key, if the policy pins none.")
+@click.option(
+    "--state",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="State directory holding the ledger of earlier imports.",
+)
+@click.option("--key", type=_FILE, help="Private key for signing the receipt and ledger entry.")
+@click.option(
+    "--out",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Where to write the assessment and receipt (default: under --state).",
+)
+@click.option("-v", "--verbose", is_flag=True, help="Also list allowed findings.")
+@_PASSPHRASE
+@_reports_errors
+def verify(
+    bundle: Path,
+    policy: Path | None,
+    pubkey: Path | None,
+    state: Path | None,
+    key: Path | None,
+    out: Path | None,
+    verbose: bool,
+    passphrase_env: str | None,
+) -> None:
+    """Verify BUNDLE with this side's own policy, keys and checks.
+
+    Exit codes: 0 accepted; 1 blocked or approval needed; 2 usage or configuration error;
+    3 integrity failure (tampering or a broken trust chain).
+    """
+    loaded = _policy(policy)
+    if pubkey is None and not loaded.signers:
+        raise ConfigError(
+            "no trusted signer: pin one in the policy (trust.signers) or pass --pubkey"
+        )
+    result = run_verify(
+        bundle,
+        policy=loaded,
+        pubkey=load_verify_key(pubkey) if pubkey else None,
+        state=state,
+        receipt_signer=_key(key, passphrase_env),
+        out=out,
+    )
+    click.echo(render(result.assessment, verbose=verbose))
+    for path in result.outputs:
+        click.echo(f"wrote:    {path}")
+    sys.exit(exit_code(result.assessment))

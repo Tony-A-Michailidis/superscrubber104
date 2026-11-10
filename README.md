@@ -1,6 +1,6 @@
 # airlock
 
-> **Status: pre-alpha, under active design.** Nothing here is ready for use. `airlock` is a working name.
+> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Type-specific inspection of models, packages and containers is being built. Not ready for real transfers. `airlock` is a working name.
 
 **Make agentic AI projects accreditable in high-assurance and disconnected environments.**
 
@@ -17,16 +17,32 @@ AI projects are usually built on connected, unclassified networks and then have 
 
 It runs fully offline, has minimal dependencies, and is designed to cross its own airlock.
 
-## Planned usage
+## Usage
+
+What works today:
 
 ```console
-$ airlock keygen
-$ airlock pack ./delivery --request req.yaml --policy policy.yaml --key signing.key -o bundle/
-$ airlock verify bundle/ --pubkey signing.pub --policy policy.yaml
-$ airlock report bundle/ --format html
+$ airlock keygen -o keys --name pack --holder build-pipeline
+$ airlock pack ./delivery --request request.yaml --key keys/pack.key -o bundle/
+$ airlock verify bundle/ --policy policy.yaml --state /var/lib/airlock --key keys/receipt.key
 ```
 
-Commands exit non-zero on blocking findings, so they can gate CI pipelines.
+- `keygen` prints the snippet that pins the new key in the receiving side's policy.
+- `pack` inventories, hashes, inspects and signs. It refuses to sign if a finding is decided `block`.
+- `verify` trusts nothing the packer said. It checks the signature against keys pinned in its own policy, re-hashes every byte, re-inspects the content with its own limits, and records the import in a hash-chained ledger so that replayed, stale or out-of-order bundles are caught.
+
+Exit codes make the commands usable as CI gates:
+
+| Code | Meaning |
+|---|---|
+| 0 | Accepted |
+| 1 | Blocked by policy, or approvals still required |
+| 2 | Usage or configuration error |
+| 3 | Integrity failure: tampering or a broken trust chain |
+
+See [examples/policy.yaml](examples/policy.yaml) and [examples/request.yaml](examples/request.yaml), and the [bundle format and verification steps](docs/design/18-bundle-and-verification.md), including its list of known limits.
+
+Planned: `airlock report`, `airlock model inspect`, `airlock offline-check`, `airlock stage`, `airlock patch`, `airlock eval`.
 
 ## Roadmap
 

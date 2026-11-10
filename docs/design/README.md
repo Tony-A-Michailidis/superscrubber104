@@ -20,4 +20,5 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [14-roadmap.md](14-roadmap.md) | §15, §20 | Phases and the initial task list |
 | [15-repo-layout.md](15-repo-layout.md) | §19 | Suggested package layout and `examples/` fixtures |
 | [16-open-decisions.md](16-open-decisions.md) | §21 | Unresolved decisions |
-| [17-core-models.md](17-core-models.md) | new | Core data models, interfaces, bundle layout and policy schema |
+| [17-core-models.md](17-core-models.md) | new | Core data models, policy schema, keys, logs and interfaces (implemented) |
+| [18-bundle-and-verification.md](18-bundle-and-verification.md) | new | Bundle layout, signed statement, pack and verify steps, archive inspection, known limits (implemented) |
