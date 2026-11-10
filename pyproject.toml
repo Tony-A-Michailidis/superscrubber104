@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling>=1.27"]  # PEP 639 licence metadata
+build-backend = "hatchling.build"
+
+[project]
+name = "airlock"  # working name; check PyPI for collisions before publishing
+dynamic = ["version"]
+description = "Prepare, inspect, sign and verify AI project deliveries for transfer across an air gap, with control-mapped evidence."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Security :: Cryptography",
+    "Topic :: System :: Archiving :: Packaging",
+    "Typing :: Typed",
+]
+# Keep this list short: the tool must cross its own airlock as a wheels bundle.
+dependencies = [
+    "click>=8.1",
+    "cryptography>=42",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "types-PyYAML",
+]
+
+[project.scripts]
+airlock = "airlock.cli:main"
+
+[tool.hatch.version]
+path = "src/airlock/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/airlock"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
+
+[tool.coverage.run]
+source = ["airlock"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle, pyflakes
+    "I",            # isort
+    "B",            # bugbear
+    "UP",           # pyupgrade
+    "S",            # bandit
+    "SIM",          # simplify
+    "PTH",          # use pathlib
+    "RUF",
+    "TID",          # banned imports
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is how pytest works
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Never execute what we inspect, and never phone home.
+"pickle.load".msg = "Never unpickle inspected content; use the static opcode scanner."
+"pickle.loads".msg = "Never unpickle inspected content; use the static opcode scanner."
+"urllib.request".msg = "No network calls at runtime."
+"http.client".msg = "No network calls at runtime."
+"requests".msg = "No network calls at runtime."
+"httpx".msg = "No network calls at runtime."
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
