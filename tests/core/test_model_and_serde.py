@@ -211,7 +211,7 @@ def test_assessment_round_trip_summary_and_coverage(findings: FindingFactory) ->
         summary=summarize(recorder.findings, decisions),
     )
     assert assessment.summary.verdict is Verdict.BLOCKED
-    assert not assessment.integrity_failed
+    assert not assessment.refused
     coverage = {c.rule: c for c in assessment.coverage}
     assert coverage["container.user.root"].passed == 3
     assert coverage["model.pickle.dangerous-import"].failed == 1
@@ -243,8 +243,16 @@ def test_summary_verdicts() -> None:
     pending = (Decision("x", Disposition.REQUIRE_APPROVAL, "d", 1),)
     assert summarize((), pending).verdict is Verdict.NEEDS_APPROVAL
     assert summarize((), pending, approved={"x"}).verdict is Verdict.PASSED
-    blocked = (*pending, Decision("y", Disposition.BLOCK, "d"))
-    assert summarize((), blocked, approved={"x", "y"}).verdict is Verdict.BLOCKED
+    # A policy blocker stands until its override quorum is met.
+    blocked = (*pending, Decision("y", Disposition.BLOCK, "d", 2))
+    assert summarize((), blocked).verdict is Verdict.BLOCKED
+    assert summarize((), blocked, approved={"x"}).verdict is Verdict.BLOCKED
+    assert summarize((), blocked, approved={"x", "y"}).verdict is Verdict.PASSED
+    # An integrity or authenticity failure is final: approvals change nothing.
+    refused = (*blocked, Decision("z", Disposition.BLOCK, "final", final=True))
+    assert summarize((), refused, approved={"x", "y", "z"}).verdict is Verdict.REFUSED
+    assert not refused[-1].clearable
+    assert blocked[-1].clearable
 
 
 def test_provenance_and_receipt_round_trip() -> None:

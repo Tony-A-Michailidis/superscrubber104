@@ -1,6 +1,6 @@
 """One run of pack or verify: wires up policy, rules and recorder, and ends in an assessment."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -8,14 +8,26 @@ from airlock.analyzer import TOOL
 from airlock.catalog import builtin_registry
 from airlock.core.controls import ControlMapping
 from airlock.core.interfaces import Context
-from airlock.core.model import Assessment, Stage, Verdict, summarize
+from airlock.core.model import (
+    ApprovalRecord,
+    Assessment,
+    Decision,
+    Finding,
+    Stage,
+    Verdict,
+    summarize,
+)
 from airlock.core.policy import Policy, evaluate
 from airlock.core.rules import FindingFactory, Recorder, RuleRegistry
 
 EXIT_OK = 0
-EXIT_BLOCKED = 1  # blocking findings, or approvals still required
+EXIT_BLOCKED = 1  # a policy blocker stands, or approvals are still required
 EXIT_USAGE = 2
-EXIT_INTEGRITY = 3  # tampering or a broken trust chain: not a matter of judgement
+EXIT_REFUSED = 3  # an integrity or authenticity check failed; nothing can override it
+
+ApprovalCounter = Callable[
+    [Sequence[Finding], Sequence[Decision]], tuple[set[str], tuple[ApprovalRecord, ...]]
+]
 
 
 def utc_now() -> datetime:
@@ -40,7 +52,13 @@ class Session:
         *,
         manifest_digest: str | None,
         content_hashes: Mapping[str, str],
+        approvals: ApprovalCounter | None = None,
     ) -> Assessment:
+        """Decide every finding and close the run.
+
+        ``approvals`` is given the findings and decisions and returns the ids of findings
+        whose approval quorum is met, plus a record of every approval it looked at.
+        """
         recorder, policy = self.ctx.recorder, self.ctx.policy
         findings = recorder.findings
         decisions = evaluate(
@@ -50,6 +68,10 @@ class Session:
             today=self.ctx.now.date(),
             content_hashes=content_hashes,
         )
+        approved: set[str] = set()
+        records: tuple[ApprovalRecord, ...] = ()
+        if approvals is not None:
+            approved, records = approvals(findings, decisions)
         return Assessment(
             tool=TOOL,
             stage=stage,
@@ -57,16 +79,17 @@ class Session:
             finished_at=max(utc_now(), self.ctx.now),
             policy_digest=policy.digest,
             manifest_digest=manifest_digest,
-            summary=summarize(findings, decisions),
+            summary=summarize(findings, decisions, approved),
             coverage=recorder.coverage(),
             findings=findings,
             decisions=decisions,
+            approvals=records,
         )
 
 
 def exit_code(assessment: Assessment) -> int:
-    if assessment.integrity_failed:
-        return EXIT_INTEGRITY
+    if assessment.refused:
+        return EXIT_REFUSED
     if assessment.summary.verdict is not Verdict.PASSED:
         return EXIT_BLOCKED
     return EXIT_OK

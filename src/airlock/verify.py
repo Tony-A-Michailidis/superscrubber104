@@ -15,6 +15,7 @@ from pathlib import Path
 
 from airlock import bundle as layout
 from airlock.analyzer import TOOL, Analyzer
+from airlock.approvals import count_approvals
 from airlock.checks.inventory import check_paths, check_request
 from airlock.checks.transfer import check_policy, check_transfer
 from airlock.core import chainlog
@@ -22,9 +23,12 @@ from airlock.core.canonical import canonical_bytes, sha256_digest
 from airlock.core.errors import AirlockError, ConfigError
 from airlock.core.interfaces import Context, Handler
 from airlock.core.model import (
+    ApprovalRecord,
     ArtifactRef,
     Assessment,
+    Decision,
     EntryType,
+    Finding,
     Manifest,
     Provenance,
     Receipt,
@@ -73,6 +77,8 @@ class _Verifier:
         self.manifest_digest: str | None = None
         self.request: TransferRequest | None = None
         self.files: dict[str, FileView] = {}
+        self.packers: list[str] = []  # trusted keys that signed the statement
+        self.custody_check: chainlog.ChainCheck | None = None
 
     # --- trust ----------------------------------------------------------------------------------
 
@@ -131,6 +137,7 @@ class _Verifier:
             else:
                 trusted.append(key_id)
         if trusted:
+            self.packers = trusted
             self.recorder.passed("integrity.signature.untrusted-key")
             # Only a statement signed by a trusted key says anything about the bundle.
             self.subjects, self.provenance = subjects, provenance
@@ -298,9 +305,13 @@ class _Verifier:
                 reason="there is no trusted statement to anchor the custody log to",
             )
             return
+        # Anyone handling the bundle may append to this log, so an event from an unknown
+        # signer is not damage: it simply carries no weight. Damage is a broken chain, a
+        # signature that does not verify, or a first event that is not the packer's.
         try:
             events = chainlog.read(self.bundle / layout.CUSTODY)
-            problems = chainlog.verify(events, self.resolve)
+            self.custody_check = chainlog.verify(events, self.resolve)
+            problems = list(self.custody_check.broken)
         except AirlockError as exc:
             events, problems = [], [str(exc)]
         first = events[0] if events else None
@@ -308,12 +319,16 @@ class _Verifier:
             problems.append("the custody log is missing or empty")
         elif (
             first.type != layout.EVENT_PACKED
+            or first.actor not in self.packers
+            or self.custody_check is None
+            or first not in self.custody_check.verified
             or first.data.get("manifestDigest") != self.manifest_digest
             or first.data.get("statementDigest") != self.statement_digest
             or first.data.get("bundleId") != self.provenance.bundle_id
         ):
             problems.append("the first event is not the 'packed' event for this bundle")
         if problems:
+            self.custody_check = None  # approvals in a damaged log are not counted
             self.recorder.fail(
                 "integrity.custody.broken",
                 self.subject,
@@ -322,6 +337,21 @@ class _Verifier:
             )
         else:
             self.recorder.passed("integrity.custody.broken")
+
+    def approvals(
+        self, findings: Sequence[Finding], decisions: Sequence[Decision]
+    ) -> tuple[set[str], tuple[ApprovalRecord, ...]]:
+        if self.custody_check is None:
+            return set(), ()
+        return count_approvals(
+            self.custody_check,
+            policy=self.policy,
+            manifest_digest=self.manifest_digest,
+            packers=self.packers,
+            findings=findings,
+            decisions=decisions,
+            today=self.ctx.now.date(),
+        )
 
     def history(self, ledger: Ledger | None) -> None:
         if ledger is not None:
@@ -378,6 +408,7 @@ def verify(
         Stage.VERIFY,
         manifest_digest=verifier.manifest_digest,
         content_hashes={path: view.sha256 for path, view in verifier.files.items() if view.sha256},
+        approvals=verifier.approvals,
     )
     assessment_bytes = layout.encode(assessment)
 

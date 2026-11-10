@@ -105,29 +105,53 @@ def append(
     return event
 
 
-def verify(
-    events: list[Event],
-    resolve: Callable[[str], VerifyKey | None],
-    *,
-    require_signed: bool = True,
-) -> list[str]:
-    """Check sequence, chaining and signatures. Returns a list of problems (empty if sound)."""
-    problems = []
+@dataclass(frozen=True, slots=True)
+class ChainCheck:
+    """Result of checking a log.
+
+    ``broken`` lists structural damage: bad sequence, broken chaining, or a signature that does
+    not verify under the key it names. Events are also sorted by what is known about their
+    signer, because what an unknown signer means depends on the log: in a ledger this side wrote
+    it is a problem; in a custody log that anyone handling the bundle may append to, such an
+    event simply carries no weight.
+    """
+
+    broken: tuple[str, ...]
+    verified: tuple[Event, ...]  # signed by a key ``resolve`` knows, and the signature holds
+    unknown: tuple[Event, ...]  # signed by a key ``resolve`` does not know
+    unsigned: tuple[Event, ...]
+
+    def problems(self, *, require_signed: bool = True, allow_unknown: bool = False) -> list[str]:
+        problems = list(self.broken)
+        if not allow_unknown:
+            problems += [f"event {e.seq} ({e.type}): signed by untrusted key" for e in self.unknown]
+        if require_signed:
+            problems += [f"event {e.seq} ({e.type}): not signed" for e in self.unsigned]
+        return problems
+
+
+def verify(events: list[Event], resolve: Callable[[str], VerifyKey | None]) -> ChainCheck:
+    """Check sequence, chaining and signatures."""
+    broken: list[str] = []
+    verified: list[Event] = []
+    unknown: list[Event] = []
+    unsigned: list[Event] = []
     previous: Event | None = None
     for position, event in enumerate(events, start=1):
         if event.seq != position:
-            problems.append(f"event {position}: sequence number is {event.seq}")
+            broken.append(f"event {position}: sequence number is {event.seq}")
         expected = previous.digest if previous else None
         if event.prev != expected:
-            problems.append(f"event {position}: does not chain to the event before it")
+            broken.append(f"event {position}: does not chain to the event before it")
         if event.sig is None or event.actor is None:
-            if require_signed:
-                problems.append(f"event {position} ({event.type}): not signed")
+            unsigned.append(event)
         else:
             key = resolve(event.actor)
             if key is None:
-                problems.append(f"event {position} ({event.type}): signed by untrusted key")
-            elif not key.verify(event.sig, event.signed_message()):
-                problems.append(f"event {position} ({event.type}): invalid signature")
+                unknown.append(event)
+            elif key.verify(event.sig, event.signed_message()):
+                verified.append(event)
+            else:
+                broken.append(f"event {position} ({event.type}): invalid signature")
         previous = event
-    return problems
+    return ChainCheck(tuple(broken), tuple(verified), tuple(unknown), tuple(unsigned))

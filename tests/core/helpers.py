@@ -1,6 +1,6 @@
 """Shared test data for core tests."""
 
-from airlock.core.model import Disposition, Severity, ToolRef
+from airlock.core.model import Severity, ToolRef
 from airlock.core.rules import RuleSpec
 
 TOOL = ToolRef("airlock-test", "0")
@@ -62,6 +62,6 @@ RULES = (
         Severity.CRITICAL,
         ("SI-7", "SI-7(1)"),
         "Tampering.",
-        floor=Disposition.BLOCK,
+        final=True,
     ),
 )

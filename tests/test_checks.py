@@ -8,7 +8,6 @@ from airlock.catalog import ALL, builtin_registry
 from airlock.checks.inventory import check_paths
 from airlock.checks.transfer import check_transfer
 from airlock.core.model import (
-    Disposition,
     Entry,
     EntryType,
     Finding,
@@ -38,13 +37,35 @@ def file(path: str, size: int = 1) -> Entry:
     return Entry(path, EntryType.FILE, size, {"sha256": SHA})
 
 
-def test_builtin_rules_register_and_floor_what_means_tampering() -> None:
+def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> None:
     registry = builtin_registry()
     assert len(registry) == len(ALL)
-    floored = {r.id for r in registry if r.floor is Disposition.BLOCK}
-    assert {r.id for r in registry if r.id.startswith("integrity.")} <= floored
-    assert {"archive.member.path-traversal", "delta.base.unknown", "path.name.unsafe"} <= floored
-    assert "request.artifact.undeclared" not in floored
+    final = {r.id for r in registry if r.final}
+    # Hash mismatch, bad or missing signature, broken custody or ledger.
+    assert {r.id for r in registry if r.id.startswith("integrity.")} <= final
+    # Replay, in every form.
+    assert {
+        "replay.bundle.already-accepted",
+        "replay.bundle.out-of-order",
+        "replay.bundle.expired",
+        "replay.clock.regression",
+        "delta.base.unknown",
+    } <= final
+    # Wrong enclave or source.
+    assert {
+        "transfer.destination.mismatch",
+        "transfer.destination.unbound",
+        "transfer.source.unaccepted",
+    } <= final
+    # Content findings are policy matters: blockable, and overridable by a quorum.
+    overridable = {
+        r.id for r in registry if r.id.startswith(("archive.", "request.", "inventory."))
+    }
+    assert not overridable & final
+    assert final - {r for r in final if r.startswith(("integrity.", "replay.", "transfer."))} == {
+        "delta.base.unknown",
+        "path.name.unsafe",  # the file cannot be stored at all, so there is nothing to approve
+    }
     assert all(r.rationale for r in registry)
 
 
@@ -100,7 +121,7 @@ def test_delta_base_must_be_an_accepted_snapshot(tmp_path: Path) -> None:
             bundle_created_at=NOW - timedelta(days=1),
         )
 
-    ledger.append(receipt(Verdict.BLOCKED), now=NOW, signer=None)
+    ledger.append(receipt(Verdict.REFUSED), now=NOW, signer=None)
     assert base_check(DIGEST) is Result.FAIL  # a refused import is not a base
     ledger.append(receipt(Verdict.PASSED), now=NOW, signer=None)
     assert base_check(DIGEST) is None

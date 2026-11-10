@@ -15,7 +15,7 @@ from airlock.core.model import Disposition, Result, Verdict
 from airlock.core.policy import ArchiveLimits, Limits, Policy
 from airlock.core.signing import generate_key
 from airlock.pack import PackResult, pack
-from airlock.session import EXIT_BLOCKED, EXIT_INTEGRITY, EXIT_OK, exit_code
+from airlock.session import EXIT_BLOCKED, EXIT_OK, EXIT_REFUSED, exit_code
 from airlock.verify import VerifyResult, verify
 from tests.helpers import NOW, Site, disposition, failed, make_delivery, make_site, zip_bytes
 
@@ -157,7 +157,7 @@ def test_modified_file_is_caught_and_located(site: Site, bundle: Path) -> None:
     assert finding.subject.display == "models/tiny/weights.bin"
     assert finding.detail["damagedChunks"] == [3]
     assert disposition(result.assessment, "integrity.hash.mismatch") is Disposition.BLOCK
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
 
 
 def test_added_removed_and_truncated_content(site: Site, bundle: Path) -> None:
@@ -193,7 +193,7 @@ def test_tampering_cannot_be_excused_by_policy(site: Site, bundle: Path) -> None
     )
     result = do_verify(site, bundle, policy=lenient)
     assert disposition(result.assessment, "integrity.hash.mismatch") is Disposition.BLOCK
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
 
 
 @pytest.mark.parametrize(
@@ -205,7 +205,7 @@ def test_modified_control_files(site: Site, bundle: Path, name: str) -> None:
     result = do_verify(site, bundle)
     [finding] = failed(result.assessment)["integrity.statement.subject-mismatch"]
     assert finding.detail["file"] == name
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
     if name == layout.MANIFEST:  # without a trusted manifest, content checks say so
         assert failed(result.assessment)["integrity.hash.mismatch"][0].result is Result.NOT_ASSESSED
 
@@ -228,7 +228,7 @@ def test_missing_or_garbled_statement(site: Site, bundle: Path) -> None:
     (bundle / layout.STATEMENT).write_text("{not json")
     result = do_verify(site, bundle)
     assert "integrity.bundle.malformed" in failed(result.assessment)
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
     assert result.receipt is None
 
 
@@ -239,7 +239,7 @@ def test_repacked_by_someone_else(site: Site, delivery: Path, tmp_path: Path) ->
     result = do_verify(site, forged)
     [finding] = failed(result.assessment)["integrity.signature.untrusted-key"]
     assert finding.detail["signedBy"] == [attacker.pack_key.key_id]
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
     assert result.provenance is None
 
 
@@ -258,7 +258,7 @@ def test_pinned_key_that_must_not_be_relied_on(
     result = do_verify(site, bundle, policy=site.policy(signer_extra=signer_extra))
     [finding] = failed(result.assessment)["integrity.signature.untrusted-key"]
     assert reason in str(finding.detail["reasons"])
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
 
 
 def test_command_line_key(site: Site, bundle: Path) -> None:
@@ -266,7 +266,7 @@ def test_command_line_key(site: Site, bundle: Path) -> None:
     assert result.assessment.summary.verdict is Verdict.PASSED
     assert disposition(result.assessment, "trust.signer.unpinned") is Disposition.WARN
     other = verify(bundle, policy=Policy.default(), pubkey=generate_key().verify_key, now=NOW)
-    assert exit_code(other.assessment) == EXIT_INTEGRITY
+    assert exit_code(other.assessment) == EXIT_REFUSED
     with pytest.raises(ConfigError, match="pins its own pack signers"):
         verify(bundle, policy=site.policy(), pubkey=site.pack_key.verify_key, now=NOW)
 
@@ -284,7 +284,7 @@ def test_custody_log_must_belong_to_this_bundle(
     assert "missing or empty" in str(
         failed(result.assessment)["integrity.custody.broken"][0].detail
     )
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
 
 
 # --- the right bundle, in the right place, at the right time ------------------------------------
@@ -293,7 +293,8 @@ def test_custody_log_must_belong_to_this_bundle(
 def test_bundle_for_another_enclave(site: Site, bundle: Path) -> None:
     result = do_verify(site, bundle, policy=site.policy(enclave="enclave-a"))
     assert disposition(result.assessment, "transfer.destination.mismatch") is Disposition.BLOCK
-    assert exit_code(result.assessment) == EXIT_BLOCKED  # refused, but not tampering
+    assert result.assessment.summary.verdict is Verdict.REFUSED
+    assert exit_code(result.assessment) == EXIT_REFUSED
 
 
 def test_unaccepted_source_and_unbound_destination(
@@ -306,9 +307,9 @@ def test_unaccepted_source_and_unbound_destination(
 
     anonymous = do_pack(site, delivery, tmp_path / "anon", request=False).bundle
     result = do_verify(site, anonymous)
-    assert disposition(result.assessment, "transfer.destination.unbound") is (
-        Disposition.REQUIRE_APPROVAL
-    )
+    # A bundle bound to no enclave could be imported anywhere, so this one is refused here.
+    assert disposition(result.assessment, "transfer.destination.unbound") is Disposition.BLOCK
+    assert result.assessment.summary.verdict is Verdict.REFUSED
     # A bundle that names no source cannot be from an accepted one either.
     assert disposition(result.assessment, "transfer.source.unaccepted") is Disposition.BLOCK
 
@@ -316,6 +317,7 @@ def test_unaccepted_source_and_unbound_destination(
 def test_stale_bundle(site: Site, bundle: Path) -> None:
     result = do_verify(site, bundle, now=NOW + timedelta(days=31))
     assert disposition(result.assessment, "replay.bundle.expired") is Disposition.BLOCK
+    assert exit_code(result.assessment) == EXIT_REFUSED
 
 
 def test_replay_and_out_of_order(site: Site, delivery: Path, tmp_path: Path) -> None:
@@ -328,18 +330,19 @@ def test_replay_and_out_of_order(site: Site, delivery: Path, tmp_path: Path) -> 
 
     replayed = do_verify(site, tuesday, state=state, now=NOW + timedelta(days=3))
     assert "replay.bundle.already-accepted" in failed(replayed.assessment)
-    assert replayed.assessment.summary.verdict is Verdict.NEEDS_APPROVAL
+    assert replayed.assessment.summary.verdict is Verdict.REFUSED
 
     older = do_verify(site, monday, state=state, now=NOW + timedelta(days=4))
     assert "replay.bundle.out-of-order" in failed(older.assessment)
     assert "replay.bundle.already-accepted" not in failed(older.assessment)
+    assert exit_code(older.assessment) == EXIT_REFUSED
 
     ledger = (state / "ledger.jsonl").read_bytes().splitlines()
     assert len(ledger) == 3  # every verification is recorded, whatever the verdict
     assert [json.loads(line)["data"]["verdict"] for line in ledger] == [
         "passed",
-        "needs-approval",
-        "needs-approval",
+        "refused",
+        "refused",
     ]
 
 
@@ -370,7 +373,7 @@ def test_clock_regression_ledger_tampering_and_policy_change(
     third = do_pack(site, delivery, tmp_path / "third", now=NOW + timedelta(days=6)).bundle
     result = do_verify(site, third, state=state, now=NOW + timedelta(days=7))
     assert "integrity.ledger.broken" in failed(result.assessment)
-    assert exit_code(result.assessment) == EXIT_INTEGRITY
+    assert exit_code(result.assessment) == EXIT_REFUSED
 
 
 # --- what the request and the content allow -----------------------------------------------------
@@ -395,15 +398,19 @@ def test_undeclared_and_missing_content(site: Site, delivery: Path, tmp_path: Pa
     assert result.assessment.summary.verdict is Verdict.BLOCKED
 
 
-def test_blocked_pack_is_not_signed(site: Site, delivery: Path, tmp_path: Path) -> None:
+def test_policy_blockers_do_not_stop_the_bundle_from_being_signed(
+    site: Site, delivery: Path, tmp_path: Path
+) -> None:
+    """Whether to override a policy blocker is for approvers and the receiving side."""
     (delivery / "vendor/evil.zip").write_bytes(zip_bytes({"../../../etc/cron.d/x": b"* * * * *"}))
     result = do_pack(site, delivery, tmp_path / "bundle")
     assert disposition(result.assessment, "archive.member.path-traversal") is Disposition.BLOCK
-    assert not result.signed
-    assert not (result.bundle / layout.STATEMENT).exists()
-    assert (result.bundle / layout.ASSESSMENT).exists()  # the findings can still be reviewed
+    assert result.assessment.summary.verdict is Verdict.BLOCKED
+    assert result.signed
+    assert exit_code(result.assessment) == EXIT_BLOCKED
     verified = do_verify(site, result.bundle)
-    assert exit_code(verified.assessment) == EXIT_INTEGRITY
+    assert verified.assessment.summary.verdict is Verdict.BLOCKED
+    assert exit_code(verified.assessment) == EXIT_BLOCKED
 
 
 def test_receiving_side_applies_its_own_limits(site: Site, delivery: Path, tmp_path: Path) -> None:
@@ -448,7 +455,12 @@ def test_unrepresentable_file_name_blocks_the_pack(
     [finding] = failed(result.assessment)["path.name.unsafe"]
     assert finding.subject.display == "docs/re%CC%81sume%CC%81.txt"
     assert disposition(result.assessment, "path.name.unsafe") is Disposition.BLOCK
-    assert not result.signed
+    assert result.assessment.summary.verdict is Verdict.REFUSED
+    assert not result.signed  # nothing to transfer, and nothing an approval could fix
+    assert not (result.bundle / layout.STATEMENT).exists()
+    assert (result.bundle / layout.ASSESSMENT).exists()  # the findings can still be reviewed
+    assert exit_code(result.assessment) == EXIT_REFUSED
+    assert exit_code(do_verify(site, result.bundle).assessment) == EXIT_REFUSED
     manifest = json.loads((result.bundle / "manifest.json").read_bytes())
     assert all("sume" not in e["path"] for e in manifest["entries"])
     analysis = json.loads((result.bundle / "analysis.json").read_bytes())

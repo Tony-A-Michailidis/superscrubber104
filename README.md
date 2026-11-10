@@ -28,7 +28,7 @@ $ airlock verify bundle/ --policy policy.yaml --state /var/lib/airlock --key key
 ```
 
 - `keygen` prints the snippet that pins the new key in the receiving side's policy.
-- `pack` inventories, hashes, inspects and signs. It refuses to sign if a finding is decided `block`.
+- `pack` inventories, hashes, inspects and signs.
 - `verify` trusts nothing the packer said. It checks the signature against keys pinned in its own policy, re-hashes every byte, re-inspects the content with its own limits, and records the import in a hash-chained ledger so that replayed, stale or out-of-order bundles are caught.
 
 Exit codes make the commands usable as CI gates:
@@ -36,11 +36,18 @@ Exit codes make the commands usable as CI gates:
 | Code | Meaning |
 |---|---|
 | 0 | Accepted |
-| 1 | Blocked by policy, or approvals still required |
+| 1 | A policy blocker stands, or approvals are outstanding |
 | 2 | Usage or configuration error |
-| 3 | Integrity failure: tampering or a broken trust chain |
+| 3 | Refused: an integrity or authenticity check failed |
+
+Two kinds of failure are kept strictly apart:
+
+- **Integrity and authenticity failures** (hash mismatch, bad or missing signature, replay, wrong enclave) can never be waived or overridden, by policy or by anyone. If they could, the airlock would not be a control.
+- **Policy blockers** (a pickle model, remote code, a licence, an unapproved package) can be overridden for one bundle with `airlock approve`, but only by a quorum of approvers with a written justification. The packer cannot approve its own bundle, and the override is recorded as signed evidence.
 
 See [examples/policy.yaml](examples/policy.yaml) and [examples/request.yaml](examples/request.yaml), and the [bundle format and verification steps](docs/design/18-bundle-and-verification.md), including its list of known limits.
+
+`airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 
 Planned: `airlock report`, `airlock model inspect`, `airlock offline-check`, `airlock stage`, `airlock patch`, `airlock eval`.
 

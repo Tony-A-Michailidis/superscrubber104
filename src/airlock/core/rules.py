@@ -14,7 +14,6 @@ from airlock.core.controls import ControlCatalog, ControlMapping
 from airlock.core.errors import RuleError
 from airlock.core.model import (
     Coverage,
-    Disposition,
     Finding,
     Result,
     Severity,
@@ -35,9 +34,10 @@ class RuleSpec:
     controls: tuple[str, ...]
     rationale: str
     remediation: str = ""
-    # Minimum disposition for a FAIL or ERROR. Policy may be stricter but never looser, and
-    # waivers do not apply. Used for checks whose failure means tampering, not judgement.
-    floor: Disposition | None = None
+    # Integrity and authenticity checks: a FAIL or ERROR is always ``block`` and can never be
+    # waived, lowered by policy or overridden by approvals. If these could be waived, the
+    # airlock would not be a control.
+    final: bool = False
     tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -81,8 +81,24 @@ def finding_id(rule: str, subject: Subject, discriminator: str) -> str:
 
 
 def finding_digest(finding: Finding) -> str:
-    """Digest of everything a finding says. Approvals bind to this, not just to the id."""
-    return digest(to_data(finding))
+    """Digest of what a finding says. Approvals bind to this, not just to the id.
+
+    Covers the rule and its version, the subject, the result and everything that was found.
+    Leaves out the reporting tool's version and presentation (title, controls), so an approval
+    given on one side still matches the same finding recomputed by a newer tool on the other.
+    """
+    return digest(
+        [
+            finding.id,
+            finding.rule,
+            finding.rule_version,
+            finding.result.value,
+            finding.severity.value,
+            to_data(finding.subject),
+            dict(finding.detail),
+            dict(finding.attributes),
+        ]
+    )
 
 
 class FindingFactory:

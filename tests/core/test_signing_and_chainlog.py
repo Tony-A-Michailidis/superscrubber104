@@ -102,7 +102,9 @@ def test_chain_appends_and_verifies(tmp_path: Path) -> None:
     assert [e.seq for e in events] == [1, 2, 3]
     assert events[0].prev is None
     assert events[1].prev == events[0].digest
-    assert chainlog.verify(events, keys.get) == []
+    check = chainlog.verify(events, keys.get)
+    assert check.problems() == []
+    assert list(check.verified) == events
     assert chainlog.read(tmp_path / "absent.jsonl") == []
 
 
@@ -118,7 +120,7 @@ def test_edited_event_breaks_signature_and_chain(tmp_path: Path) -> None:
     path = tmp_path / "log.jsonl"
     keys, _ = _log(path)
     _rewrite(path, 0, data={"n": 99})
-    problems = chainlog.verify(chainlog.read(path), keys.get)
+    problems = chainlog.verify(chainlog.read(path), keys.get).problems()
     assert any("event 1" in p and "invalid signature" in p for p in problems)
     assert any("event 2" in p and "chain" in p for p in problems)
 
@@ -128,21 +130,27 @@ def test_removed_and_reordered_events_are_detected(tmp_path: Path) -> None:
     keys, _ = _log(path)
     lines = path.read_bytes().splitlines()
     path.write_bytes(b"\n".join([lines[0], lines[2]]) + b"\n")
-    assert chainlog.verify(chainlog.read(path), keys.get)
+    assert chainlog.verify(chainlog.read(path), keys.get).broken
     path.write_bytes(b"\n".join([lines[1], lines[0], lines[2]]) + b"\n")
-    assert chainlog.verify(chainlog.read(path), keys.get)
+    assert chainlog.verify(chainlog.read(path), keys.get).broken
 
 
 def test_unknown_and_missing_signatures(tmp_path: Path) -> None:
     path = tmp_path / "log.jsonl"
     _, events = _log(path, 1)
-    assert "untrusted key" in chainlog.verify(events, lambda _key_id: None)[0]
+    check = chainlog.verify(events, lambda _key_id: None)
+    assert "untrusted key" in check.problems()[0]
+    # In a log that others may append to, an unknown signer is not damage.
+    assert check.problems(allow_unknown=True) == []
+    assert list(check.unknown) == events
+    assert check.verified == ()
 
     unsigned = tmp_path / "unsigned.jsonl"
     chainlog.append(unsigned, "note", {}, now=NOW, signer=None)
     events = chainlog.read(unsigned)
-    assert "not signed" in chainlog.verify(events, lambda _key_id: None)[0]
-    assert chainlog.verify(events, lambda _key_id: None, require_signed=False) == []
+    check = chainlog.verify(events, lambda _key_id: None)
+    assert "not signed" in check.problems()[0]
+    assert check.problems(require_signed=False) == []
 
 
 def test_swapped_signature_is_rejected(tmp_path: Path) -> None:
@@ -150,7 +158,7 @@ def test_swapped_signature_is_rejected(tmp_path: Path) -> None:
     keys, events = _log(path, 2)
     assert events[1].sig is not None
     _rewrite(path, 0, sig=base64.b64encode(events[1].sig).decode())
-    assert chainlog.verify(chainlog.read(path), keys.get)
+    assert chainlog.verify(chainlog.read(path), keys.get).broken
 
 
 def test_garbage_is_not_a_log(tmp_path: Path) -> None:

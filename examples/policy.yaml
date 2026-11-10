@@ -13,6 +13,7 @@ identity:
 
 transfer:
   maxBundleAge: 30d            # older bundles are treated as possible replays
+  clockTolerance: 10m          # allowance for clock drift on disconnected hosts
 
 # Keys are pinned by hash, so they cannot be shown in a static example. `airlock keygen` prints
 # the snippet to paste here:
@@ -45,10 +46,16 @@ defaults:
     info: allow
   notAssessed: warn
   error: require-approval
-  approvals: 1
+  approvals: 1                 # distinct approvers to clear a require-approval finding
+  overrideApprovals: 2         # distinct approvers to override a blocker (never the packer)
 
-# First match wins. A rule only applies to the outcomes it sets, and can never decide a
-# tamper-evidence rule (integrity.*, archive path traversal, ...) below "block".
+# First match wins. A rule only applies to the outcomes it sets.
+#
+# Integrity and authenticity failures (hash mismatch, bad signature, replay, wrong enclave)
+# are outside the reach of this file: no rule, waiver or approval changes them.
+# A "block" decided here is a policy blocker: it can be overridden for one bundle by
+# overrideApprovals approvers with a written justification, unless the rule says
+# "overridable: false".
 rules:
   - rule: "model.pickle.*"
     disposition: block
@@ -62,6 +69,8 @@ rules:
     where: { kev: "true" }     # select on finding attributes
     disposition: block
   - rule: "malware.*"
+    disposition: block
+    overridable: false         # optional: this site never overrides a malware detection
     notAssessed: block         # the scanner must actually have run
   - rule: "inventory.artifact.unclassified"
     disposition: warn

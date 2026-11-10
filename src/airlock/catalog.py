@@ -1,15 +1,21 @@
 """Built-in rules: every check airlock can report, with severity and control mapping.
 
-Rules marked ``floor=BLOCK`` report tampering or a broken trust chain. Policy cannot waive them
-or decide them below ``block``; the fix is to repair the delivery, not to adjust the policy.
+Two classes of rule, with different rules of engagement:
+
+* **Integrity and authenticity** (``final=True``): hash mismatch, bad or missing signature,
+  replay, wrong enclave, broken custody or ledger. A failure is always ``block``. No policy
+  setting, waiver or approval can change that; if it could, the airlock would not be a control.
+* **Everything else** is judged by policy. Where policy decides ``block`` (a pickle model, remote
+  code, a licence, an unapproved package, a path-traversal archive), the blocker can be
+  overridden for one bundle by a quorum of approvers with a written justification, recorded as
+  signed evidence.
 """
 
 from airlock.core.controls import ControlCatalog
-from airlock.core.model import Disposition, Severity
+from airlock.core.model import Severity
 from airlock.core.rules import RuleRegistry, RuleSpec
 
 C, H, M, L, I = Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO  # noqa: E741
-BLOCK = Disposition.BLOCK
 
 
 def _rule(
@@ -19,10 +25,10 @@ def _rule(
     controls: tuple[str, ...],
     rationale: str,
     *,
-    floor: Disposition | None = None,
+    final: bool = False,
     remediation: str = "",
 ) -> RuleSpec:
-    return RuleSpec(rule_id, "1", title, severity, controls, rationale, remediation, floor)
+    return RuleSpec(rule_id, "1", title, severity, controls, rationale, remediation, final)
 
 
 INTEGRITY = (
@@ -32,7 +38,7 @@ INTEGRITY = (
         C,
         ("SI-7",),
         "Without its signed statement and manifest a bundle cannot be verified at all.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.signature.invalid",
@@ -40,7 +46,7 @@ INTEGRITY = (
         C,
         ("SI-7", "AU-10"),
         "The signed statement was altered, or was not signed by the key it names.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.signature.untrusted-key",
@@ -49,7 +55,7 @@ INTEGRITY = (
         ("SI-7", "AU-10", "SR-4"),
         "Only keys pinned in the receiving side's policy, valid today and allowed to pack for "
         "the bundle's source, establish where a bundle came from.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.statement.subject-mismatch",
@@ -57,7 +63,7 @@ INTEGRITY = (
         C,
         ("SI-7",),
         "The manifest, analysis, assessment or request was changed after signing.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.hash.mismatch",
@@ -65,7 +71,7 @@ INTEGRITY = (
         C,
         ("SI-7",),
         "The file was modified or corrupted between pack and import.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.entry.missing",
@@ -73,7 +79,7 @@ INTEGRITY = (
         C,
         ("SI-7", "CM-8"),
         "An incomplete delivery tempts people to carry the missing piece across informally.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.entry.unexpected",
@@ -81,7 +87,7 @@ INTEGRITY = (
         C,
         ("SI-7", "CM-8"),
         "Content added after signing has not been inventoried, inspected or approved.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.custody.broken",
@@ -89,7 +95,7 @@ INTEGRITY = (
         C,
         ("AU-10", "MP-5"),
         "The custody log must chain from a signed 'packed' event for this exact manifest.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "integrity.ledger.broken",
@@ -97,7 +103,7 @@ INTEGRITY = (
         C,
         ("AU-10", "SI-7"),
         "Replay, downgrade and delta checks all depend on the ledger of accepted bundles.",
-        floor=BLOCK,
+        final=True,
     ),
 )
 
@@ -108,15 +114,16 @@ TRANSFER = (
         C,
         ("AC-4", "SC-7"),
         "A bundle approved for one destination must not be imported into another.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "transfer.destination.unbound",
         "Bundle does not name a destination",
-        M,
+        H,
         ("AC-4",),
         "Without a transfer request the bundle is not bound to any enclave and could be "
         "imported anywhere.",
+        final=True,
     ),
     _rule(
         "transfer.source.unaccepted",
@@ -124,6 +131,7 @@ TRANSFER = (
         H,
         ("AC-4", "SC-7", "SR-3"),
         "The receiving policy lists the networks it accepts transfers from.",
+        final=True,
     ),
     _rule(
         "replay.bundle.expired",
@@ -131,20 +139,23 @@ TRANSFER = (
         H,
         ("SI-7", "SI-2"),
         "An old bundle may reintroduce superseded, vulnerable content.",
+        final=True,
     ),
     _rule(
         "replay.bundle.already-accepted",
         "This exact bundle was already accepted",
-        M,
+        H,
         ("SI-7", "CM-3"),
         "Re-importing an accepted bundle is either a mistake or a replay.",
+        final=True,
     ),
     _rule(
         "replay.bundle.out-of-order",
         "A newer bundle from the same source and stream was already accepted",
-        M,
+        H,
         ("SI-7", "CM-3"),
         "Importing an older bundle after a newer one can roll content back.",
+        final=True,
     ),
     _rule(
         "replay.clock.regression",
@@ -152,6 +163,25 @@ TRANSFER = (
         H,
         ("AU-10",),
         "Age, expiry and ordering checks are meaningless if the clock has gone backwards.",
+        remediation="Correct the system clock. If the earlier ledger times were the ones that "
+        "were wrong, record the correction with 'airlock ledger adjust-clock'.",
+        final=True,
+    ),
+    _rule(
+        "replay.clock.skew",
+        "Bundle was created later than this system's clock allows",
+        L,
+        ("AU-10",),
+        "Either this system's clock is behind or the packing side's is ahead. Clocks drift on "
+        "disconnected systems; correct it before it becomes a regression.",
+    ),
+    _rule(
+        "replay.clock.adjusted",
+        "The clock was deliberately adjusted since the previous import",
+        I,
+        ("AU-10", "CM-3"),
+        "A signed clock adjustment was recorded in the ledger. It is listed here so the "
+        "adjustment and its reason appear in the evidence for the next import.",
     ),
     _rule(
         "delta.base.unknown",
@@ -159,7 +189,7 @@ TRANSFER = (
         C,
         ("SI-7", "CM-3"),
         "A delta is only meaningful on top of the exact snapshot it was computed against.",
-        floor=BLOCK,
+        final=True,
     ),
     _rule(
         "trust.signer.unpinned",
@@ -216,7 +246,7 @@ PATHS = (
         ("SI-7", "CM-8"),
         "Names with backslashes, control characters, undecodable bytes or non-NFC Unicode do "
         "not survive every filesystem unchanged, so the content cannot be tracked reliably.",
-        floor=BLOCK,
+        final=True,
         remediation="Rename the file before packing.",
     ),
     _rule(
@@ -284,7 +314,6 @@ ARCHIVE = (
         H,
         ("SI-3", "SI-7"),
         "Absolute paths and '..' segments overwrite files when the archive is extracted.",
-        floor=BLOCK,
     ),
     _rule(
         "archive.member.unsafe-name",
@@ -299,7 +328,6 @@ ARCHIVE = (
         H,
         ("SI-3", "SI-7"),
         "Extracting through such a link writes or reads outside the extraction directory.",
-        floor=BLOCK,
     ),
     _rule(
         "archive.member.special-file",

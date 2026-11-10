@@ -6,7 +6,7 @@ import tarfile
 import textwrap
 import zipfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -88,24 +88,39 @@ class Site:
     pack_key: SigningKey
     receipt_key: SigningKey
     request: Path
+    # Approver keys by name. The holder is the name up to the first "-", so "alice" and
+    # "alice-backup" are two keys held by the same person.
+    approvers: dict[str, SigningKey] = field(default_factory=dict)
 
-    def policy(self, extra: str = "", *, signer_extra: str = "", enclave: str = ENCLAVE) -> Policy:
-        """The receiving side's policy, pinning both keys. ``extra`` is appended YAML."""
+    def policy(
+        self,
+        extra: str = "",
+        *,
+        signer_extra: str = "",
+        approver_extra: str = "",
+        enclave: str = ENCLAVE,
+    ) -> Policy:
+        """The receiving side's policy, pinning every key. ``extra`` is appended YAML."""
         keys = self.root / "keys"
         keys.mkdir(exist_ok=True)
         entries = []
-        for name, key, roles in (
-            ("pack", self.pack_key, "[pack, approve]"),
-            ("receipt", self.receipt_key, "[receipt]"),
-        ):
+        pinned = [
+            ("pack", self.pack_key, "[pack, approve]", "packer", signer_extra),
+            ("receipt", self.receipt_key, "[receipt]", "receipt-holder", ""),
+            *(
+                (name, key, "[approve]", name.split("-")[0], approver_extra)
+                for name, key in self.approvers.items()
+            ),
+        ]
+        for name, key, roles, holder, more in pinned:
             pem = key.verify_key.pem()
             (keys / f"{name}.pub").write_bytes(pem)
             entries.append(
                 f'    - keyId: "{key.key_id}"\n'
                 f"      publicKey: keys/{name}.pub\n"
                 f'      sha256: "{hashlib.sha256(pem).hexdigest()}"\n'
-                f"      holder: {name}-holder\n"
-                f"      roles: {roles}\n" + (signer_extra if name == "pack" else "")
+                f"      holder: {holder}\n"
+                f"      roles: {roles}\n" + more
             )
         text = (
             "apiVersion: airlock/v1alpha1\nkind: Policy\n"
@@ -123,7 +138,8 @@ def make_site(root: Path) -> Site:
     root.mkdir(parents=True, exist_ok=True)
     request = root / "request.yaml"
     request.write_text(REQUEST, encoding="utf-8")
-    return Site(root, generate_key(), generate_key(), request)
+    approvers = {name: generate_key() for name in ("alice", "alice-backup", "bob")}
+    return Site(root, generate_key(), generate_key(), request, approvers)
 
 
 def failed(assessment: Assessment) -> dict[str, list[Finding]]:

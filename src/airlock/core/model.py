@@ -98,8 +98,9 @@ _DISPOSITION_RANK = {d: i for i, d in enumerate(Disposition)}
 
 class Verdict(StrEnum):
     PASSED = "passed"
-    NEEDS_APPROVAL = "needs-approval"
-    BLOCKED = "blocked"
+    NEEDS_APPROVAL = "needs-approval"  # approvals outstanding on require-approval findings
+    BLOCKED = "blocked"  # a policy blocker stands; it can be overridden by an approval quorum
+    REFUSED = "refused"  # an integrity or authenticity check failed; nothing can override it
 
 
 class Stage(StrEnum):
@@ -627,24 +628,50 @@ class Decision:
 
     finding: str  # finding id
     disposition: Disposition
-    matched: str  # "rules[4]", "waivers[1]", "defaults.severity.high", "floor(...)", "pass"
+    matched: str  # "rules[4]", "waivers[1]", "defaults.severity.high", "final", "pass"
+    # Distinct approvers needed to clear a require-approval finding or to override a blocker.
     approvals_required: int = 0
     waiver: str | None = None
+    # True when nothing can clear it: an integrity or authenticity rule failed, or the policy
+    # marks the rule as not overridable.
+    final: bool = False
+
+    @property
+    def clearable(self) -> bool:
+        """Whether signed approvals can clear this decision."""
+        gated = self.disposition in (Disposition.REQUIRE_APPROVAL, Disposition.BLOCK)
+        return gated and not self.final
 
 
 @dataclass(frozen=True, slots=True)
 class Approval:
-    """A signed, per-bundle clearance of one ``require-approval`` finding.
+    """A signed, per-bundle clearance of one finding: an approval, or the override of a blocker.
 
     Carried as the data of an ``approved`` custody event; the event's signature identifies the
     approver. Bound to the manifest and to the exact finding (by digest), so it lapses if either
-    the content or what was found changes.
+    the content or what was found changes. The written justification is part of what is signed.
     """
 
     manifest_digest: str
     finding: str  # finding id
     finding_digest: str
     justification: str
+
+    def __post_init__(self) -> None:
+        if not self.justification.strip():
+            raise ValueError("an approval needs a written justification")
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalRecord:
+    """What the verifier made of one approval in the custody log. Kept as evidence either way."""
+
+    finding: str  # finding id
+    key_id: str | None
+    holder: str | None
+    justification: str
+    counted: bool
+    reason: str | None = None  # why it was not counted
 
 
 @dataclass(frozen=True, slots=True)
@@ -687,18 +714,20 @@ class Summary:
 def summarize(
     findings: Iterable[Finding], decisions: Iterable[Decision], approved: Collection[str] = ()
 ) -> Summary:
-    """Counts and overall verdict. ``approved`` holds ids of findings whose approvals are met."""
+    """Counts and overall verdict.
+
+    ``approved`` holds ids of findings whose approval quorum is met. Approvals clear
+    require-approval findings and override policy blockers; they never clear a final decision.
+    """
     decisions = list(decisions)
     results = Counter(f.result for f in findings)
     dispositions = Counter(d.disposition for d in decisions)
-    pending = [
-        d
-        for d in decisions
-        if d.disposition is Disposition.REQUIRE_APPROVAL and d.finding not in approved
-    ]
-    if dispositions[Disposition.BLOCK]:
+    standing = {d.disposition for d in decisions if d.clearable and d.finding not in approved}
+    if any(d.final and d.disposition is Disposition.BLOCK for d in decisions):
+        verdict = Verdict.REFUSED
+    elif Disposition.BLOCK in standing:
         verdict = Verdict.BLOCKED
-    elif pending:
+    elif Disposition.REQUIRE_APPROVAL in standing:
         verdict = Verdict.NEEDS_APPROVAL
     else:
         verdict = Verdict.PASSED
@@ -724,6 +753,7 @@ class Assessment:
     coverage: tuple[Coverage, ...] = ()
     findings: tuple[Finding, ...] = ()
     decisions: tuple[Decision, ...] = ()
+    approvals: tuple[ApprovalRecord, ...] = ()
     api_version: str = API_VERSION
     kind: str = "Assessment"
 
@@ -738,10 +768,8 @@ class Assessment:
             raise ValueError("every finding needs exactly one decision")
 
     @property
-    def integrity_failed(self) -> bool:
-        return any(
-            f.result is Result.FAIL and f.rule.startswith("integrity.") for f in self.findings
-        )
+    def refused(self) -> bool:
+        return self.summary.verdict is Verdict.REFUSED
 
 
 @dataclass(frozen=True, slots=True)

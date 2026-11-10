@@ -2,7 +2,7 @@
 
 from airlock.analyzer import TOOL
 from airlock.core.interfaces import Context
-from airlock.core.model import Provenance, Subject
+from airlock.core.model import Provenance, Subject, SubjectKind
 from airlock.ledger import Ledger
 
 _LEDGER_RULES = (
@@ -79,6 +79,19 @@ def check_transfer(
     else:
         recorder.passed("replay.bundle.expired")
 
+    if provenance.created_at > ctx.now + policy.clock_tolerance:
+        recorder.fail(
+            "replay.clock.skew",
+            subject,
+            tool=TOOL,
+            detail={
+                "bundleCreated": provenance.created_at.isoformat(),
+                "clock": ctx.now.isoformat(),
+            },
+        )
+    else:
+        recorder.passed("replay.clock.skew")
+
     if ledger is None:
         rules = (*_LEDGER_RULES, "delta.base.unknown") if base else _LEDGER_RULES
         recorder.not_assessed(
@@ -89,10 +102,28 @@ def check_transfer(
         )
         return
 
-    last = ledger.last_time
-    if last is not None and ctx.now < last:
+    for event in ledger.pending_clock_adjustments:
         recorder.fail(
-            "replay.clock.regression", subject, tool=TOOL, detail={"lastEntry": last.isoformat()}
+            "replay.clock.adjusted",
+            Subject(SubjectKind.HOST, name="ledger"),
+            tool=TOOL,
+            detail={"at": event.at.isoformat(), "by": event.actor, **dict(event.data)},
+            discriminator=str(event.seq),
+        )
+
+    high_water = ledger.high_water
+    if high_water is not None and ctx.now + policy.clock_tolerance < high_water:
+        recorder.fail(
+            "replay.clock.regression",
+            subject,
+            tool=TOOL,
+            detail={
+                "clock": ctx.now.isoformat(),
+                "ledgerHighWater": high_water.isoformat(),
+                "toleranceSeconds": int(policy.clock_tolerance.total_seconds()),
+                "hint": "correct the system clock; if the ledger's times were the wrong ones, "
+                "record the correction with 'airlock ledger adjust-clock'",
+            },
         )
     else:
         recorder.passed("replay.clock.regression")

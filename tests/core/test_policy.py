@@ -77,6 +77,9 @@ def test_example_policy_loads() -> None:
     assert policy.identity.accept_sources == ("dev-unclass",)
     assert policy.max_bundle_age == timedelta(days=30)
     assert policy.rules[1].approvals == 2
+    assert policy.defaults.override_approvals == 2
+    assert policy.clock_tolerance == timedelta(minutes=10)
+    assert policy.rules[0].overridable
     assert policy.rules[3].where == {"kev": "true"}
     assert policy.limits.archive.max_expanded_bytes == 500 * 2**30
     assert policy.limits.archive.ratio_min_bytes == 16 * 2**20
@@ -205,6 +208,8 @@ _WAIVER = (
         ("rules:\n  - rule: x.y\n", r"rules\[0\]: a rule must set"),
         ("rules:\n  - rule: x.y\n    disposition: maybe\n", r"rules\[0\]\.disposition: 'maybe'"),
         ("rules:\n  - rule: x.y\n    disposition: block\n    approvals: 0\n", "at least 1"),
+        ("defaults: {overrideApprovals: 0}\n", r"overrideApprovals: must be at least 1"),
+        ("rules:\n  - {rule: x.y, disposition: block, overridable: maybe}\n", "true or false"),
         ("rules:\n  - {rule: x.y, disposition: block, where: {cve: 7}}\n", r"where\.cve"),
         ("defaults:\n  severity:\n    severe: block\n", r"defaults\.severity: unknown key"),
         ("defaults: {notAssessed: warn}\ndefaults: {notAssessed: block}\n", "duplicate key"),
@@ -263,6 +268,7 @@ def policy(tmp_path: Path) -> Policy:
         disposition: warn
       - rule: "offline.*"
         disposition: block
+        overridable: false
       - rule: "container.*"
         disposition: require-approval
         approvals: 2
@@ -366,8 +372,24 @@ def test_approvals(policy: Policy, findings: FindingFactory) -> None:
     f = findings("container.user.root", Subject.of_path("images/app.tar"), Result.FAIL, tool=TOOL)
     d = policy.decide(f, today=TODAY)
     assert (d.disposition, d.approvals_required) == (Disposition.REQUIRE_APPROVAL, 2)
-    block = findings("model.pickle.dangerous-import", PT, Result.FAIL, tool=TOOL)
-    assert policy.decide(block, today=TODAY).approvals_required == 0
+    # A policy blocker can be overridden, by the (larger) override quorum.
+    block = policy.decide(
+        findings("model.pickle.dangerous-import", PT, Result.FAIL, tool=TOOL), today=TODAY
+    )
+    assert (block.disposition, block.approvals_required, block.final) == (
+        Disposition.BLOCK,
+        2,
+        False,
+    )
+    # Unless the policy says that this rule's blocks are not overridable.
+    strict = policy.decide(
+        findings("offline.telemetry.enabled", PT, Result.FAIL, tool=TOOL), today=TODAY
+    )
+    assert (strict.disposition, strict.approvals_required, strict.final) == (
+        Disposition.BLOCK,
+        0,
+        True,
+    )
 
 
 def test_waiver_pinned_to_content(policy: Policy, findings: FindingFactory) -> None:
@@ -393,17 +415,24 @@ def test_expired_waivers(policy: Policy, findings: FindingFactory) -> None:
     assert policy.decide(f, today=TODAY).waiver is None
 
 
-def test_floor_cannot_be_waived_or_lowered(
+def test_integrity_failures_cannot_be_waived_lowered_or_overridden(
     policy: Policy, findings: FindingFactory, registry: RuleRegistry
 ) -> None:
     tampered = findings("integrity.hash.mismatch", PT, Result.FAIL, tool=TOOL)
-    # Without the floor, the policy's `integrity.*: allow` rule and waiver W-4 would both apply.
+    # If the rule were not final, the policy's `integrity.*: allow` rule and waiver W-4 would
+    # both apply.
     assert policy.decide(tampered, today=TODAY).waiver == "W-4"
     [decision] = evaluate(policy, registry, [tampered], today=TODAY)
     assert decision.disposition is Disposition.BLOCK
-    assert decision.matched == "floor(rules[6])"
+    assert decision.matched == "final"
     assert decision.waiver is None
-    # A floor does not turn "could not check" into a block.
+    assert decision.final
+    assert not decision.clearable
+    assert decision.approvals_required == 0
+    crashed = findings("integrity.hash.mismatch", PT, Result.ERROR, tool=TOOL)
+    [decision] = evaluate(policy, registry, [crashed], today=TODAY)
+    assert decision.final
+    # Being final does not turn "could not check" into a block.
     skipped = findings("integrity.hash.mismatch", PT, Result.NOT_ASSESSED, tool=TOOL, reason="r")
     [decision] = evaluate(policy, registry, [skipped], today=TODAY)
     assert decision.disposition is Disposition.WARN

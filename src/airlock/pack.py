@@ -75,8 +75,10 @@ def pack(
 ) -> PackResult:
     """Build a bundle from ``inputs`` in ``output``.
 
-    The bundle is signed unless a finding is decided ``block``: then everything is still written,
-    so the findings can be reviewed, but there is no statement and nothing to transfer.
+    The bundle is signed unless it is refused outright (a failure nothing can override, such
+    as a file name that cannot be stored). Everything is still written then, so the findings
+    can be reviewed, but there is no statement and nothing to transfer. A bundle with policy
+    blockers is signed: whether to override them is for approvers and the receiving side.
     """
     now = now or utc_now()
     request: TransferRequest | None = load_request(request_path) if request_path else None
@@ -152,7 +154,7 @@ def pack(
         (output / layout.REQUEST).write_bytes(subjects[layout.REQUEST])
 
     layout.write(output / layout.DESCRIPTOR, BundleDescriptor())
-    signed = assessment.summary.verdict is not Verdict.BLOCKED
+    signed = assessment.summary.verdict is not Verdict.REFUSED
     if signed:
         provenance = Provenance(
             bundle_id=bundle_id or uuid.uuid4().hex,

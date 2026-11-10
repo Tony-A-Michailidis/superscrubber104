@@ -10,6 +10,7 @@ from typing import ParamSpec
 import click
 
 from airlock import __version__
+from airlock.approvals import approve as run_approve
 from airlock.core.errors import AirlockError, ConfigError
 from airlock.core.policy import Policy, load_policy
 from airlock.core.signing import (
@@ -19,8 +20,9 @@ from airlock.core.signing import (
     load_verify_key,
     save_key,
 )
+from airlock.ledger import Ledger
 from airlock.pack import pack as run_pack
-from airlock.session import EXIT_USAGE, exit_code
+from airlock.session import EXIT_USAGE, exit_code, utc_now
 from airlock.summary import render
 from airlock.verify import verify as run_verify
 
@@ -121,7 +123,9 @@ def pack(
     """Inventory, inspect and sign INPUTS into a bundle.
 
     A single directory becomes the bundle root. Several inputs are each placed under their own
-    name. Exits 1, without signing, if any finding is decided 'block'.
+    name. A bundle with policy blockers is still signed (overriding them is for approvers and
+    the receiving side) and exits 1. A bundle that is refused outright is not signed and
+    exits 3.
     """
     signer = _key(key, passphrase_env)
     assert signer is not None  # noqa: S101
@@ -131,7 +135,7 @@ def pack(
     if result.signed:
         click.echo(f"bundle:   {result.bundle} (signed by {signer.key_id})")
     else:
-        click.echo(f"bundle:   {result.bundle} (NOT SIGNED: blocking findings)")
+        click.echo(f"bundle:   {result.bundle} (NOT SIGNED: refused)")
     sys.exit(exit_code(result.assessment))
 
 
@@ -165,8 +169,9 @@ def verify(
 ) -> None:
     """Verify BUNDLE with this side's own policy, keys and checks.
 
-    Exit codes: 0 accepted; 1 blocked or approval needed; 2 usage or configuration error;
-    3 integrity failure (tampering or a broken trust chain).
+    Exit codes: 0 accepted; 1 a policy blocker stands or approvals are outstanding (both can
+    be cleared with 'airlock approve'); 2 usage or configuration error; 3 refused: an
+    integrity or authenticity check failed, which nothing can override.
     """
     loaded = _policy(policy)
     if pubkey is None and not loaded.signers:
@@ -185,3 +190,95 @@ def verify(
     for path in result.outputs:
         click.echo(f"wrote:    {path}")
     sys.exit(exit_code(result.assessment))
+
+
+@main.command()
+@click.argument("bundle", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--key", required=True, type=_FILE, help="The approver's private key.")
+@click.option(
+    "-f",
+    "--finding",
+    "findings",
+    multiple=True,
+    required=True,
+    metavar="ID",
+    help="Finding id, as shown in brackets by pack and verify. Repeatable.",
+)
+@click.option("-j", "--justification", required=True, help="Why this is acceptable. Signed.")
+@click.option(
+    "--assessment",
+    type=_FILE,
+    help="The assessment you reviewed (default: the packer's, inside the bundle). On the "
+    "receiving side, pass this side's assessment.verify.json.",
+)
+@_PASSPHRASE
+@_reports_errors
+def approve(
+    bundle: Path,
+    key: Path,
+    findings: tuple[str, ...],
+    justification: str,
+    assessment: Path | None,
+    passphrase_env: str | None,
+) -> None:
+    """Sign an approval of findings in BUNDLE, with a written justification.
+
+    Clears findings decided 'require-approval' and overrides policy blockers, once enough
+    distinct approvers have signed. Integrity and authenticity failures cannot be approved.
+    The packer cannot approve its own bundle. Whether an approval counts is decided by the
+    verifying side's policy; run 'airlock verify' again to see.
+    """
+    signer = _key(key, passphrase_env)
+    assert signer is not None  # noqa: S101
+    approvals = run_approve(
+        bundle,
+        signer=signer,
+        findings=findings,
+        justification=justification,
+        now=utc_now(),
+        assessment_path=assessment,
+    )
+    for approval in approvals:
+        click.echo(f"approved [{approval.finding}] as {signer.key_id}")
+
+
+@main.group()
+def ledger() -> None:
+    """Maintain the receiving side's ledger of imports."""
+
+
+@ledger.command("adjust-clock")
+@click.option(
+    "--state", required=True, type=click.Path(exists=True, file_okay=False, path_type=Path)
+)
+@click.option("--reason", required=True, help="Why the clock was set back. Recorded and signed.")
+@click.option("--key", type=_FILE, help="Private key for signing the ledger entry.")
+@_PASSPHRASE
+@_reports_errors
+def adjust_clock(state: Path, reason: str, key: Path | None, passphrase_env: str | None) -> None:
+    """Record that this system's clock was deliberately set back.
+
+    'airlock verify' refuses imports while the clock is earlier than the ledger's latest entry,
+    because age and ordering checks would be meaningless. If the clock was wrong earlier and has
+    now been corrected, this records the correction as a signed ledger entry and lets imports
+    resume. The adjustment and its reason are listed in the next import's assessment.
+    """
+    if not reason.strip():
+        raise ConfigError("a reason is required")
+    book = Ledger(state)
+    problems = book.load(lambda _key_id: None, require_signed=False)
+    damage = [p for p in problems if "untrusted key" not in p]
+    if damage:
+        raise ConfigError(
+            "the ledger is damaged; restore it before adjusting: " + "; ".join(damage)
+        )
+    now, mark = utc_now(), book.high_water
+    if mark is None or now >= mark:
+        click.echo(f"the clock ({now.isoformat()}) is not behind the ledger; nothing recorded")
+        return
+    signer = _key(key, passphrase_env)
+    book.adjust_clock(now=now, reason=reason.strip(), signer=signer)
+    click.echo(f"ledger high-water mark was {mark.isoformat()}")
+    click.echo(
+        f"recorded clock adjustment to {now.isoformat()}" + ("" if signer else " (unsigned)")
+    )

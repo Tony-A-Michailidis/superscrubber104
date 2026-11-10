@@ -1,6 +1,6 @@
 # 17. Core data models and policy schema
 
-> **Status: implemented** in `src/airlock/core/` (revision 2, 2026-11-10).
+> **Status: implemented** in `src/airlock/core/` (revision 3, 2026-11-10).
 > Revision 1 was reviewed against the brief and found to need structural changes. [§17.12](#1712-review-resolutions) lists each review item and what was done about it.
 > The bundle format and the verification procedure built on these models are in [18-bundle-and-verification.md](18-bundle-and-verification.md).
 
@@ -13,6 +13,7 @@ This is the shared core that every module (pack/verify, patch, eval, controls-as
   - *Integrity* (`Manifest`, `Entry`): paths, sizes, hashes. Independent of tool version, policy and time. Its digest identifies content and nothing else. This is what is signed and re-checked.
   - *Interpretation* (`Analysis`, `Artifact`, `Unit`, `Component`): what the content is. It depends on the tool version, so the receiving side regenerates it and never trusts the packer's copy.
 - **Checks observe; policy decides.** A check reports a `Result` and a `Severity`. Only the policy engine assigns a `Disposition`. The receiving side therefore reaches its own decision with its own policy.
+- **Two classes of rule.** *Integrity and authenticity* failures (hash mismatch, bad or missing signature, replay, wrong enclave) can never be waived, lowered or overridden. If they could, the airlock would not be a control. *Policy blockers* (a pickle model, remote code, a licence, an unapproved package) can be overridden for one bundle, but only by a quorum of approvers with a written justification, never by the packer, and the override is recorded as signed evidence. See [§17.7](#177-policy).
 - **Canonical JSON** for every document that is hashed or signed: UTF-8, sorted keys, no whitespace, NFC strings, **no floats**. Numbers that are not integers are carried as decimal strings; `canonical.jsonable()` coerces handler metadata (floats, bytes, sets) at the boundary.
 - **Digests are taken over bytes on disk.** Nothing is parsed and re-serialised before being checked, so two tool versions can never disagree about what a signature covers.
 - **Algorithm agility.** Digests are `<algorithm>:<hex>` (`sha256`, `sha384`, `sha512` accepted); key ids are `<algorithm>:<fingerprint>`. sha256 and Ed25519 are the only ones produced today. Confirm both against the destination's approved-algorithm list before publishing.
@@ -25,7 +26,7 @@ This is the shared core that every module (pack/verify, patch, eval, controls-as
 | `Severity` | critical, high, medium, low, info |
 | `Result` | pass, fail, not-assessed (could not run), error (check crashed) |
 | `Disposition` | allow < warn < require-approval < block |
-| `Verdict` | passed, needs-approval, blocked |
+| `Verdict` | passed, needs-approval, blocked (a policy blocker stands; overridable), refused (an integrity or authenticity failure; final) |
 | `TrustLevel` | none < asserted < checksum < pinned-checksum < signature |
 | `EntryType` | file, directory, symlink, hardlink, other |
 | `UnitKind` | model-package, runtime-profile, python-environment, node-environment, repo-mirror, container-image, vm-image, patch-set, knowledge-base |
@@ -83,19 +84,26 @@ Analysis(tool, artifacts, units, components)
 Subject(kind, artifact | unit | component | name, locator)
 Finding(id, rule, rule_version, result, severity, subject, title, controls, tool,
         detail, attributes, not_assessed_reason)
-Decision(finding, disposition, matched, approvals_required, waiver)
+Decision(finding, disposition, matched, approvals_required, waiver, final)
 Coverage(rule, rule_version, controls, passed, failed, not_assessed, errors)
 Assessment(tool, stage, started_at, finished_at, policy_digest, manifest_digest,
-           summary, plugins, coverage, findings, decisions)
-Approval(manifest_digest, finding, finding_digest, justification)
+           summary, plugins, coverage, findings, decisions, approvals)
+Approval(manifest_digest, finding, finding_digest, justification)   # what an approver signs
+ApprovalRecord(finding, key_id, holder, justification, counted, reason)   # what the verifier made of it
 ```
 
-- **Rule registry.** Every check is declared as a `RuleSpec` (id, version, title, severity, controls, rationale, remediation, `floor`, tags). A finding can only be created from a registered rule, so no check ships without a control mapping. Built-in rules are in `airlock/catalog.py`.
-- **`RuleSpec.floor`** is a minimum disposition for a FAIL or ERROR. Policy may be stricter but never looser, and waivers do not apply. It is set to `block` for checks whose failure means tampering or a broken trust chain (`integrity.*`, archive path traversal and link escapes, an unknown delta base, a destination mismatch, unrepresentable file names). The remedy for those is to fix the delivery, not to adjust the policy.
+- **Rule registry.** Every check is declared as a `RuleSpec` (id, version, title, severity, controls, rationale, remediation, `final`, tags). A finding can only be created from a registered rule, so no check ships without a control mapping. Built-in rules are in `airlock/catalog.py`.
+- **`RuleSpec.final`** marks the integrity and authenticity rules. A FAIL or ERROR of a final rule is always `block`, and the decision is itself marked `final`: no policy rule, default, waiver or approval changes it. The final rules are:
+  - `integrity.*`: hash mismatch, missing or unexpected content, bad or missing signature, untrusted key, edited control files, broken custody log or ledger
+  - `replay.bundle.*`, `replay.clock.regression`, `delta.base.unknown`: replayed, out-of-order or stale bundles, a clock that has gone backwards, a delta on an unknown base
+  - `transfer.destination.*`, `transfer.source.unaccepted`: a bundle addressed to another enclave, bound to none, or from a source this enclave does not accept
+  - `path.name.unsafe`: the file could not be stored at all, so there is nothing an approval could apply to
+
+  Everything else, including archive path traversal, is a matter for policy.
 - **Passes are counts, not findings.** `Recorder.passed(rule, n)` increments a counter; only non-passes are individual findings. `Assessment.coverage` has one row for *every* registered rule, so a rule that never ran is visible as such instead of silently absent. A bundle of a million files does not produce a million rows.
 - **`Finding.attributes`** are string facets (`cve`, `kev`, `mcp.server`, `mcp.tool`, `class`) that policy `where` clauses select on.
 - **`Subject.locator`** narrows a subject to a place inside it (line, byte offset, JSON pointer, tool name).
-- **Finding ids** are deterministic: `sha256(rule, subject, discriminator)[:16]`. **`finding_digest()`** covers the whole finding. Approvals bind to the digest, so an approval lapses if what was found changes even though the id is the same.
+- **Finding ids** are deterministic: `sha256(rule, subject, discriminator)[:16]`. **`finding_digest()`** covers the rule and its version, the subject, the result and everything that was found (detail and attributes). It leaves out the reporting tool's version and presentation, so an approval given on one side still matches the same finding recomputed by a newer tool on the other. Approvals bind to the digest, so an approval lapses if what was found changes even though the id is the same.
 - **Timestamps** exist only on the assessment (run start and finish) and on log events, never on individual findings, so findings stay reproducible.
 
 ## 17.6 Transfer request
@@ -142,6 +150,7 @@ identity:                         # who owns this policy; bundles addressed else
   acceptSources: [dev-unclass]
 transfer:
   maxBundleAge: 30d               # older bundles are possible replays
+  clockTolerance: 10m             # allowance for clock drift (default 10m)
 
 trust:
   signers:                        # keys for bundle signatures, approvals and receipts
@@ -170,7 +179,8 @@ defaults:
   severity: { critical: block, high: block, medium: require-approval, low: warn, info: allow }
   notAssessed: warn
   error: require-approval
-  approvals: 1
+  approvals: 1                    # distinct approvers to clear a require-approval finding
+  overrideApprovals: 2            # distinct approvers to override a blocker
 
 rules:                            # first match wins
   - rule: "model.pickle.*"
@@ -185,6 +195,8 @@ rules:                            # first match wins
     where: { kev: "true" }        # optional: globs over finding attributes
     disposition: block
   - rule: "malware.*"
+    disposition: block
+    overridable: false            # optional: a site may make one of its own blockers final
     notAssessed: block            # the scanner must actually have run
 
 waivers:                          # standing, expiring exceptions
@@ -235,14 +247,33 @@ extensions: { }                   # ignored by this version; still covered by th
 **Evaluation order for one finding**
 
 1. A `pass` is always `allow`.
-2. If the rule has no floor: the first unexpired **waiver** that names this rule, matches the subject, matches `where`, and (if it sets `sha256`) matches the content.
-3. The first **rule** that matches (rule glob, `paths`, `where`) *and* sets an outcome for this result. A rule that only sets `notAssessed` never swallows a FAIL.
-4. Otherwise the **defaults**: by severity for a FAIL, `notAssessed` or `error` otherwise.
-5. If the rule has a **floor** and the result is FAIL or ERROR, the outcome is raised to at least the floor.
+2. A FAIL or ERROR of a **final** rule is `block`, and the decision is final. Nothing below applies.
+3. The first unexpired **waiver** that names this rule, matches the subject, matches `where`, and (if it sets `sha256`) matches the content. (Never for a final rule.)
+4. The first **rule** that matches (rule glob, `paths`, `where`) *and* sets an outcome for this result. A rule that only sets `notAssessed` never swallows a FAIL.
+5. Otherwise the **defaults**: by severity for a FAIL, `notAssessed` or `error` otherwise.
 
-The decision records which entry decided it (`rules[3]`, `waivers[0]`, `defaults.severity.high`, `floor(rules[6])`), so every outcome traces to one policy line.
+The decision records which entry decided it (`rules[3]`, `waivers[0]`, `defaults.severity.high`, `final`), so every outcome traces to one policy line.
 
-**Approvals and blockers.** A signed per-bundle approval clears a `require-approval` finding. A `block` is final for that bundle: the only way through is a policy waiver, which is pinned to content, expires, and changes the policy digest (which the ledger records). A site that wants blockers of some class to be overridable per bundle sets that rule to `require-approval` with `approvals: 2`. This is stricter than the brief's wording ("justifications for overridden blockers") and is deliberate: an override that leaves no trace in policy is the thing an assessor will ask about.
+**Approvals and overrides**
+
+| Decision | Can it be cleared for this bundle? | By whom |
+|---|---|---|
+| `block`, final | No. Never. | Nobody. Fix the delivery or the trust chain. |
+| `block` (a policy blocker) | Yes: an **override** | `overrideApprovals` distinct approvers (default 2), or the deciding rule's `approvals` |
+| `block` from a rule with `overridable: false` | No | The site has chosen to make this blocker final |
+| `require-approval` | Yes: an **approval** | `approvals` distinct approvers (default 1), or the deciding rule's `approvals` |
+
+An approval or override is a signed `approved` event in the bundle's custody log, made with `airlock approve`. It counts only if all of these hold:
+
+- It carries a **written justification**, which is part of what is signed.
+- The signer is pinned in the *verifying* side's policy with the `approve` role, within its validity window and not revoked.
+- **The signer is not the packer**: not the key that signed the bundle, and not another key with the same `holder`.
+- It names this manifest and the finding exactly as the verifier found it (by `finding_digest`).
+- The quorum counts distinct **holders**, so two keys held by one person are one approver.
+
+Every approval the verifier looked at is kept in the assessment as an `ApprovalRecord` (who, which key, the justification, whether it counted and, if not, why). The assessment's digest is in the signed receipt, so the override is signed evidence on both sides: the approver's signature in the custody log and the verifier's over the outcome. An overridden blocker is still recorded as a blocker; it is overridden, not erased.
+
+**Waivers are policy, not overrides.** A waiver is the policy owner narrowing a rule for one exact subject or exact content until a date. It has the same standing as any other policy rule, changes the policy digest (which the ledger logs), and never applies to a final rule. It is not signed, because the policy file is not signed yet; see the known limits in [18](18-bundle-and-verification.md).
 
 **Policy hygiene**
 
@@ -270,6 +301,8 @@ The decision records which entry decided it (`rules[3]`, `waivers[0]`, `defaults
 `core/chainlog.py` is one append-only, hash-chained, per-event signed JSON Lines format: `{seq, prev, type, at, actor, data, sig}`. It serves the custody log that travels with a bundle, the receiving side's ledger, and (phase 3) the gateway audit log.
 
 Edits and reordering are detectable. **Truncation of the tail is not**, so nothing may rely on the absence of a later event. Approvals are safe under that rule (removing one only makes the bundle fail); a "rejected" event would not be, which is why there is none.
+
+`verify()` reports structural damage separately from what is known about each event's signer. In the ledger, which this side writes, an unknown signer is a problem. In a custody log, which anyone handling the bundle may append to, an event from an unknown signer is not damage; it simply carries no weight.
 
 ## 17.10 Interfaces
 
@@ -323,13 +356,13 @@ Status: **done** (implemented and tested), **shaped** (the model or schema has t
 | 8 | Deltas | shaped | `Manifest.base`, `Entry.carried`, `delta.base.unknown`; packing and resolving deltas is 1c |
 | 9 | Scale | done / deferred | Passes are counts; nested members live in the analysis, not the manifest. Streaming JSON Lines for very large analyses is deferred |
 | 10 | Version skew | done | Receiver parses only statement, manifest and request; `extensions` maps; packer analysis never parsed |
-| 11 | Integrity checks could be waived | done | `RuleSpec.floor`; waivers restricted to one rule and an exact or content-pinned subject |
+| 11 | Integrity checks could be waived | done | `RuleSpec.final`: integrity, authenticity and replay rules cannot be waived, lowered or overridden; waivers restricted to one rule and an exact or content-pinned subject |
 | 12 | No record of upstream verification | done (model) | `Verification`, `TrustLevel`, `trust.minimum`; handlers fill it from task 5 |
 | 13 | Pinned keys too thin | done | Validity, revocation, holder, sources, fingerprints; full key ids; rotation logged via `policy.digest.changed` |
 | 14 | Policy unsigned; two trust roots | done / deferred | Policy is the single root, `--pubkey` only when nothing is pinned. A signature over the policy is deferred |
-| 15 | Approvals had no model | shaped | `Approval`, `finding_digest`, `summarize(approved=…)`; blockers are final (§17.7). `airlock approve` and quorum counting arrive with reports (task 8) |
+| 15 | Approvals had no model | done | Owner's decision: integrity and authenticity failures are final; policy blockers are overridable by a quorum with a written justification; the packer cannot approve; overrides are signed evidence. `airlock approve`, `count_approvals`, `ApprovalRecord` (§17.7) |
 | 16 | Scanner pinning incomplete | shaped | `files`, `minVersion`, `plugin.required.missing`; enforced with the plugins (task 7) |
-| 17 | Time | done | `Context.now` is a datetime; `replay.clock.regression` |
+| 17 | Time | done | `Context.now` is a datetime; `replay.clock.regression` with a drift tolerance and a logged recovery path (`airlock ledger adjust-clock`); `replay.clock.skew` as an early warning ([18 §18.6](18-bundle-and-verification.md)) |
 | 18 | Algorithm agility | done | Digest and key-id grammars accept other algorithms |
 | 19 | Runtime profile inputs | deferred to 1b | `Requirement` can already express "supplied by the high side" |
 | 20 | Patch documents and profiles | shaped / 1c | `profile` and `stream` on the request and statement |

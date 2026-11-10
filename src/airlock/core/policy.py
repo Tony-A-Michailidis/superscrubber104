@@ -123,7 +123,8 @@ class Defaults:
     severity: Mapping[Severity, Disposition]
     not_assessed: Disposition
     error: Disposition
-    approvals: int
+    approvals: int  # distinct approvers to clear a require-approval finding
+    override_approvals: int  # distinct approvers to override a blocker
 
 
 DEFAULTS = Defaults(
@@ -137,6 +138,7 @@ DEFAULTS = Defaults(
     not_assessed=Disposition.WARN,
     error=Disposition.REQUIRE_APPROVAL,
     approvals=1,
+    override_approvals=2,
 )
 
 
@@ -156,6 +158,7 @@ class RuleOverride:
     not_assessed: Disposition | None = None
     error: Disposition | None = None
     approvals: int | None = None
+    overridable: bool = True  # false: a block decided by this rule cannot be overridden
 
     def outcome_for(self, result: Result) -> Disposition | None:
         if result is Result.FAIL:
@@ -300,6 +303,8 @@ class Policy:
     digest: str  # covers the policy bytes and every pinned file
     identity: Identity | None = None
     max_bundle_age: timedelta | None = None
+    # Allowance for clock drift, on this host and between the two sides.
+    clock_tolerance: timedelta = timedelta(minutes=10)
     defaults: Defaults = DEFAULTS
     rules: tuple[RuleOverride, ...] = ()
     waivers: tuple[Waiver, ...] = ()
@@ -348,50 +353,54 @@ class Policy:
         *,
         today: date,
         content_sha256: str | None = None,
-        floor: Disposition | None = None,
+        final: bool = False,
     ) -> Decision:
         """Decide one finding.
 
-        Order: PASS is always allowed; then the first applicable unexpired waiver; then the first
-        rule that matches *and* sets an outcome for this result; then the defaults.
+        ``final`` marks an integrity or authenticity rule. A FAIL or ERROR of such a rule is
+        always ``block``: no waiver, rule, default or approval changes that.
+
+        Otherwise the order is: PASS is always allowed; then the first applicable unexpired
+        waiver; then the first rule that matches *and* sets an outcome for this result; then the
+        defaults. A resulting ``block`` is a policy blocker: it stands unless a quorum of
+        approvers overrides it for this bundle (or the deciding rule says it is not overridable).
 
         ``content_sha256`` is the subject's content hash, needed for content-pinned waivers.
-        ``floor`` is the rule's minimum disposition: waivers are skipped, and a FAIL or ERROR is
-        never decided below it.
         """
         if finding.result is Result.PASS:
             return Decision(finding.id, Disposition.ALLOW, "pass")
+        if final and finding.result in (Result.FAIL, Result.ERROR):
+            return Decision(finding.id, Disposition.BLOCK, "final", final=True)
 
-        if floor is None:
+        if not final:
             for index, waiver in enumerate(self.waivers):
                 if waiver.applies(finding, today, content_sha256):
                     return Decision(
                         finding.id, Disposition.ALLOW, f"waivers[{index}]", 0, waiver.id
                     )
 
-        outcome, matched, approvals = self._outcome(finding)
-        enforce = floor is not None and finding.result in (Result.FAIL, Result.ERROR)
-        if enforce and floor is not None and outcome.rank < floor.rank:
-            outcome, matched = floor, f"floor({matched})"
-        required = approvals if outcome is Disposition.REQUIRE_APPROVAL else 0
-        return Decision(finding.id, outcome, matched, required)
+        outcome, matched, rule = self._outcome(finding)
+        if outcome is Disposition.REQUIRE_APPROVAL:
+            required = (rule.approvals if rule else None) or self.defaults.approvals
+            return Decision(finding.id, outcome, matched, required)
+        if outcome is Disposition.BLOCK:
+            if rule is not None and not rule.overridable:
+                return Decision(finding.id, outcome, matched, final=True)
+            required = (rule.approvals if rule else None) or self.defaults.override_approvals
+            return Decision(finding.id, outcome, matched, required)
+        return Decision(finding.id, outcome, matched)
 
-    def _outcome(self, finding: Finding) -> tuple[Disposition, str, int]:
+    def _outcome(self, finding: Finding) -> tuple[Disposition, str, RuleOverride | None]:
         for index, rule in enumerate(self.rules):
             outcome = rule.outcome_for(finding.result)
             if outcome is not None and rule.matches(finding):
-                approvals = rule.approvals or self.defaults.approvals
-                return outcome, f"rules[{index}]", approvals
+                return outcome, f"rules[{index}]", rule
         if finding.result is Result.FAIL:
             level = finding.severity
-            return (
-                self.defaults.severity[level],
-                f"defaults.severity.{level.value}",
-                (self.defaults.approvals),
-            )
+            return self.defaults.severity[level], f"defaults.severity.{level.value}", None
         if finding.result is Result.NOT_ASSESSED:
-            return self.defaults.not_assessed, "defaults.notAssessed", self.defaults.approvals
-        return self.defaults.error, "defaults.error", self.defaults.approvals
+            return self.defaults.not_assessed, "defaults.notAssessed", None
+        return self.defaults.error, "defaults.error", None
 
 
 def evaluate(
@@ -402,7 +411,7 @@ def evaluate(
     today: date,
     content_hashes: Mapping[str, str] | None = None,
 ) -> tuple[Decision, ...]:
-    """Decide every finding, applying each rule's floor.
+    """Decide every finding. Rules the registry marks ``final`` cannot be waived or overridden.
 
     ``content_hashes`` maps a subject's display form to its sha256, for content-pinned waivers.
     """
@@ -412,7 +421,7 @@ def evaluate(
             finding,
             today=today,
             content_sha256=hashes.get(finding.subject.display),
-            floor=registry.get(finding.rule).floor,
+            final=registry.get(finding.rule).final,
         )
         for finding in findings
     )
@@ -447,6 +456,7 @@ class _Parser:
         framework, catalog, overrides = self._controls(doc.opt_section("controls"))
         transfer = doc.opt_section("transfer")
         max_bundle_age = transfer.opt_duration("maxBundleAge") if transfer else None
+        clock_tolerance = transfer.opt_duration("clockTolerance") if transfer else None
         if transfer:
             transfer.done()
         policy = Policy(
@@ -455,6 +465,7 @@ class _Parser:
             digest="",
             identity=self._identity(doc.opt_section("identity")),
             max_bundle_age=max_bundle_age,
+            clock_tolerance=clock_tolerance or timedelta(minutes=10),
             defaults=self._defaults(doc.opt_section("defaults")),
             rules=tuple(self._rule(r) for r in doc.sections("rules")),
             waivers=tuple(self._waiver(w) for w in doc.sections("waivers")),
@@ -517,6 +528,8 @@ class _Parser:
             not_assessed=section.opt_enum("notAssessed", Disposition) or DEFAULTS.not_assessed,
             error=section.opt_enum("error", Disposition) or DEFAULTS.error,
             approvals=_approvals(section) or DEFAULTS.approvals,
+            override_approvals=_approvals(section, "overrideApprovals")
+            or DEFAULTS.override_approvals,
         )
         section.done()
         return result
@@ -530,6 +543,7 @@ class _Parser:
             not_assessed=section.opt_enum("notAssessed", Disposition),
             error=section.opt_enum("error", Disposition),
             approvals=_approvals(section),
+            overridable=section.opt_bool("overridable") is not False,
         )
         section.done()
         if rule.disposition is rule.not_assessed is rule.error is None:
@@ -777,10 +791,10 @@ def _where(section: Reader) -> dict[str, str]:
     return where
 
 
-def _approvals(section: Reader) -> int | None:
-    value = section.opt_int("approvals")
+def _approvals(section: Reader, key: str = "approvals") -> int | None:
+    value = section.opt_int(key)
     if value is not None and value < 1:
-        raise section.error("must be at least 1", "approvals")
+        raise section.error("must be at least 1", key)
     return value
 
 
