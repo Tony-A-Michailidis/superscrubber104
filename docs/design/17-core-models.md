@@ -1,375 +1,344 @@
 # 17. Core data models and policy schema
 
-> **Status: ACCEPTED (2026-11-10).** The recommended answer to each of Q1–Q8 (listed at the end) was adopted.
+> **Status: implemented** in `src/airlock/core/` (revision 2, 2026-11-10).
+> Revision 1 was reviewed against the brief and found to need structural changes. [§17.12](#1712-review-resolutions) lists each review item and what was done about it.
+> The bundle format and the verification procedure built on these models are in [18-bundle-and-verification.md](18-bundle-and-verification.md).
 
-This covers task 3 ([§20](14-roadmap.md)): the shared core that every module (pack/verify, patch, eval, controls-as-code, gateway) builds on. Concepts come from [§5](03-core-concepts.md).
+This is the shared core that every module (pack/verify, patch, eval, controls-as-code, gateway) builds on. Concepts come from [§5](03-core-concepts.md).
 
-## 17.1 Implementation choices
+## 17.1 Ground rules
 
-- **Stdlib `dataclasses` (frozen, slotted) plus hand-written validation.** No pydantic. Pydantic would be one more compiled wheel to carry across the airlock and keep pinned, and our schemas are small. Validation errors give the YAML path (`rules[3].disposition: expected one of ...`).
-- **Canonical JSON for everything that is hashed or signed.** UTF-8, sorted keys, no insignificant whitespace, integers only (no floats), NFC-normalised strings. This is the RFC 8785 (JCS) subset that our data needs.
-- **Determinism.** Same inputs give byte-identical `manifest.json`, `sbom.cdx.json` and findings. Timestamps, hostnames and tool run IDs live only in the custody log and the assessment header, never in the manifest (see **Q1**).
-- **Paths.** Bundle-relative, POSIX separators, NFC, no `..`, no absolute paths, no drive letters. Case collisions (`A.txt` vs `a.txt`) are a finding, because the high side may be case-insensitive (Windows staging).
-- **Hashes.** `sha256` is mandatory and the primary identity. Other algorithms (`sha512`, `md5`) are computed only when needed to check an upstream claim (Glance `os_hash_value`, publisher md5), in the same streaming pass.
-- **Schema versioning.** Every serialised document carries `apiVersion: airlock/v1alpha1` and `kind`. We stay on `v1alpha1` until phase 1a is finished.
+- **Stdlib frozen dataclasses with hand-written validation.** No pydantic: it would be one more compiled wheel to carry across the airlock. Validation errors name the document path (`rules[3].disposition: 'maybe' is not one of ...`).
+- **Two layers, kept apart.**
+  - *Integrity* (`Manifest`, `Entry`): paths, sizes, hashes. Independent of tool version, policy and time. Its digest identifies content and nothing else. This is what is signed and re-checked.
+  - *Interpretation* (`Analysis`, `Artifact`, `Unit`, `Component`): what the content is. It depends on the tool version, so the receiving side regenerates it and never trusts the packer's copy.
+- **Checks observe; policy decides.** A check reports a `Result` and a `Severity`. Only the policy engine assigns a `Disposition`. The receiving side therefore reaches its own decision with its own policy.
+- **Canonical JSON** for every document that is hashed or signed: UTF-8, sorted keys, no whitespace, NFC strings, **no floats**. Numbers that are not integers are carried as decimal strings; `canonical.jsonable()` coerces handler metadata (floats, bytes, sets) at the boundary.
+- **Digests are taken over bytes on disk.** Nothing is parsed and re-serialised before being checked, so two tool versions can never disagree about what a signature covers.
+- **Algorithm agility.** Digests are `<algorithm>:<hex>` (`sha256`, `sha384`, `sha512` accepted); key ids are `<algorithm>:<fingerprint>`. sha256 and Ed25519 are the only ones produced today. Confirm both against the destination's approved-algorithm list before publishing.
+- **Version skew.** The receiving side must be able to read only three things written by the other side: the signed statement, the manifest and the transfer request. Those are kept small and strict, and the statement and manifest each have an `extensions` map for forward-compatible additions. The packer's analysis and assessment are hash-checked but never parsed, so they can change freely between versions. A policy may carry an `extensions:` section that this version ignores (but that is still covered by the policy digest).
 
 ## 17.2 Enumerations
 
-```python
-class Severity(StrEnum):        # how bad, if it's a problem; set by the rule
-    CRITICAL, HIGH, MEDIUM, LOW, INFO
+| Enum | Values |
+|---|---|
+| `Severity` | critical, high, medium, low, info |
+| `Result` | pass, fail, not-assessed (could not run), error (check crashed) |
+| `Disposition` | allow < warn < require-approval < block |
+| `Verdict` | passed, needs-approval, blocked |
+| `TrustLevel` | none < asserted < checksum < pinned-checksum < signature |
+| `EntryType` | file, directory, symlink, hardlink, other |
+| `UnitKind` | model-package, runtime-profile, python-environment, node-environment, repo-mirror, container-image, vm-image, patch-set, knowledge-base |
+| `SubjectKind` | artifact, unit, component, bundle, request, policy, host (phase 2), tool-call (phase 3) |
 
-class Result(StrEnum):          # what the check observed
-    PASS          # check ran, condition not present
-    FAIL          # check ran, condition present
-    NOT_ASSESSED  # check could not run (plugin absent, encrypted, over size limit, unsupported)
-    ERROR         # check crashed or got malformed input; treated at least as NOT_ASSESSED
+Artifact kinds are dotted strings (`archive.zip`, `model.safetensors`), not an enum: handlers own their namespace.
 
-class Disposition(StrEnum):     # what policy decides to do about a FAIL / NOT_ASSESSED
-    ALLOW, WARN, REQUIRE_APPROVAL, BLOCK
-```
-
-**Checks observe; policy decides.** A check never says "this is a blocker". It emits `Result` + `Severity`, and the policy engine assigns the `Disposition`. That keeps one rule set across pack, verify, phase 2 and the phase 3 gateway, and lets the high side reach its own decision on the same findings with its own policy.
-
-## 17.3 Artifact
-
-One file, directory entry or archive member.
+## 17.3 Integrity layer
 
 ```python
-@dataclass(frozen=True, slots=True)
-class ArtifactRef:
-    path: str                    # bundle-relative, e.g. "models/qwen/model-00001-of-00004.safetensors"
-    member: tuple[str, ...] = () # path inside nested archives: ("layer.tar", "usr/bin/x")
-    # display form: "images/app.tar!/layer.tar!/usr/bin/x"
+ArtifactRef(path, member=(), unsafe=False)   # "images/app.tar!/layer.tar!/usr/bin/x"
 
-@dataclass(frozen=True, slots=True)
-class Artifact:
-    ref: ArtifactRef
-    entry_type: EntryType        # FILE | DIRECTORY | SYMLINK | HARDLINK | OTHER (device, fifo: always a finding)
-    size: int
-    hashes: Mapping[str, str]    # {"sha256": "...", ...}
-    link_target: str | None      # symlinks are recorded, never followed
-    media_type: str | None       # detected from content, not extension
-    kind: str                    # handler classification, e.g. "model.safetensors", "archive.tar", "unclassified"
-    handler: ToolRef | None      # name + version of the handler that classified it
-    metadata: Mapping[str, JSON] # handler-specific (safetensors header summary, GGUF kv, wheel tags...)
+Entry(path, entry_type, size, hashes, chunks, link_target, carried)
+
+Manifest(entries, chunk_size, base=None, extensions={})
 ```
 
-`kind` is a dotted string, not an enum. Handlers own their namespace, and new types don't need core changes.
+- **`ArtifactRef.unsafe`** marks a reference whose name is hostile or unrepresentable (`../../etc/passwd`, a backslash, undecodable bytes, non-NFC Unicode). The name is stored percent-escaped. Such a reference can be inventoried and can be the subject of a finding, but is never turned into a filesystem path. Without this, the very members an archive check exists to report could not be recorded.
+- **`Entry.chunks`** holds one sha256 per `Manifest.chunk_size` bytes (64 MiB by default) for files larger than one chunk. Verification can then say *where* a large file is damaged; resumable verification and splitting a file across volumes build on the same hashes.
+- **No file modes** in `Entry`: removable media and Windows hosts do not preserve them, so they cannot be verified after transfer. Modes inside archives are covered by the archive's hash and are recorded in the analysis.
+- **Symlinks** are recorded with their target and are never followed or recreated.
+- **Delta bundles**: the manifest always lists the *full* state. Entries marked `carried` are unchanged from the accepted snapshot named by `base`. Completeness is therefore always judged on the whole state, and deletions are implicit. (Packing and resolving deltas is phase 1c; the fields and the base check exist now.)
+- The manifest has no timestamps, host details, tool versions, policy digest or request digest. The same content always gives the same bytes.
 
-## 17.4 Component (SBOM)
-
-Maps directly onto a CycloneDX 1.6 component, so the SBOM writer is a straight transform.
+## 17.4 Interpretation layer
 
 ```python
-@dataclass(frozen=True, slots=True)
-class Component:
-    bom_ref: str                 # deterministic: derived from purl or kind+name+version+first artifact hash
-    type: ComponentType          # CycloneDX: application, library, framework, container, operating-system,
-                                 # device-driver, firmware, file, machine-learning-model, data
-    name: str
-    version: str | None
-    purl: str | None             # pkg:pypi/numpy@2.1.0, pkg:huggingface/org/name@<commit>, pkg:oci/...
-    licenses: tuple[LicenseRef, ...]   # SPDX id/expression, or named custom licence (Llama, Gemma...)
-    supplier: str | None
-    hashes: Mapping[str, str]
-    upstream: UpstreamRef | None # source reference: HF repo+commit, Ollama manifest digest, vendor URL+checksum
-    evidence: tuple[ArtifactRef, ...]  # the artifacts this component was identified from
-    children: tuple[str, ...]    # bom_refs of nested components
-    properties: Mapping[str, str]      # CycloneDX properties (airlock:* namespace)
+Artifact(ref, entry_type, size, kinds, hashes, link_target, mode,
+         media_type, handlers, metadata, verifications)
+
+Verification(type, level: TrustLevel, result, signer, anchor, detail)
+
+Component(bom_ref, type, name, version, purl, licenses, supplier, hashes, upstream,
+          evidence, children, depends_on, verifications, properties)
+
+UnitMember(role, artifact, sha256)
+Requirement(relation, name, kind, digest, version, satisfied_by)
+Unit(kind, name, root: ArtifactRef, members, requires, components, attributes)
+
+Analysis(tool, artifacts, units, components)
 ```
 
-## 17.5 Units
+- **`Artifact.kinds`** is a tuple, most confident first. Every handler whose `detect()` matches runs, so a polyglot (an executable that is also a model file, a wheel that is also a zip) is inspected as each thing it is.
+- **`Verification`** records what was actually checked for the second layer of trust (vendor GPG, Authenticode, publisher checksum, model signature, Glance), which pinned anchor was used, and how strong the result is. `UpstreamRef` on its own is only a claim by the packing side: a repository revision is `asserted`, a digest pinned in the receiver's own policy is `pinned-checksum`, a signature verified against a pinned key is `signature`. Policy sets the minimum level per artifact kind (`trust.minimum`).
+- **`Unit.root`** is an `ArtifactRef`, so a unit can live inside an archive (a model in a container layer).
+- **`Unit.requires`** expresses what a unit needs beyond its own members: an adapter's base model, a knowledge base's embedding model, the runtime a model was tested on, an image a Helm chart references. `satisfied_by` is a unit id in this bundle, `high-side:<reference>` when a receiving-side inventory supplies it, or empty (a completeness finding).
+- **`Unit.digest`** is computed from the kind and the sorted `(role, sha256)` of the members. It is independent of location, so it pins a unit in an allowlist or waiver, links an adapter to its base model, and compares a unit across bundles.
+- **`Component.depends_on`** carries the dependency graph (for closure checks); `evidence` lists every place a component occurs.
 
-A unit is a typed set of artifacts that only works as a whole.
+**How units form:** a handler emits `UnitClaim(kind, root, role, artifact, sha256, facts)` while inspecting an artifact. After the walk, one `UnitAssembler` per kind groups the claims by root, builds the unit and records completeness and consistency findings. A `BundleCheck` then runs with the whole picture for cross-unit requirements.
+
+## 17.5 Findings and assessments
 
 ```python
-@dataclass(frozen=True, slots=True)
-class UnitMember:
-    role: str                    # "weights-shard", "weights-index", "tokenizer", "chat-template", "config", "lockfile", "wheel", ...
-    artifact: ArtifactRef
-
-@dataclass(frozen=True, slots=True)
-class Unit:
-    id: str                      # deterministic: f"{kind}:{root path}"
-    kind: UnitKind               # MODEL_PACKAGE | RUNTIME_PROFILE | PYTHON_ENVIRONMENT | NODE_ENVIRONMENT |
-                                 # REPO_MIRROR | CONTAINER_IMAGE | VM_IMAGE | PATCH_SET | KNOWLEDGE_BASE
-    name: str
-    root: str                    # bundle-relative directory or file that anchors the unit
-    members: tuple[UnitMember, ...]
-    components: tuple[str, ...]  # bom_refs
-    attributes: Mapping[str, JSON]  # kind-specific record; typed accessors per kind (see below)
+Subject(kind, artifact | unit | component | name, locator)
+Finding(id, rule, rule_version, result, severity, subject, title, controls, tool,
+        detail, attributes, not_assessed_reason)
+Decision(finding, disposition, matched, approvals_required, waiver)
+Coverage(rule, rule_version, controls, passed, failed, not_assessed, errors)
+Assessment(tool, stage, started_at, finished_at, policy_digest, manifest_digest,
+           summary, plugins, coverage, findings, decisions)
+Approval(manifest_digest, finding, finding_digest, justification)
 ```
 
-**How units form (two stages):**
-1. While inspecting an artifact, a handler emits `UnitClaim(kind, root, role, artifact, facts)`. For example, the safetensors handler claims "shard 2 of the model package rooted at `models/qwen/`".
-2. After the walk, one **`UnitAssembler` per kind** collects the claims for each root, builds the `Unit`, and runs the **unit-level checks**: completeness and consistency, such as shards against the index or the tokenizer's vocab size against the config.
+- **Rule registry.** Every check is declared as a `RuleSpec` (id, version, title, severity, controls, rationale, remediation, `floor`, tags). A finding can only be created from a registered rule, so no check ships without a control mapping. Built-in rules are in `airlock/catalog.py`.
+- **`RuleSpec.floor`** is a minimum disposition for a FAIL or ERROR. Policy may be stricter but never looser, and waivers do not apply. It is set to `block` for checks whose failure means tampering or a broken trust chain (`integrity.*`, archive path traversal and link escapes, an unknown delta base, a destination mismatch, unrepresentable file names). The remedy for those is to fix the delivery, not to adjust the policy.
+- **Passes are counts, not findings.** `Recorder.passed(rule, n)` increments a counter; only non-passes are individual findings. `Assessment.coverage` has one row for *every* registered rule, so a rule that never ran is visible as such instead of silently absent. A bundle of a million files does not produce a million rows.
+- **`Finding.attributes`** are string facets (`cve`, `kev`, `mcp.server`, `mcp.tool`, `class`) that policy `where` clauses select on.
+- **`Subject.locator`** narrows a subject to a place inside it (line, byte offset, JSON pointer, tool name).
+- **Finding ids** are deterministic: `sha256(rule, subject, discriminator)[:16]`. **`finding_digest()`** covers the whole finding. Approvals bind to the digest, so an approval lapses if what was found changes even though the id is the same.
+- **Timestamps** exist only on the assessment (run start and finish) and on log events, never on individual findings, so findings stay reproducible.
 
-Typed views give type-safe access without fragmenting serialisation, e.g. `ModelPackageView(unit).shards` or `.chat_template_sha256`. In 1a: `MODEL_PACKAGE`, `PYTHON_ENVIRONMENT`, `NODE_ENVIRONMENT` and `CONTAINER_IMAGE`. The other kinds are declared but have no assembler yet.
-
-## 17.6 Finding and assessment
-
-```python
-@dataclass(frozen=True, slots=True)
-class Finding:
-    id: str                      # deterministic: sha256(rule_id, subject, discriminator)[:16]
-    rule: str                    # "model.pickle.dangerous-import"
-    rule_version: str
-    result: Result
-    severity: Severity
-    subject: Subject             # one of: artifact ref | unit id | bundle | request
-    title: str
-    detail: Mapping[str, JSON]   # e.g. {"imports": ["os.system"], "opcode_offset": 1042}
-    controls: tuple[str, ...]    # ["SI-3", "SR-10"]; copied from the rule registry so evidence stands alone
-    tool: ToolRef                # airlock handler, or plugin name+version+db version
-    not_assessed_reason: str | None
-
-@dataclass(frozen=True, slots=True)
-class Decision:                  # policy engine output, one per finding
-    finding: str                 # finding id
-    disposition: Disposition
-    matched: str                 # which policy entry decided it: "rules[4]", "waivers[1]", "defaults.severity.high"
-    approvals_required: int
-    waiver: str | None
-
-@dataclass(frozen=True, slots=True)
-class Assessment:                # one run of pack or verify
-    tool: ToolRef
-    stage: Stage                 # PACK | VERIFY | OFFLINE_CHECK | ...
-    started_at, finished_at: datetime   # UTC; the only timestamps (see Q1)
-    policy_digest: str
-    plugins: tuple[PluginStatus, ...]   # every plugin: present/absent, version, binary sha256, db age
-    findings: tuple[Finding, ...]
-    decisions: tuple[Decision, ...]
-    summary: Summary             # counts by result/disposition, overall verdict
-```
-
-**Rule registry.** Every check is declared in a registry (`id`, `version`, `title`, default `severity`, `controls`, `rationale`, `remediation`). Findings can only be created from a registered rule, so a check can't ship without a control mapping, and the registry renders straight into docs.
-
-Rule IDs are dotted, stable, lowercase: `<domain>.<subject>.<condition>`, e.g. `integrity.hash.mismatch`, `request.artifact.undeclared`, `archive.path-traversal`, `model.remote-code.required`, `model.package.shard-missing`, `offline.telemetry.enabled`.
-
-## 17.7 Transfer request
+## 17.6 Transfer request
 
 ```yaml
 apiVersion: airlock/v1alpha1
 kind: TransferRequest
-metadata:
-  id: TR-2026-0042
-  title: Initial delivery of local RAG assistant
+metadata: { id: TR-2026-0001, title: Initial delivery of example RAG assistant }
 spec:
-  purpose: Deploy local RAG assistant v1.0 to disconnected enclave
-  owner: { name: Jane Example, contact: jane@example.org }
+  purpose: Deploy example RAG assistant v1.0 to a disconnected enclave
+  owner: { name: Example Owner, contact: owner@example.org }
   source: dev-unclass
   destination: enclave-b
-  direction: low-to-high              # only value accepted in phase 1
-  approvers:
-    - { name: A. Reviewer, role: security, key_id: "ed25519:4f2c…" }
-  allowUndeclared: false              # undeclared artifact => finding request.artifact.undeclared
+  direction: low-to-high          # the only direction accepted for bundles in phase 1
+  stream: rag-assistant           # ordering scope for recurring transfers (default: "default")
+  profile: routine                # routine | emergency (emergency handling is phase 1c)
+  approvers:                      # who is expected to sign; informational
+    - { name: Example Reviewer, role: security }
+  allowUndeclared: false
   contents:
-    - name: qwen-7b-instruct
+    - name: chat-model
       unit: model-package
-      paths: ["models/qwen2.5-7b-instruct/**"]
-      upstream: { huggingface: Qwen/Qwen2.5-7B-Instruct, revision: a09a3545... }
+      paths: ["models/tiny-chat/**"]
+      upstream: { type: huggingface, reference: example-org/tiny-chat, revision: 0123… }
     - name: app
       paths: ["app/**"]
-    - name: wheelhouse
-      unit: python-environment
-      paths: ["wheels/**", "app/requirements.lock"]
 ```
 
-Verify reports `request.content.missing` (declared but absent, or the declared unit kind was not formed) and `request.artifact.undeclared`.
+- The request is written on the packing side, so the receiving side treats it as a claim. Whether an approver's signature counts is decided only by keys pinned in the receiving side's policy.
+- A path may be declared by several content entries (`entries_for` returns all of them).
+- `request.artifact.undeclared` and `request.content.missing` report the two directions of mismatch. Checking that a declared `unit` actually formed arrives with the unit assemblers (task 5).
 
-## 17.8 Bundle layout and signing
+## 17.7 Policy
 
-```
-bundle/
-  airlock-bundle.json      # {apiVersion, kind: Bundle, manifestDigest, layout version}
-  manifest.json            # deterministic: artifacts, units, request digest, policy digest
-  sbom.cdx.json            # CycloneDX 1.6 incl. ML-BOM
-  assessment.pack.json     # low-side findings + decisions (informational on the high side)
-  request.yaml             # verbatim copy of the transfer request
-  manifest.dsse.json       # DSSE envelope, ed25519 signature
-  custody.jsonl            # hash-chained, individually signed events
-  payload/                 # artifacts stored as-is at their bundle paths
-```
-
-- **Signature format: DSSE** (the in-toto envelope). The payload is an in-toto Statement whose subjects are the digests of `manifest.json`, `sbom.cdx.json`, `assessment.pack.json` and `request.yaml`. DSSE is small enough to implement natively (PAE + ed25519), it's a standard, and it lines up with the later cosign/Sigstore work.
-- **Keys:** ed25519, PKCS#8 / SubjectPublicKeyInfo PEM via `cryptography`. `key_id = "ed25519:" + sha256(raw public key)[:16]`.
-- **Payload stored as-is** in 1a, so reviewers can inspect it with ordinary tools. Multi-volume packing (1b) adds a `volumes/` layer without changing the manifest.
-- **Custody log** (separate from the manifest; see **Q4**): JSON Lines, where each event is `{seq, prev, event, manifestDigest, actor key_id, at, data, sig}`. Events: `packed`, `reviewed`, `approved` (finding IDs + justification), `media-written` (media ID, per-volume hashes), `verified`, `staged`, `receipt`. Appending an approval doesn't touch the signed manifest.
-- **Receipt:** a signed `Receipt` document recording the manifest digest, the verify assessment digest, the high-side policy digest, the verifier key ID and time. It contains hashes only, so it is safe to send back outbound if policy allows.
-
-**Exit codes:** `0` no blockers · `1` blocking findings or unapproved `REQUIRE_APPROVAL` · `2` usage or config error · `3` integrity failure (bad signature, hash mismatch, broken custody chain). Integrity failure is kept separate from policy failure because it means tampering, not judgement.
-
-## 17.9 Interfaces
-
-```python
-class ArtifactView(Protocol):    # what a handler is allowed to see; no filesystem access beyond this
-    ref: ArtifactRef; size: int; hashes: Mapping[str, str]
-    def head(self, n: int = 65536) -> bytes: ...
-    def open(self) -> BinaryIO: ...            # read-only stream
-    def sibling(self, name: str) -> ArtifactView | None: ...  # e.g. find model.safetensors.index.json
-
-class Handler(Protocol):
-    name: str; version: str
-    kinds: frozenset[str]                       # kinds this handler can produce
-    def detect(self, a: ArtifactView) -> Detection | None: ...   # cheap: magic bytes + name; returns kind + confidence
-    def inspect(self, a: ArtifactView, ctx: Context) -> Inspection: ...
-        # one streaming pass -> metadata, components, unit claims, findings
-
-class UnitAssembler(Protocol):
-    kind: UnitKind
-    def assemble(self, claims: Sequence[UnitClaim], ctx: Context) -> Iterable[tuple[Unit, list[Finding]]]: ...
-
-class Plugin(Protocol):          # wrapper around an external scanner/tool
-    name: str
-    def status(self, ctx: Context) -> PluginStatus: ...  # present? version, binary sha256, db version/age
-    # concrete capability protocols: MalwareScanner, SastScanner, SecretScanner, SbomGenerator, ImageInspector
-
-class Stager(Protocol):
-    name: str
-    def accepts(self, unit_or_artifact) -> bool: ...
-    def stage(self, bundle: VerifiedBundle, target: Mapping[str, JSON]) -> StageResult: ...
-```
-
-`Context` carries the policy, limits, the rule registry, a finding factory (so findings always come from registered rules), and plugin lookup.
-
-**Dispatch:** every handler's `detect()` runs, and the highest-confidence match wins. Ties go to the more specific kind, then to registration order. The generic handler always runs as well (hash, secrets, malware plugin), so "unclassified" is just "generic only". **Q2** covers the deviation from the five-method handler interface in the brief.
-
-**Plugins and "trust nothing that crosses":** the policy can pin plugin binaries by sha256. If a binary is present but doesn't match the pin, that is a `BLOCK`-able finding (`plugin.binary.unpinned`) and the plugin is not run. Its checks are then reported as `NOT_ASSESSED`.
-
-## 17.10 Policy YAML schema
-
-The policy is a single document. Low and high side each have their own, and verify always uses the high side's.
+One document per side. Verify always uses the receiving side's own. A working example is [examples/policy.yaml](../../examples/policy.yaml).
 
 ```yaml
 apiVersion: airlock/v1alpha1
 kind: Policy
-metadata:
-  name: enclave-b-import
-  version: "2026.11.1"            # recorded in every assessment (with the file digest)
+metadata: { name: enclave-b-import, version: "2026.11.1" }
+
+identity:                         # who owns this policy; bundles addressed elsewhere are refused
+  enclave: enclave-b
+  acceptSources: [dev-unclass]
+transfer:
+  maxBundleAge: 30d               # older bundles are possible replays
+
+trust:
+  signers:                        # keys for bundle signatures, approvals and receipts
+    - keyId: "ed25519:<64 hex>"   # full fingerprint; must match the key file
+      publicKey: keys/lowside-pack.pub
+      sha256: "…"                 # every referenced file is pinned
+      holder: build-pipeline      # quorums count distinct holders, not keys
+      roles: [pack]               # pack | approve | receipt
+      sources: [dev-unclass]      # networks this key may pack for (empty: any)
+      validFrom: 2026-01-01
+      validUntil: 2027-12-31
+      revoked: false
+  upstream:                       # vendor and publisher keys
+    - name: almalinux-9
+      type: gpg                   # gpg | x509 | sigstore | checksum-list
+      file: keys/RPM-GPG-KEY-AlmaLinux-9
+      sha256: "…"
+      scope: [package.rpm, repo.dnf]
+      fingerprints: ["…"]         # acceptable (sub)keys inside the file
+      validUntil: 2030-01-01
+  minimum:                        # weakest acceptable upstream trust level per artifact kind
+    "package.rpm": signature
+    "model.*": pinned-checksum
 
 defaults:
-  severity:                       # FAIL result -> disposition, unless a rule/waiver says otherwise
-    critical: block
-    high: block
-    medium: require-approval
-    low: warn
-    info: allow
-  notAssessed: warn               # check couldn't run; per-rule override available
+  severity: { critical: block, high: block, medium: require-approval, low: warn, info: allow }
+  notAssessed: warn
   error: require-approval
-  approvals: 1                    # signatures needed to clear a require-approval
+  approvals: 1
 
-rules:                            # first match wins (firewall semantics, see Q3)
+rules:                            # first match wins
   - rule: "model.pickle.*"
     disposition: block
   - rule: "model.remote-code.required"
     disposition: require-approval
     approvals: 2
   - rule: "offline.*"
-    paths: ["dev-tools/**"]       # optional scope: artifact/unit root globs
+    paths: ["dev-tools/**"]       # optional scope: artifact path or unit root globs
     disposition: warn
+  - rule: "vuln.component.known"
+    where: { kev: "true" }        # optional: globs over finding attributes
+    disposition: block
   - rule: "malware.*"
-    notAssessed: block            # e.g. ClamAV must actually run on import
+    notAssessed: block            # the scanner must actually have run
 
-waivers:                          # standing exceptions, pinned to exact content
+waivers:                          # standing, expiring exceptions
   - id: W-2026-007
-    rule: "container.user.root"
-    subject: "images/legacy-ingest.tar"
-    sha256: "9f86d08…"            # waiver lapses automatically if content changes
+    rule: container.user.root     # exactly one rule id; no globs
+    subject: images/legacy-ingest.tar
+    sha256: "9f86d08…"            # lapses automatically if the content changes
+    where: { }                    # optional, e.g. { cve: CVE-2026-0001 }
     justification: Vendor image; runs in an isolated namespace
-    approvedBy: "ed25519:4f2c…"
-    expires: 2027-03-31           # expired waiver => finding policy.waiver.expired
-
-trust:
-  signers:                        # keys accepted for bundle signatures and custody events
-    - keyId: "ed25519:4f2c…"
-      publicKey: keys/lowside-pack.pub
-      sha256: "…"                 # every referenced key file is pinned
-      roles: [pack]
-    - keyId: "ed25519:a91b…"
-      publicKey: keys/security-officer.pub
-      sha256: "…"
-      roles: [approve, receipt]
-  upstream:                       # vendor/publisher keys (phase 1a: recorded; verification grows per handler)
-    - name: almalinux-9
-      type: gpg                   # gpg | x509 | sigstore | checksum-list
-      file: keys/RPM-GPG-KEY-AlmaLinux-9
-      sha256: "…"
-      scope: ["rpm", "repomd"]
+    approvedBy: "ed25519:…"
+    expires: 2027-03-31           # required
 
 licences:
-  allow: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, PSF-2.0]
-  requireApproval: [LicenseRef-llama3.1, LicenseRef-gemma, MPL-2.0, LGPL-*]
-  deny: [AGPL-3.0-*, SSPL-1.0]
+  allow: [Apache-2.0, MIT, BSD-3-Clause]
+  requireApproval: [LicenseRef-*, MPL-2.0, LGPL-*]
+  deny: [AGPL-*, SSPL-1.0]
   unknown: require-approval
 
-allowlists:                       # anti-slopsquatting / approved sources; mode: enforce | report
-  python: { mode: enforce, file: allow/python.txt, sha256: "…" }   # name==ver or name specifiers
-  npm:    { mode: report,  entries: ["react@^18", "zod"] }
-  models:
-    mode: enforce
-    entries:
-      - { id: "huggingface:Qwen/Qwen2.5-7B-Instruct", revision: "a09a3545…" }
-  mcpServers: { mode: enforce, entries: [] }
+allowlists:
+  python: { mode: enforce, file: allow/python.txt, sha256: "…" }
+  models: { mode: enforce, entries: [{ id: "huggingface:example-org/tiny-chat", sha256: "…" }] }
 
 limits:
-  archive:
-    maxDepth: 4
-    maxMembers: 200000
-    maxRatio: 200                 # expansion ratio (zip-bomb)
-    maxExpandedBytes: 500GiB
+  archive: { maxDepth: 4, maxMembers: 200000, maxRatio: 200, ratioMinBytes: 16MiB, maxExpandedBytes: 500GiB }
   maxArtifactBytes: 1TiB
   maxPathLength: 1024
 
-plugins:                          # optional scanners; pinned like any crossing artifact
+plugins:
   clamav:
-    required: false               # true => absence is a finding with notAssessed disposition
+    required: false               # true: absence is a failing plugin.required.missing
     binarySha256: "…"
+    files: { "main.cvd": "…" }    # other pinned files (libraries, rule packs, databases)
+    minVersion: "1.4"
     maxDbAge: 7d
-  gitleaks: { required: false }
 
-freshness:                        # 1c; parsed now so the schema is stable
+freshness:
   feeds: { default: 7d, kev: 2d }
 
 controls:
-  framework: nist-800-53r5        # built-in catalogue; ITSG-33 aligns
+  framework: nist-800-53r5
+  catalog: { file: controls/site-profile.yaml, sha256: "…" }   # optional custom catalogue
   overrides:                      # first matching glob replaces the rule's own control IDs
-    "offline.*": ["SC-7", "AC-4", "CM-6"]
+    "offline.*": [SC-7, AC-4, CM-6]
+
+extensions: { }                   # ignored by this version; still covered by the digest
 ```
 
-**Evaluation order for each finding:** a `PASS` is always `ALLOW`. Otherwise, apply the first matching unexpired **waiver** whose sha256 (if it sets one) still matches. If there is none, apply the first **rule** that matches *and* sets an outcome for this result (`disposition` for `FAIL`, `notAssessed`, `error`), so a rule that only sets `notAssessed` never swallows a `FAIL`. If no rule applies, use **defaults**: `severity` for a `FAIL`, `notAssessed`/`error` otherwise. The decision records which entry matched (`rules[3]`), so every outcome can be traced back to one policy line.
+**Evaluation order for one finding**
 
-**Policy hygiene:** referenced files (`keys/…`, `allow/…`) resolve relative to the policy file and **must** be pinned by sha256. The policy digest covers the policy file and every file it references. Unknown keys are an error, not ignored, because a typo like `dispositon: block` must not silently weaken a policy. Duplicate keys are also an error (plain YAML loaders keep the last one silently). Hashes must be quoted, because YAML reads an all-digit hash as an integer. Every waiver must have an `expires` date.
+1. A `pass` is always `allow`.
+2. If the rule has no floor: the first unexpired **waiver** that names this rule, matches the subject, matches `where`, and (if it sets `sha256`) matches the content.
+3. The first **rule** that matches (rule glob, `paths`, `where`) *and* sets an outcome for this result. A rule that only sets `notAssessed` never swallows a FAIL.
+4. Otherwise the **defaults**: by severity for a FAIL, `notAssessed` or `error` otherwise.
+5. If the rule has a **floor** and the result is FAIL or ERROR, the outcome is raised to at least the floor.
 
-I'll also generate JSON Schema for the policy and the transfer request, so editors can validate them while they're being written.
+The decision records which entry decided it (`rules[3]`, `waivers[0]`, `defaults.severity.high`, `floor(rules[6])`), so every outcome traces to one policy line.
 
-## 17.11 Module placement
+**Approvals and blockers.** A signed per-bundle approval clears a `require-approval` finding. A `block` is final for that bundle: the only way through is a policy waiver, which is pinned to content, expires, and changes the policy digest (which the ledger records). A site that wants blockers of some class to be overridable per bundle sets that rule to `require-approval` with `approvals: 2`. This is stricter than the brief's wording ("justifications for overridden blockers") and is deliberate: an override that leaves no trace in policy is the thing an assessor will ask about.
+
+**Policy hygiene**
+
+- Unknown keys are errors (a typo such as `dispositon: block` must not silently weaken a policy). So are duplicate keys, which plain YAML loaders resolve silently.
+- Referenced files resolve relative to the policy file and must be pinned by sha256. The policy digest covers the policy bytes and every pinned file, so swapping a key file changes it.
+- A signer's `keyId` must match its key file.
+- Hashes must be quoted (YAML reads an all-digit hash as a number).
+- A waiver names exactly one rule, must expire, and needs an exact subject unless `sha256` pins it to content.
+- Licence expressions are evaluated: `A OR B` takes the more permissive side, `A AND B` the more restrictive, `WITH <exception>` does not change the base licence. Anything unparseable is `unknown`.
+- Controls may be enhancements of a listed control (`SI-7(1)`).
+
+**Not yet in the schema** (added with the module that needs them; `extensions:` carries them meanwhile): `targets:` and `compatibility:` for runtime profiles (1b), `profiles:` overlays for emergency transfers (1c), `mcp:` server and tool rules shared with phases 2 and 3 (task 6), `eval:` tolerances (1d), and an optional detached signature over the policy itself.
+
+## 17.8 Keys and signatures
+
+- Ed25519, PKCS#8 and SubjectPublicKeyInfo PEM via `cryptography`. Private keys can be passphrase-encrypted. `Signer` is a protocol (`key_id`, `sign`), so a hardware token can replace a key file later.
+- Key id: `ed25519:<sha256 of the raw public key>`, never truncated.
+- Envelopes are **DSSE**. The bundle statement is an in-toto Statement; receipts are DSSE over the receipt document.
+- **One root of trust:** the receiving side's policy (`trust.signers`). `airlock verify --pubkey` is accepted only when the policy pins no pack signer, and is reported as `trust.signer.unpinned`.
+- A pinned key is relied on only if it has the right role, is within its validity window, is not revoked, and (for packing) is allowed to sign for the bundle's source.
+- **Rotation** is done by editing `trust` (add the new key, set `validUntil` or `revoked` on the old). That changes the policy digest, and the next import records `policy.digest.changed` in the ledger with both digests.
+
+## 17.9 Chained logs
+
+`core/chainlog.py` is one append-only, hash-chained, per-event signed JSON Lines format: `{seq, prev, type, at, actor, data, sig}`. It serves the custody log that travels with a bundle, the receiving side's ledger, and (phase 3) the gateway audit log.
+
+Edits and reordering are detectable. **Truncation of the tail is not**, so nothing may rely on the absence of a later event. Approvals are safe under that rule (removing one only makes the bundle fail); a "rejected" event would not be, which is why there is none.
+
+## 17.10 Interfaces
+
+```python
+ArtifactView:   ref, size, sha256; head(n), open(), resolve(relative)
+Handler:        name, version, kinds; detect(view) -> Detection | None; inspect(view, ctx) -> Inspection
+UnitAssembler:  kind; assemble(claims, lookup, ctx) -> units
+BundleCheck:    name; check(manifest, analysis, lookup, ctx)
+Plugin:         name; status(ctx) -> PluginStatus
+Stager:         name; accepts(unit | artifact); stage(bundle, item, target) -> StageResult
+Context:        policy, recorder, now, plugins
+```
+
+- Handlers see content only through `ArtifactView`: read-only bytes, no filesystem paths. `resolve()` reaches other files of the same delivery by relative path (`tokenizer.json`, `onnx/model.onnx_data`) and can never leave it.
+- `detect()` is cheap (name and first bytes). `inspect()` makes one streaming pass and returns kind, metadata, components, unit claims and findings. This replaces the brief's five-method interface so that a multi-hundred-GB shard is read once.
+- A handler that raises is reported as `inventory.handler.error`; the artifact is still recorded.
+- Assemblers and bundle checks get a `Lookup` so they can read any artifact.
+
+## 17.11 Module map
 
 ```
 src/airlock/core/
-  model.py        # Artifact, Component, Unit, Finding, Decision, Assessment, Manifest, Receipt, enums
-  request.py      # TransferRequest: loader, validator, path -> content entry matching
-  policy.py       # Policy: loader, validator, pinned-file checks, evaluator, licence decisions
-  rules.py        # RuleSpec, RuleRegistry, FindingFactory
-  controls.py     # control catalogue and rule-to-control mapping (data/nist-800-53r5.yaml)
-  canonical.py    # canonical JSON and digests
-  serde.py        # strict dataclass <-> JSON conversion (camelCase on the wire)
-  paths.py        # bundle path rules and glob matching
-  yamlio.py       # strict YAML loading (duplicate keys, unknown keys, sizes, durations)
-  interfaces.py   # ArtifactView, Handler, UnitAssembler, Plugin, Stager, Context
+  model.py        enums and every data model above
+  policy.py       policy loader, validator, evaluator; licence decisions
+  request.py      transfer request loader
+  rules.py        RuleSpec, RuleRegistry, FindingFactory, Recorder
+  controls.py     control catalogue and mapping (data/nist-800-53r5.yaml)
+  signing.py      Ed25519 keys, DSSE
+  chainlog.py     hash-chained signed log
+  canonical.py    canonical JSON, digests, jsonable()
+  serde.py        strict dataclass <-> JSON (camelCase on the wire)
+  paths.py        bundle path rules, hostile-name handling, globs
+  yamlio.py       strict YAML (duplicate keys, unknown keys, sizes, durations)
+  interfaces.py   protocols
   errors.py
 ```
 
-Signing (DSSE), the custody log and the receipt signing flow arrive with keygen/pack/verify in task 4. `Unit.id` is computed from `kind` and `root` and is not stored separately.
+## 17.12 Review resolutions
 
-## Decisions (Q1–Q8, recommendations adopted)
+Status: **done** (implemented and tested), **shaped** (the model or schema has the field; the behaviour arrives with the named task), **deferred** (documented, not built).
 
-- **Q1 Timestamps.** The brief puts a timestamp on every finding, but that breaks "same inputs, same output". I propose keeping timestamps only on the `Assessment` (run start/finish) and on custody events, since findings belong to exactly one assessment. Is that acceptable for the evidence you'd hand an assessor?
-- **Q2 Handler interface.** The brief lists `detect/inventory/components/units/checks`. I propose `detect()` plus a single `inspect()` that returns all four results, because a multi-hundred-GB shard should be read once, not four times. Accept?
-- **Q3 Rule matching.** First match wins (firewall-style, easy to audit) versus most specific match wins (more forgiving of ordering). I recommend first match. Agree?
-- **Q4 Approvals and custody** (open decision in [§21](16-open-decisions.md)). I recommend a separate hash-chained, per-event signed `custody.jsonl` that references the manifest digest, so the manifest is signed once and never re-signed. Standing exceptions go in the policy `waivers`; per-bundle approvals go in custody events. Agree?
-- **Q5 Envelope format.** DSSE + in-toto Statement (standard, cosign-aligned) versus a simpler bespoke `{payload, sig}`. I recommend DSSE.
-- **Q6 Two-person sign-off.** Model it generally (`approvals: N`, distinct key IDs with the `approve` role) rather than as a special emergency profile. Agree?
-- **Q7 Schema naming.** Kubernetes-style `apiVersion`/`kind`/`metadata`/`spec` for the request, and a flatter shape for the policy. Is that consistent enough, or should the policy also use `spec`?
-- **Q8 Case-insensitive collisions.** Treat as `HIGH` by default (Windows/WSUS staging targets), downgradable by policy?
+| # | Review item | Status | What was done |
+|---|---|---|---|
+| 1 | Manifest mixed integrity with interpretation | done | `Manifest`/`Entry` vs `Analysis`/`Artifact`; policy and request digests moved to the signed statement |
+| 2 | No receiving-side state | done | Ledger of receipts (`airlock/ledger.py`), `verify --state`; signed `Inventory` document is 1c |
+| 3 | Signed statement could be replayed | done | `Provenance` (bundle id, time, source, destination, stream); policy `identity` and `transfer.maxBundleAge`; replay, ordering and clock checks |
+| 4 | Units had no relationships, digest or archive roots | done (model) | `Requirement`, `Unit.digest`, `Unit.root: ArtifactRef`; assemblers use them from task 5 |
+| 5 | Hostile names could not be recorded | done | `ArtifactRef.unsafe`, `escape_name`, `check_member_name` |
+| 6 | Floats banned with no convention | done | Decimal strings; `jsonable()` at the handler boundary |
+| 7 | No chunk hashes or volume index | done / shaped | Chunk hashes done and verified; volume index and resumable verify are 1b |
+| 8 | Deltas | shaped | `Manifest.base`, `Entry.carried`, `delta.base.unknown`; packing and resolving deltas is 1c |
+| 9 | Scale | done / deferred | Passes are counts; nested members live in the analysis, not the manifest. Streaming JSON Lines for very large analyses is deferred |
+| 10 | Version skew | done | Receiver parses only statement, manifest and request; `extensions` maps; packer analysis never parsed |
+| 11 | Integrity checks could be waived | done | `RuleSpec.floor`; waivers restricted to one rule and an exact or content-pinned subject |
+| 12 | No record of upstream verification | done (model) | `Verification`, `TrustLevel`, `trust.minimum`; handlers fill it from task 5 |
+| 13 | Pinned keys too thin | done | Validity, revocation, holder, sources, fingerprints; full key ids; rotation logged via `policy.digest.changed` |
+| 14 | Policy unsigned; two trust roots | done / deferred | Policy is the single root, `--pubkey` only when nothing is pinned. A signature over the policy is deferred |
+| 15 | Approvals had no model | shaped | `Approval`, `finding_digest`, `summarize(approved=…)`; blockers are final (§17.7). `airlock approve` and quorum counting arrive with reports (task 8) |
+| 16 | Scanner pinning incomplete | shaped | `files`, `minVersion`, `plugin.required.missing`; enforced with the plugins (task 7) |
+| 17 | Time | done | `Context.now` is a datetime; `replay.clock.regression` |
+| 18 | Algorithm agility | done | Digest and key-id grammars accept other algorithms |
+| 19 | Runtime profile inputs | deferred to 1b | `Requirement` can already express "supplied by the high side" |
+| 20 | Patch documents and profiles | shaped / 1c | `profile` and `stream` on the request and statement |
+| 21 | Transfer request gaps | done | `entries_for` returns all matches; typed `upstream`; `stream`, `profile` |
+| 22 | Receipt gaps | done | Bundle id, enclave, source, stream, request id, evidence digests; only the receipt crosses back |
+| 23 | Components | done (model) | `SubjectKind.COMPONENT`, `depends_on`, licence expressions |
+| 24 | Handler interface | done | Multiple kinds, `resolve()`, `Lookup`, `BundleCheck`, stagers take units or artifacts |
+| 25 | Mode bits | done | Recorded for archive members (`archive.member.setuid`); deliberately not for payload entries |
+| 26 | Policy could only select on rule ids and paths | done / shaped | `where` on rules and waivers; the `mcp:` section comes with the MCP handlers (task 6) |
+| 27 | Subjects were bundle-centric | done | `locator`; component, policy, host and tool-call subjects |
+| 28 | Audit log | done | Generic `chainlog` |
+| 29 | Controls | done | Enhancements; pinned custom catalogue |

@@ -1,12 +1,12 @@
 """Policy: loading, validation and evaluation.
 
-One YAML document per side of the gap. Verify always evaluates with the high side's own policy.
-Every file the policy references is pinned by sha256 and covered by the policy digest.
+One YAML document per side of the gap. Verify always evaluates with the receiving side's own
+policy. Every file the policy references is pinned by sha256 and covered by the policy digest.
 """
 
 import hashlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from enum import StrEnum
@@ -14,13 +14,24 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from airlock.core.canonical import JSON, digest, sha256_digest
-from airlock.core.controls import DEFAULT_FRAMEWORK, ControlOverride
-from airlock.core.model import API_VERSION, Decision, Disposition, Finding, Result, Severity
-from airlock.core.paths import path_matches
+from airlock.core.controls import DEFAULT_FRAMEWORK, ControlCatalog, ControlOverride
+from airlock.core.model import (
+    API_VERSION,
+    Decision,
+    Disposition,
+    Finding,
+    Result,
+    Severity,
+    TrustLevel,
+)
+from airlock.core.paths import has_glob, path_matches
+from airlock.core.rules import RuleRegistry
+from airlock.core.signing import SigningError, VerifyKey, load_verify_key
 from airlock.core.yamlio import Reader, load_yaml_file
 
-KEY_ID = re.compile(r"^ed25519:[0-9a-f]{16}$")
+KEY_ID = re.compile(r"^[a-z0-9]+:[0-9a-f]{64}$")
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+_RULE_ID = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 _HASH_CHUNK = 1 << 20
 
 
@@ -50,10 +61,43 @@ class PinnedFile:
 
 
 @dataclass(frozen=True, slots=True)
+class Validity:
+    """When a key may be relied on. Rotation is done by editing these, which changes the policy
+    digest; the receiving side's ledger records every digest change."""
+
+    valid_from: date | None = None
+    valid_until: date | None = None
+    revoked: bool = False
+
+    def problem(self, today: date) -> str | None:
+        if self.revoked:
+            return "key is revoked"
+        if self.valid_from and today < self.valid_from:
+            return f"key is not valid before {self.valid_from}"
+        if self.valid_until and today > self.valid_until:
+            return f"key expired on {self.valid_until}"
+        return None
+
+
+@dataclass(frozen=True, slots=True)
 class Signer:
     key_id: str
     public_key: PinnedFile
     roles: frozenset[KeyRole]
+    holder: str  # the person or system holding the key; quorums count distinct holders
+    sources: tuple[str, ...] = ()  # networks this key may pack for; empty means any
+    validity: Validity = field(default_factory=Validity)
+
+    def problem(self, role: KeyRole, today: date, source: str | None = None) -> str | None:
+        """Why this key must not be relied on for ``role`` right now, or None if it may be."""
+        if role not in self.roles:
+            return f"key does not have the {role.value!r} role"
+        if self.sources and source not in self.sources:
+            return f"key may not sign for source {source!r}"
+        return self.validity.problem(today)
+
+    def load(self) -> VerifyKey:
+        return load_verify_key(self.public_key.path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +105,17 @@ class UpstreamKey:
     name: str
     type: UpstreamKeyType
     file: PinnedFile
-    scope: tuple[str, ...]
+    scope: tuple[str, ...]  # what it may vouch for: artifact kinds, repo ids, publishers
+    fingerprints: tuple[str, ...] = ()  # acceptable (sub)key fingerprints inside the file
+    validity: Validity = field(default_factory=Validity)
+
+
+@dataclass(frozen=True, slots=True)
+class Identity:
+    """Who this policy's owner is. Bundles addressed elsewhere are refused."""
+
+    enclave: str
+    accept_sources: tuple[str, ...] = ()  # empty means any source
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,10 +140,18 @@ DEFAULTS = Defaults(
 )
 
 
+def _where_matches(where: Mapping[str, str], finding: Finding) -> bool:
+    return all(
+        key in finding.attributes and fnmatchcase(finding.attributes[key], pattern)
+        for key, pattern in where.items()
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RuleOverride:
     rule: str  # rule id glob
     paths: tuple[str, ...] = ()  # optional scope; empty means everywhere
+    where: Mapping[str, str] = field(default_factory=dict)  # finding attribute globs
     disposition: Disposition | None = None  # for FAIL
     not_assessed: Disposition | None = None
     error: Disposition | None = None
@@ -104,16 +166,39 @@ class RuleOverride:
             return self.error
         return None
 
+    def matches(self, finding: Finding) -> bool:
+        if not fnmatchcase(finding.rule, self.rule) or not _where_matches(self.where, finding):
+            return False
+        if not self.paths:
+            return True
+        path = finding.subject.path
+        return path is not None and any(path_matches(p, path) for p in self.paths)
+
 
 @dataclass(frozen=True, slots=True)
 class Waiver:
+    """A standing, expiring exception for one rule on one subject."""
+
     id: str
-    rule: str  # rule id glob
-    subject: str  # glob over the finding subject's display form
+    rule: str  # exact rule id; waivers never use globs here
+    subject: str  # the finding subject's display form; a glob only if ``sha256`` pins content
     justification: str
     approved_by: str  # key id
     expires: date
     sha256: str | None = None  # pins the waiver to exact content
+    where: Mapping[str, str] = field(default_factory=dict)
+
+    def applies(self, finding: Finding, today: date, content_sha256: str | None) -> bool:
+        return (
+            self.expires >= today
+            and finding.rule == self.rule
+            and path_matches(self.subject, finding.subject.display)
+            and (self.sha256 is None or self.sha256 == content_sha256)
+            and _where_matches(self.where, finding)
+        )
+
+
+_LICENCE_TOKEN = re.compile(r"\(|\)|[^\s()]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,10 +208,49 @@ class LicencePolicy:
     deny: tuple[str, ...] = ()
     unknown: Disposition = Disposition.REQUIRE_APPROVAL
 
-    def decide(self, licence_id: str | None) -> Disposition:
-        """Deny wins over approval, approval over allow; anything unlisted is ``unknown``."""
-        if not licence_id:
+    def decide(self, expression: str | None) -> Disposition:
+        """Decide an SPDX id or expression.
+
+        ``A OR B`` takes the more permissive side (the licensee may choose); ``A AND B`` the more
+        restrictive. For a single id, deny wins over approval and approval over allow.
+        """
+        if not expression:
             return self.unknown
+        tokens = _LICENCE_TOKEN.findall(expression)
+        try:
+            outcome, rest = self._either(tokens)
+        except (IndexError, ValueError):
+            return self.unknown
+        return self.unknown if rest else outcome
+
+    def _either(self, tokens: list[str]) -> tuple[Disposition, list[str]]:
+        outcome, tokens = self._both(tokens)
+        while tokens and tokens[0].upper() == "OR":
+            other, tokens = self._both(tokens[1:])
+            outcome = min(outcome, other, key=lambda d: d.rank)
+        return outcome, tokens
+
+    def _both(self, tokens: list[str]) -> tuple[Disposition, list[str]]:
+        outcome, tokens = self._single(tokens)
+        while tokens and tokens[0].upper() == "AND":
+            other, tokens = self._single(tokens[1:])
+            outcome = max(outcome, other, key=lambda d: d.rank)
+        return outcome, tokens
+
+    def _single(self, tokens: list[str]) -> tuple[Disposition, list[str]]:
+        head, tokens = tokens[0], tokens[1:]
+        if head == "(":
+            outcome, tokens = self._either(tokens)
+            if tokens[0] != ")":
+                raise ValueError("unbalanced parentheses")
+            return outcome, tokens[1:]
+        if head == ")" or head.upper() in ("AND", "OR", "WITH"):
+            raise ValueError(f"unexpected {head!r}")
+        if tokens and tokens[0].upper() == "WITH":  # an exception does not change the base terms
+            tokens = tokens[2:]
+        return self._id(head), tokens
+
+    def _id(self, licence_id: str) -> Disposition:
         for patterns, outcome in (
             (self.deny, Disposition.BLOCK),
             (self.require_approval, Disposition.REQUIRE_APPROVAL),
@@ -148,7 +272,8 @@ class Allowlist:
 class ArchiveLimits:
     max_depth: int = 4
     max_members: int = 200_000
-    max_ratio: int = 200
+    max_ratio: int = 200  # expanded bytes per byte of the outermost archive
+    ratio_min_bytes: int = 16 * 2**20  # the ratio is only judged once this much has expanded
     max_expanded_bytes: int = 500 * 2**30
 
 
@@ -161,8 +286,10 @@ class Limits:
 
 @dataclass(frozen=True, slots=True)
 class PluginPolicy:
-    required: bool = False
+    required: bool = False  # true: a missing plugin is a failing ``plugin.required.missing``
     binary_sha256: str | None = None
+    files: Mapping[str, str] = field(default_factory=dict)  # other pinned files: name -> sha256
+    min_version: str | None = None
     max_db_age: timedelta | None = None
 
 
@@ -171,18 +298,36 @@ class Policy:
     name: str
     version: str
     digest: str  # covers the policy bytes and every pinned file
+    identity: Identity | None = None
+    max_bundle_age: timedelta | None = None
     defaults: Defaults = DEFAULTS
     rules: tuple[RuleOverride, ...] = ()
     waivers: tuple[Waiver, ...] = ()
     signers: tuple[Signer, ...] = ()
     upstream: tuple[UpstreamKey, ...] = ()
+    minimum_trust: tuple[tuple[str, TrustLevel], ...] = ()  # (artifact kind glob, level)
     licences: LicencePolicy = field(default_factory=LicencePolicy)
     allowlists: Mapping[str, Allowlist] = field(default_factory=dict)
     limits: Limits = field(default_factory=Limits)
     plugins: Mapping[str, PluginPolicy] = field(default_factory=dict)
     feed_max_age: Mapping[str, timedelta] = field(default_factory=dict)
     control_framework: str = DEFAULT_FRAMEWORK
+    control_catalog: PinnedFile | None = None
     control_overrides: tuple[ControlOverride, ...] = ()
+
+    @classmethod
+    def default(cls) -> "Policy":
+        """Built-in defaults, for use when no policy file is given."""
+        return cls(name="builtin-default", version="1", digest=digest("airlock:builtin-default:1"))
+
+    def catalog(self) -> ControlCatalog:
+        if self.control_catalog is None:
+            return ControlCatalog.builtin(self.control_framework)
+        text = self.control_catalog.path.read_text(encoding="utf-8")
+        return ControlCatalog.parse(text, source=self.control_catalog.declared)
+
+    def signer(self, key_id: str) -> Signer | None:
+        return next((s for s in self.signers if s.key_id == key_id), None)
 
     def signers_with_role(self, role: KeyRole) -> tuple[Signer, ...]:
         return tuple(s for s in self.signers if role in s.roles)
@@ -190,51 +335,87 @@ class Policy:
     def expired_waivers(self, today: date) -> tuple[Waiver, ...]:
         return tuple(w for w in self.waivers if w.expires < today)
 
+    def required_trust(self, kind: str) -> TrustLevel:
+        """Minimum upstream trust level for an artifact kind (first matching glob)."""
+        return next(
+            (level for pattern, level in self.minimum_trust if fnmatchcase(kind, pattern)),
+            TrustLevel.NONE,
+        )
+
     def decide(
-        self, finding: Finding, *, today: date, content_sha256: str | None = None
+        self,
+        finding: Finding,
+        *,
+        today: date,
+        content_sha256: str | None = None,
+        floor: Disposition | None = None,
     ) -> Decision:
         """Decide one finding.
 
         Order: PASS is always allowed; then the first applicable unexpired waiver; then the first
         rule that matches *and* sets an outcome for this result; then the defaults.
+
         ``content_sha256`` is the subject's content hash, needed for content-pinned waivers.
+        ``floor`` is the rule's minimum disposition: waivers are skipped, and a FAIL or ERROR is
+        never decided below it.
         """
         if finding.result is Result.PASS:
             return Decision(finding.id, Disposition.ALLOW, "pass")
 
-        for index, waiver in enumerate(self.waivers):
-            if (
-                waiver.expires >= today
-                and fnmatchcase(finding.rule, waiver.rule)
-                and path_matches(waiver.subject, finding.subject.display)
-                and (waiver.sha256 is None or waiver.sha256 == content_sha256)
-            ):
-                return Decision(finding.id, Disposition.ALLOW, f"waivers[{index}]", 0, waiver.id)
+        if floor is None:
+            for index, waiver in enumerate(self.waivers):
+                if waiver.applies(finding, today, content_sha256):
+                    return Decision(
+                        finding.id, Disposition.ALLOW, f"waivers[{index}]", 0, waiver.id
+                    )
 
-        for index, rule in enumerate(self.rules):
-            outcome = rule.outcome_for(finding.result)
-            if outcome is None or not fnmatchcase(finding.rule, rule.rule):
-                continue
-            if rule.paths:
-                path = finding.subject.path
-                if path is None or not any(path_matches(p, path) for p in rule.paths):
-                    continue
-            approvals = rule.approvals if rule.approvals is not None else self.defaults.approvals
-            return self._decision(finding, outcome, f"rules[{index}]", approvals)
-
-        if finding.result is Result.FAIL:
-            outcome = self.defaults.severity[finding.severity]
-            matched = f"defaults.severity.{finding.severity.value}"
-        elif finding.result is Result.NOT_ASSESSED:
-            outcome, matched = self.defaults.not_assessed, "defaults.notAssessed"
-        else:
-            outcome, matched = self.defaults.error, "defaults.error"
-        return self._decision(finding, outcome, matched, self.defaults.approvals)
-
-    @staticmethod
-    def _decision(finding: Finding, outcome: Disposition, matched: str, approvals: int) -> Decision:
+        outcome, matched, approvals = self._outcome(finding)
+        enforce = floor is not None and finding.result in (Result.FAIL, Result.ERROR)
+        if enforce and floor is not None and outcome.rank < floor.rank:
+            outcome, matched = floor, f"floor({matched})"
         required = approvals if outcome is Disposition.REQUIRE_APPROVAL else 0
         return Decision(finding.id, outcome, matched, required)
+
+    def _outcome(self, finding: Finding) -> tuple[Disposition, str, int]:
+        for index, rule in enumerate(self.rules):
+            outcome = rule.outcome_for(finding.result)
+            if outcome is not None and rule.matches(finding):
+                approvals = rule.approvals or self.defaults.approvals
+                return outcome, f"rules[{index}]", approvals
+        if finding.result is Result.FAIL:
+            level = finding.severity
+            return (
+                self.defaults.severity[level],
+                f"defaults.severity.{level.value}",
+                (self.defaults.approvals),
+            )
+        if finding.result is Result.NOT_ASSESSED:
+            return self.defaults.not_assessed, "defaults.notAssessed", self.defaults.approvals
+        return self.defaults.error, "defaults.error", self.defaults.approvals
+
+
+def evaluate(
+    policy: Policy,
+    registry: RuleRegistry,
+    findings: Iterable[Finding],
+    *,
+    today: date,
+    content_hashes: Mapping[str, str] | None = None,
+) -> tuple[Decision, ...]:
+    """Decide every finding, applying each rule's floor.
+
+    ``content_hashes`` maps a subject's display form to its sha256, for content-pinned waivers.
+    """
+    hashes = content_hashes or {}
+    return tuple(
+        policy.decide(
+            finding,
+            today=today,
+            content_sha256=hashes.get(finding.subject.display),
+            floor=registry.get(finding.rule).floor,
+        )
+        for finding in findings
+    )
 
 
 # --- Loading ------------------------------------------------------------------------------------
@@ -262,26 +443,38 @@ class _Parser:
         name, version = meta.req_str("name"), meta.req_str("version")
         meta.done()
 
-        defaults = self._defaults(doc.opt_section("defaults"))
-        signers, upstream = self._trust(doc.opt_section("trust"))
-        framework, overrides = self._controls(doc.opt_section("controls"))
+        signers, upstream, minimum = self._trust(doc.opt_section("trust"))
+        framework, catalog, overrides = self._controls(doc.opt_section("controls"))
+        transfer = doc.opt_section("transfer")
+        max_bundle_age = transfer.opt_duration("maxBundleAge") if transfer else None
+        if transfer:
+            transfer.done()
         policy = Policy(
             name=name,
             version=version,
             digest="",
-            defaults=defaults,
+            identity=self._identity(doc.opt_section("identity")),
+            max_bundle_age=max_bundle_age,
+            defaults=self._defaults(doc.opt_section("defaults")),
             rules=tuple(self._rule(r) for r in doc.sections("rules")),
             waivers=tuple(self._waiver(w) for w in doc.sections("waivers")),
             signers=signers,
             upstream=upstream,
+            minimum_trust=minimum,
             licences=self._licences(doc.opt_section("licences")),
             allowlists=self._allowlists(doc),
             limits=self._limits(doc.opt_section("limits")),
             plugins=self._plugins(doc),
             feed_max_age=self._freshness(doc.opt_section("freshness")),
             control_framework=framework,
+            control_catalog=catalog,
             control_overrides=overrides,
         )
+        # Free-form and ignored by this version, but still covered by the digest. Lets a newer
+        # policy carry settings an older tool does not understand without being rejected.
+        extensions = doc.raw("extensions")
+        if extensions is not None and not isinstance(extensions, dict):
+            raise doc.error("expected a mapping", "extensions")
         doc.done()
         _check_unique([w.id for w in policy.waivers], doc, "waivers", "waiver id")
         _check_unique([s.key_id for s in policy.signers], doc, "trust.signers", "key id")
@@ -304,6 +497,13 @@ class _Parser:
         self.pinned[declared] = "sha256:" + actual
         return PinnedFile(declared, path, actual)
 
+    def _identity(self, section: Reader | None) -> Identity | None:
+        if section is None:
+            return None
+        identity = Identity(section.req_str("enclave"), section.str_list("acceptSources"))
+        section.done()
+        return identity
+
     def _defaults(self, section: Reader | None) -> Defaults:
         if section is None:
             return DEFAULTS
@@ -312,12 +512,11 @@ class _Parser:
             for level in Severity:
                 severity[level] = sev.opt_enum(level.value, Disposition) or severity[level]
             sev.done()
-        approvals = _approvals(section) or DEFAULTS.approvals
         result = Defaults(
             severity=severity,
             not_assessed=section.opt_enum("notAssessed", Disposition) or DEFAULTS.not_assessed,
             error=section.opt_enum("error", Disposition) or DEFAULTS.error,
-            approvals=approvals,
+            approvals=_approvals(section) or DEFAULTS.approvals,
         )
         section.done()
         return result
@@ -326,6 +525,7 @@ class _Parser:
         rule = RuleOverride(
             rule=section.req_str("rule"),
             paths=section.str_list("paths"),
+            where=_where(section),
             disposition=section.opt_enum("disposition", Disposition),
             not_assessed=section.opt_enum("notAssessed", Disposition),
             error=section.opt_enum("error", Disposition),
@@ -348,13 +548,22 @@ class _Parser:
             approved_by=_key_id(section, "approvedBy"),
             expires=expires,
             sha256=_sha256_field(section, "sha256", required=False),
+            where=_where(section),
         )
         section.done()
+        if not _RULE_ID.match(waiver.rule):
+            raise section.error("a waiver names exactly one rule id; globs are not allowed", "rule")
+        if waiver.sha256 is None and has_glob(waiver.subject):
+            raise section.error(
+                "a waiver needs an exact subject, or a sha256 that pins it to content", "subject"
+            )
         return waiver
 
-    def _trust(self, section: Reader | None) -> tuple[tuple[Signer, ...], tuple[UpstreamKey, ...]]:
+    def _trust(
+        self, section: Reader | None
+    ) -> tuple[tuple[Signer, ...], tuple[UpstreamKey, ...], tuple[tuple[str, TrustLevel], ...]]:
         if section is None:
-            return (), ()
+            return (), (), ()
         signers = []
         for s in section.sections("signers"):
             roles = s.str_list("roles")
@@ -365,7 +574,24 @@ class _Parser:
             except ValueError:
                 allowed = ", ".join(r.value for r in KeyRole)
                 raise s.error(f"roles must be from: {allowed}", "roles") from None
-            signers.append(Signer(_key_id(s, "keyId"), self._pinned(s, "publicKey"), role_set))
+            key_id = _key_id(s, "keyId")
+            pinned = self._pinned(s, "publicKey")
+            try:
+                actual = load_verify_key(pinned.path).key_id
+            except SigningError as exc:
+                raise s.error(str(exc), "publicKey") from exc
+            if actual != key_id:
+                raise s.error(f"key file has key id {actual}, policy says {key_id}", "keyId")
+            signers.append(
+                Signer(
+                    key_id=key_id,
+                    public_key=pinned,
+                    roles=role_set,
+                    holder=s.req_str("holder"),
+                    sources=s.str_list("sources"),
+                    validity=_validity(s),
+                )
+            )
             s.done()
         upstream = []
         for u in section.sections("upstream"):
@@ -375,11 +601,18 @@ class _Parser:
                     type=u.enum("type", UpstreamKeyType),
                     file=self._pinned(u, "file"),
                     scope=u.str_list("scope"),
+                    fingerprints=u.str_list("fingerprints"),
+                    validity=_validity(u),
                 )
             )
             u.done()
+        minimum = []
+        if m := section.opt_section("minimum"):
+            for kind in m.names():
+                minimum.append((kind, m.enum(kind, TrustLevel)))
+            m.done()
         section.done()
-        return tuple(signers), tuple(upstream)
+        return tuple(signers), tuple(upstream), tuple(minimum)
 
     def _licences(self, section: Reader | None) -> LicencePolicy:
         if section is None:
@@ -419,6 +652,9 @@ class _Parser:
                     a, "maxMembers", a.opt_int("maxMembers"), archive.max_members
                 ),
                 max_ratio=_positive(a, "maxRatio", a.opt_int("maxRatio"), archive.max_ratio),
+                ratio_min_bytes=_positive(
+                    a, "ratioMinBytes", a.opt_size("ratioMinBytes"), archive.ratio_min_bytes
+                ),
                 max_expanded_bytes=_positive(
                     a,
                     "maxExpandedBytes",
@@ -450,9 +686,18 @@ class _Parser:
         plugins = {}
         for name, _, reader in doc.mapping("plugins"):
             section = reader()
+            files = {}
+            if f := section.opt_section("files"):
+                for file_name in f.names():
+                    pin = _sha256_field(f, file_name, required=True)
+                    assert pin is not None  # noqa: S101
+                    files[file_name] = pin
+                f.done()
             plugins[name] = PluginPolicy(
                 required=bool(section.opt_bool("required")),
                 binary_sha256=_sha256_field(section, "binarySha256", required=False),
+                files=files,
+                min_version=section.opt_str("minVersion"),
                 max_db_age=section.opt_duration("maxDbAge"),
             )
             section.done()
@@ -469,17 +714,23 @@ class _Parser:
         section.done()
         return {name: age for name, age in feeds.items() if age is not None}
 
-    def _controls(self, section: Reader | None) -> tuple[str, tuple[ControlOverride, ...]]:
+    def _controls(
+        self, section: Reader | None
+    ) -> tuple[str, PinnedFile | None, tuple[ControlOverride, ...]]:
         if section is None:
-            return DEFAULT_FRAMEWORK, ()
+            return DEFAULT_FRAMEWORK, None, ()
         framework = section.opt_str("framework") or DEFAULT_FRAMEWORK
+        catalog = None
+        if c := section.opt_section("catalog"):
+            catalog = self._pinned(c, "file")
+            c.done()
         overrides = []
         for rule, value, _ in section.mapping("overrides"):
             if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
                 raise section.error("expected a list of control ids", f"overrides.{rule}")
             overrides.append(ControlOverride(rule, tuple(value)))
         section.done()
-        return framework, tuple(overrides)
+        return framework, catalog, tuple(overrides)
 
 
 # --- Helpers ------------------------------------------------------------------------------------
@@ -505,8 +756,25 @@ def _sha256_field(section: Reader, key: str, *, required: bool) -> str | None:
 def _key_id(section: Reader, key: str) -> str:
     value = section.req_str(key)
     if not KEY_ID.match(value):
-        raise section.error("expected a key id such as 'ed25519:0123456789abcdef'", key)
+        raise section.error("expected a key id such as 'ed25519:<64 hex characters>'", key)
     return value
+
+
+def _validity(section: Reader) -> Validity:
+    return Validity(
+        valid_from=section.opt_date("validFrom"),
+        valid_until=section.opt_date("validUntil"),
+        revoked=bool(section.opt_bool("revoked")),
+    )
+
+
+def _where(section: Reader) -> dict[str, str]:
+    where = {}
+    if w := section.opt_section("where"):
+        for name in w.names():
+            where[name] = w.req_str(name)
+        w.done()
+    return where
 
 
 def _approvals(section: Reader) -> int | None:

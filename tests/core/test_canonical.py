@@ -1,6 +1,6 @@
 import pytest
 
-from airlock.core.canonical import canonical_bytes, digest
+from airlock.core.canonical import canonical_bytes, digest, jsonable
 from airlock.core.errors import SerializationError
 
 
@@ -31,3 +31,10 @@ def test_digest_format() -> None:
 def test_rejects_non_canonical(value: object) -> None:
     with pytest.raises(SerializationError):
         canonical_bytes(value)  # type: ignore[arg-type]
+
+
+def test_jsonable_makes_metadata_canonical() -> None:
+    raw = {"temperature": 0.7, "ids": (1, 2), "blob": b"\x01\xff", 3: {"x"}, "name": "é"}
+    safe = jsonable(raw)
+    assert safe == {"temperature": "0.7", "ids": [1, 2], "blob": "01ff", "3": ["x"], "name": "é"}
+    canonical_bytes(safe)

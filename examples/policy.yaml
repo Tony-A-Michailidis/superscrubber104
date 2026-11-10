@@ -1,10 +1,40 @@
-# Example import policy. Trust keys are omitted here because they must point at real,
-# sha256-pinned key files; see docs/design/17-core-models.md for the full schema.
+# Example import policy for the receiving side.
+# Full schema: docs/design/17-core-models.md
 apiVersion: airlock/v1alpha1
 kind: Policy
 metadata:
   name: example-import
   version: "2026.11.1"
+
+# Who this policy belongs to. Bundles addressed to another enclave are refused.
+identity:
+  enclave: enclave-b
+  acceptSources: [dev-unclass]
+
+transfer:
+  maxBundleAge: 30d            # older bundles are treated as possible replays
+
+# Keys are pinned by hash, so they cannot be shown in a static example. `airlock keygen` prints
+# the snippet to paste here:
+#
+# trust:
+#   signers:
+#     - keyId: "ed25519:<64 hex>"
+#       publicKey: keys/lowside-pack.pub
+#       sha256: "<sha256 of the key file>"
+#       holder: build-pipeline          # quorums count distinct holders, not keys
+#       roles: [pack]
+#       sources: [dev-unclass]          # networks this key may pack for
+#       validUntil: 2027-12-31
+#   upstream:
+#     - name: almalinux-9
+#       type: gpg
+#       file: keys/RPM-GPG-KEY-AlmaLinux-9
+#       sha256: "<sha256 of the key file>"
+#       scope: [package.rpm, repo.dnf]
+#   minimum:                            # weakest acceptable proof of genuineness, per kind
+#     "package.rpm": signature
+#     "model.*": pinned-checksum
 
 defaults:
   severity:
@@ -17,6 +47,8 @@ defaults:
   error: require-approval
   approvals: 1
 
+# First match wins. A rule only applies to the outcomes it sets, and can never decide a
+# tamper-evidence rule (integrity.*, archive path traversal, ...) below "block".
 rules:
   - rule: "model.pickle.*"
     disposition: block
@@ -26,8 +58,13 @@ rules:
   - rule: "offline.*"
     paths: ["dev-tools/**"]
     disposition: warn
+  - rule: "vuln.component.known"
+    where: { kev: "true" }     # select on finding attributes
+    disposition: block
   - rule: "malware.*"
-    notAssessed: block
+    notAssessed: block         # the scanner must actually have run
+  - rule: "inventory.artifact.unclassified"
+    disposition: warn
 
 licences:
   allow: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, PSF-2.0]
@@ -49,7 +86,8 @@ limits:
   archive:
     maxDepth: 4
     maxMembers: 200000
-    maxRatio: 200
+    maxRatio: 200              # expanded bytes per byte of the outermost archive
+    ratioMinBytes: 16MiB       # small archives are not judged on ratio
     maxExpandedBytes: 500GiB
   maxArtifactBytes: 1TiB
   maxPathLength: 1024

@@ -1,19 +1,28 @@
-"""Transfer request: the declared intent that verify checks the bundle against."""
+"""Transfer request: the declared intent that pack and verify check a bundle against.
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+The request is written on the packing side, so the receiving side treats it as a claim. Its
+listed approvers say who is *expected* to sign; whether a signature counts is decided only by
+the keys pinned in the receiving side's policy.
+"""
+
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from airlock.core.canonical import JSON, sha256_digest
-from airlock.core.model import API_VERSION, UnitKind
+from airlock.core.canonical import sha256_digest
+from airlock.core.model import API_VERSION, UnitKind, UpstreamRef
 from airlock.core.paths import path_matches
 from airlock.core.policy import KEY_ID
 from airlock.core.yamlio import Reader, load_yaml, load_yaml_file
 
 
 class Direction(StrEnum):
-    LOW_TO_HIGH = "low-to-high"  # the only direction phase 1 accepts
+    LOW_TO_HIGH = "low-to-high"  # the only direction phase 1 accepts for bundles
+
+
+class Profile(StrEnum):
+    ROUTINE = "routine"
+    EMERGENCY = "emergency"  # minimal fix for a critical vulnerability (phase 1c)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +45,10 @@ class ContentEntry:
     name: str
     paths: tuple[str, ...]
     unit: UnitKind | None = None
-    upstream: Mapping[str, JSON] = field(default_factory=dict)
+    upstream: UpstreamRef | None = None
+
+    def covers(self, path: str) -> bool:
+        return any(path_matches(pattern, path) for pattern in self.paths)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,15 +62,14 @@ class TransferRequest:
     direction: Direction
     contents: tuple[ContentEntry, ...]
     digest: str  # of the request file's exact bytes, which travel verbatim in the bundle
+    stream: str = "default"  # ordering scope for recurring transfers
+    profile: Profile = Profile.ROUTINE
     approvers: tuple[Approver, ...] = ()
     allow_undeclared: bool = False
 
-    def entry_for(self, path: str) -> ContentEntry | None:
-        """The first content entry that declares ``path``, if any."""
-        for entry in self.contents:
-            if any(path_matches(pattern, path) for pattern in entry.paths):
-                return entry
-        return None
+    def entries_for(self, path: str) -> tuple[ContentEntry, ...]:
+        """Every content entry that declares ``path``. A file may belong to several."""
+        return tuple(entry for entry in self.contents if entry.covers(path))
 
 
 def load_request(path: Path) -> TransferRequest:
@@ -68,6 +79,19 @@ def load_request(path: Path) -> TransferRequest:
 
 def parse_request(raw: bytes, source: str) -> TransferRequest:
     return _parse(load_yaml(raw, source), raw, source)
+
+
+def _upstream(section: Reader | None) -> UpstreamRef | None:
+    if section is None:
+        return None
+    upstream = UpstreamRef(
+        type=section.req_str("type"),
+        reference=section.req_str("reference"),
+        revision=section.opt_str("revision"),
+        digest=section.opt_str("digest"),
+    )
+    section.done()
+    return upstream
 
 
 def _parse(data: object, raw: bytes, source: str) -> TransferRequest:
@@ -90,7 +114,7 @@ def _parse(data: object, raw: bytes, source: str) -> TransferRequest:
     for a in spec.sections("approvers"):
         key_id = a.opt_str("keyId")
         if key_id is not None and not KEY_ID.match(key_id):
-            raise a.error("expected a key id such as 'ed25519:0123456789abcdef'", "keyId")
+            raise a.error("expected a key id such as 'ed25519:<64 hex characters>'", "keyId")
         approvers.append(Approver(a.req_str("name"), a.req_str("role"), key_id))
         a.done()
 
@@ -99,15 +123,12 @@ def _parse(data: object, raw: bytes, source: str) -> TransferRequest:
         paths = c.str_list("paths")
         if not paths:
             raise c.error("at least one path glob is required", "paths")
-        upstream = c.raw("upstream")
-        if upstream is not None and not isinstance(upstream, dict):
-            raise c.error("expected a mapping", "upstream")
         contents.append(
             ContentEntry(
                 name=c.req_str("name"),
                 paths=paths,
                 unit=c.opt_enum("unit", UnitKind),
-                upstream=dict(upstream or {}),
+                upstream=_upstream(c.opt_section("upstream")),
             )
         )
         c.done()
@@ -124,6 +145,8 @@ def _parse(data: object, raw: bytes, source: str) -> TransferRequest:
         destination=spec.req_str("destination"),
         direction=spec.enum("direction", Direction),
         contents=tuple(contents),
+        stream=spec.opt_str("stream") or "default",
+        profile=spec.opt_enum("profile", Profile) or Profile.ROUTINE,
         approvers=tuple(approvers),
         allow_undeclared=bool(spec.opt_bool("allowUndeclared")),
         digest=sha256_digest(raw),

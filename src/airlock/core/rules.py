@@ -1,17 +1,26 @@
-"""Rule registry and the finding factory.
+"""Rule registry, the finding factory and the per-run recorder.
 
 Every check is declared as a ``RuleSpec`` before it can produce findings, so no check ships without
 a severity, a rationale and a control mapping, and the registry can be rendered straight into docs.
 """
 
 import re
+from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 
 from airlock.core.canonical import JSON, digest
 from airlock.core.controls import ControlCatalog, ControlMapping
 from airlock.core.errors import RuleError
-from airlock.core.model import Finding, Result, Severity, Subject, ToolRef
+from airlock.core.model import (
+    Coverage,
+    Disposition,
+    Finding,
+    Result,
+    Severity,
+    Subject,
+    ToolRef,
+)
 from airlock.core.serde import to_data
 
 _RULE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$")
@@ -26,6 +35,10 @@ class RuleSpec:
     controls: tuple[str, ...]
     rationale: str
     remediation: str = ""
+    # Minimum disposition for a FAIL or ERROR. Policy may be stricter but never looser, and
+    # waivers do not apply. Used for checks whose failure means tampering, not judgement.
+    floor: Disposition | None = None
+    tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _RULE_ID.match(self.id):
@@ -67,12 +80,20 @@ def finding_id(rule: str, subject: Subject, discriminator: str) -> str:
     return digest([rule, to_data(subject), discriminator]).removeprefix("sha256:")[:16]
 
 
+def finding_digest(finding: Finding) -> str:
+    """Digest of everything a finding says. Approvals bind to this, not just to the id."""
+    return digest(to_data(finding))
+
+
 class FindingFactory:
     """The only way checks create findings: looks up the rule and applies control overrides."""
 
     def __init__(self, registry: RuleRegistry, mapping: ControlMapping | None = None) -> None:
         self.registry = registry
         self.mapping = mapping or ControlMapping(registry.catalog)
+
+    def controls_for(self, rule: str) -> tuple[str, ...]:
+        return self.mapping.controls_for(rule, self.registry.get(rule).controls)
 
     def __call__(
         self,
@@ -82,6 +103,7 @@ class FindingFactory:
         *,
         tool: ToolRef,
         detail: Mapping[str, JSON] | None = None,
+        attributes: Mapping[str, str] | None = None,
         title: str | None = None,
         severity: Severity | None = None,
         discriminator: str = "",
@@ -90,7 +112,8 @@ class FindingFactory:
         """Create a finding.
 
         ``discriminator`` separates several findings of one rule on one subject (e.g. one per
-        dangerous import). ``reason`` is required for, and only allowed with, NOT_ASSESSED.
+        dangerous import). ``attributes`` are facets that policy ``where`` clauses can select on.
+        ``reason`` is required for, and only allowed with, NOT_ASSESSED.
         """
         spec = self.registry.get(rule)
         return Finding(
@@ -101,16 +124,88 @@ class FindingFactory:
             severity=severity or spec.severity,
             subject=subject,
             title=title or spec.title,
-            controls=self.mapping.controls_for(rule, spec.controls),
+            controls=self.controls_for(rule),
             tool=tool,
             detail=dict(detail or {}),
+            attributes=dict(attributes or {}),
             not_assessed_reason=reason,
+        )
+
+
+class Recorder:
+    """Collects the evidence of one run: findings, plus counts of checks that passed.
+
+    A pass is normally a count, not a finding, so a bundle of a million files does not produce a
+    million rows. Anything that is not a pass is always an individual finding.
+    """
+
+    def __init__(self, factory: FindingFactory) -> None:
+        self.factory = factory
+        self._findings: dict[str, Finding] = {}
+        self._passed: Counter[str] = Counter()
+
+    def record(self, finding: Finding) -> Finding:
+        self.factory.registry.get(finding.rule)
+        return self._findings.setdefault(finding.id, finding)
+
+    def fail(
+        self,
+        rule: str,
+        subject: Subject,
+        *,
+        tool: ToolRef,
+        detail: Mapping[str, JSON] | None = None,
+        attributes: Mapping[str, str] | None = None,
+        discriminator: str = "",
+    ) -> Finding:
+        return self.record(
+            self.factory(
+                rule,
+                subject,
+                Result.FAIL,
+                tool=tool,
+                detail=detail,
+                attributes=attributes,
+                discriminator=discriminator,
+            )
         )
 
     def not_assessed(
         self, rules: Iterable[str], subject: Subject, *, tool: ToolRef, reason: str
-    ) -> list[Finding]:
-        """NOT_ASSESSED findings for every rule a check could not run."""
-        return [
-            self(rule, subject, Result.NOT_ASSESSED, tool=tool, reason=reason) for rule in rules
-        ]
+    ) -> None:
+        """Record, for each rule, that it could not be checked on this subject."""
+        for rule in rules:
+            self.record(self.factory(rule, subject, Result.NOT_ASSESSED, tool=tool, reason=reason))
+
+    def error(self, rule: str, subject: Subject, *, tool: ToolRef, error: str) -> Finding:
+        return self.record(
+            self.factory(rule, subject, Result.ERROR, tool=tool, detail={"error": error})
+        )
+
+    def passed(self, rule: str, count: int = 1) -> None:
+        self.factory.registry.get(rule)
+        self._passed[rule] += count
+
+    @property
+    def findings(self) -> tuple[Finding, ...]:
+        return tuple(
+            sorted(self._findings.values(), key=lambda f: (f.rule, f.subject.display, f.id))
+        )
+
+    def coverage(self) -> tuple[Coverage, ...]:
+        """One row per registered rule, including rules that never ran."""
+        by_result: Counter[tuple[str, Result]] = Counter(
+            (f.rule, f.result) for f in self._findings.values()
+        )
+        return tuple(
+            Coverage(
+                rule=spec.id,
+                rule_version=spec.version,
+                controls=self.factory.controls_for(spec.id),
+                passed=self._passed[spec.id] + by_result[spec.id, Result.PASS],
+                failed=by_result[spec.id, Result.FAIL],
+                not_assessed=by_result[spec.id, Result.NOT_ASSESSED],
+                errors=by_result[spec.id, Result.ERROR],
+            )
+            for spec in self.factory.registry
+        )

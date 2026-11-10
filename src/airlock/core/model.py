@@ -2,22 +2,31 @@
 
 All models are frozen dataclasses. Serialisation goes through ``airlock.core.serde`` and every
 document that is hashed or signed is encoded with ``airlock.core.canonical``.
+
+Two layers are kept apart on purpose:
+
+* **Integrity** (``Manifest``/``Entry``): paths, sizes and hashes. Independent of tool version and
+  policy, so its digest identifies the content and nothing else. This is what gets signed.
+* **Interpretation** (``Analysis``/``Artifact``/``Unit``): what the content *is*. Derived, depends
+  on the tool version, and is regenerated on the high side rather than trusted.
 """
 
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
-from airlock.core.canonical import JSON
+from airlock.core.canonical import JSON, digest
 from airlock.core.paths import validate_bundle_path
 
 API_VERSION = "airlock/v1alpha1"
+UNCLASSIFIED = "unclassified"
 
+DIGEST = re.compile(r"^(sha256|sha384|sha512):[0-9a-f]{64,128}$")
+_HEX = re.compile(r"^[0-9a-f]+$")
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _require_kind(obj: object, expected: str) -> None:
@@ -30,8 +39,16 @@ def _require_kind(obj: object, expected: str) -> None:
 
 
 def _require_digest(value: str | None, name: str) -> None:
-    if value is not None and not _DIGEST.match(value):
-        raise ValueError(f"{name} must be 'sha256:<64 hex>', got {value!r}")
+    if value is not None and not DIGEST.match(value):
+        raise ValueError(f"{name} must be '<algorithm>:<hex>', got {value!r}")
+
+
+def _check_hashes(hashes: Mapping[str, str], where: object) -> None:
+    for algorithm, value in hashes.items():
+        if not _HEX.match(value):
+            raise ValueError(f"{where}: {algorithm} must be lowercase hex")
+    if "sha256" in hashes and not _SHA256_HEX.match(hashes["sha256"]):
+        raise ValueError(f"{where}: sha256 must be 64 lowercase hex characters")
 
 
 # --- Enumerations -------------------------------------------------------------------------------
@@ -64,12 +81,19 @@ class Result(StrEnum):
 
 
 class Disposition(StrEnum):
-    """What policy decides to do about a finding."""
+    """What policy decides to do about a finding. Ordered from least to most restrictive."""
 
     ALLOW = "allow"
     WARN = "warn"
     REQUIRE_APPROVAL = "require-approval"
     BLOCK = "block"
+
+    @property
+    def rank(self) -> int:
+        return _DISPOSITION_RANK[self]
+
+
+_DISPOSITION_RANK = {d: i for i, d in enumerate(Disposition)}
 
 
 class Verdict(StrEnum):
@@ -83,6 +107,11 @@ class Stage(StrEnum):
     VERIFY = "verify"
     OFFLINE_CHECK = "offline-check"
     INSPECT = "inspect"
+    STAGE = "stage"
+    EVAL = "eval"
+    PATCH = "patch"
+    AGENT_SCAN = "agent-scan"  # phase 2
+    GATEWAY = "gateway"  # phase 3
 
 
 class EntryType(StrEnum):
@@ -126,8 +155,29 @@ class ComponentType(StrEnum):
 class SubjectKind(StrEnum):
     ARTIFACT = "artifact"
     UNIT = "unit"
+    COMPONENT = "component"
     BUNDLE = "bundle"
     REQUEST = "request"
+    POLICY = "policy"
+    HOST = "host"  # phase 2: a workstation or repository being scanned
+    TOOL_CALL = "tool-call"  # phase 3: one MCP call seen by the gateway
+
+
+class TrustLevel(StrEnum):
+    """How strongly upstream genuineness was established. Ordered weakest to strongest."""
+
+    NONE = "none"
+    ASSERTED = "asserted"  # a low-side claim, e.g. a repository revision
+    CHECKSUM = "checksum"  # matches a checksum list that is itself unauthenticated
+    PINNED_CHECKSUM = "pinned-checksum"  # matches a digest pinned in the verifier's own policy
+    SIGNATURE = "signature"  # signature verified against a key pinned in policy
+
+    @property
+    def rank(self) -> int:
+        return _TRUST_RANK[self]
+
+
+_TRUST_RANK = {t: i for i, t in enumerate(TrustLevel)}
 
 
 # --- Identity -----------------------------------------------------------------------------------
@@ -139,19 +189,29 @@ class ToolRef:
 
     name: str
     version: str
-    extra: Mapping[str, str] | None = None  # e.g. {"dbVersion": "27412", "dbAge": "P2D"}
+    extra: Mapping[str, str] | None = None  # e.g. {"dbVersion": "27412"}
 
 
 @dataclass(frozen=True, slots=True, order=True)
 class ArtifactRef:
-    """Location of an artifact: a bundle path, plus the path inside nested archives if any."""
+    """Location of an artifact: a path, plus the path inside nested archives if any.
+
+    ``unsafe`` marks a reference whose last part is a hostile or unrepresentable name
+    (``../../etc/passwd``, a backslash, undecodable bytes) recorded in escaped form. Such a
+    reference can be inventoried and reported on, but is never turned into a filesystem path.
+    """
 
     path: str
     member: tuple[str, ...] = ()
+    unsafe: bool = False
 
     def __post_init__(self) -> None:
-        validate_bundle_path(self.path)
-        for part in self.member:
+        parts = (self.path, *self.member)
+        if self.unsafe:
+            if not all(parts) or any("\x00" in p for p in parts):
+                raise ValueError("unsafe references still need non-empty, NUL-free parts")
+            return
+        for part in parts:
             validate_bundle_path(part)
 
     @property
@@ -159,37 +219,48 @@ class ArtifactRef:
         """Human form, e.g. ``images/app.tar!/layer.tar!/usr/bin/x``. Not parsed back."""
         return "!/".join((self.path, *self.member))
 
+    @property
+    def nested(self) -> bool:
+        return bool(self.member)
+
+    def child(self, name: str, *, unsafe: bool = False) -> "ArtifactRef":
+        return ArtifactRef(self.path, (*self.member, name), unsafe=self.unsafe or unsafe)
+
     def __str__(self) -> str:
         return self.display
 
 
-# --- Artifacts, components, units ---------------------------------------------------------------
+# --- Integrity layer ----------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
-class Artifact:
-    ref: ArtifactRef
+class Entry:
+    """One payload entry: the facts that integrity verification checks, and nothing else.
+
+    File modes are deliberately absent: removable media and Windows hosts do not preserve them,
+    so they cannot be verified after transfer. Modes inside archives are covered by the archive's
+    own hash and are recorded in the analysis.
+    """
+
+    path: str
     entry_type: EntryType
-    size: int
-    kind: str  # handler classification, e.g. "model.safetensors"; "unclassified" if none
+    size: int = 0
     hashes: Mapping[str, str] = field(default_factory=dict)
-    link_target: str | None = None  # symlinks are recorded, never followed
-    media_type: str | None = None  # detected from content, not the extension
-    handler: ToolRef | None = None
-    metadata: Mapping[str, JSON] = field(default_factory=dict)
+    chunks: tuple[str, ...] = ()  # sha256 per ``Manifest.chunk_size`` block; empty if one block
+    link_target: str | None = None  # symlinks are recorded, never followed or recreated
+    carried: bool = False  # delta bundles: content is unchanged from ``Manifest.base``
 
     def __post_init__(self) -> None:
+        validate_bundle_path(self.path)
         if self.size < 0:
-            raise ValueError("size must be non-negative")
+            raise ValueError(f"{self.path}: size must be non-negative")
         if self.entry_type is EntryType.FILE and "sha256" not in self.hashes:
-            raise ValueError(f"{self.ref}: files must have a sha256 hash")
-        for algorithm, value in self.hashes.items():
-            if not re.fullmatch(r"[0-9a-f]+", value):
-                raise ValueError(f"{self.ref}: {algorithm} must be lowercase hex")
-        if "sha256" in self.hashes and not _SHA256_HEX.match(self.hashes["sha256"]):
-            raise ValueError(f"{self.ref}: sha256 must be 64 lowercase hex characters")
+            raise ValueError(f"{self.path}: files must have a sha256 hash")
+        _check_hashes(self.hashes, self.path)
+        if any(not _SHA256_HEX.match(c) for c in self.chunks):
+            raise ValueError(f"{self.path}: chunk hashes must be sha256 hex")
         if (self.link_target is not None) != (self.entry_type in _LINK_TYPES):
-            raise ValueError(f"{self.ref}: link_target is set if and only if this is a link")
+            raise ValueError(f"{self.path}: link_target is set if and only if this is a link")
 
     @property
     def sha256(self) -> str | None:
@@ -197,6 +268,125 @@ class Artifact:
 
 
 _LINK_TYPES = frozenset({EntryType.SYMLINK, EntryType.HARDLINK})
+
+
+@dataclass(frozen=True, slots=True)
+class Manifest:
+    """Deterministic inventory of the full delivery state.
+
+    No timestamps, host details, policy or tool versions: the same content always yields the same
+    bytes, so the digest is the identity of a snapshot. For a delta bundle the manifest still lists
+    every entry; those marked ``carried`` come from the accepted snapshot named by ``base``.
+    """
+
+    entries: tuple[Entry, ...]
+    chunk_size: int
+    base: str | None = None
+    extensions: Mapping[str, JSON] = field(default_factory=dict)
+    api_version: str = API_VERSION
+    kind: str = "Manifest"
+
+    def __post_init__(self) -> None:
+        _require_kind(self, "Manifest")
+        _require_digest(self.base, "base")
+        if self.chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        paths = [e.path for e in self.entries]
+        if paths != sorted(paths) or len(set(paths)) != len(paths):
+            raise ValueError("entries must be unique and sorted by path; use Manifest.create")
+        if self.base is None and any(e.carried for e in self.entries):
+            raise ValueError("carried entries require a base manifest")
+
+    @classmethod
+    def create(
+        cls, entries: Iterable[Entry], *, chunk_size: int, base: str | None = None
+    ) -> "Manifest":
+        """Build a manifest with entries in canonical order."""
+        ordered = tuple(sorted(entries, key=lambda e: e.path))
+        return cls(entries=ordered, chunk_size=chunk_size, base=base)
+
+
+@dataclass(frozen=True, slots=True)
+class Provenance:
+    """Predicate of the signed statement: who packed what, when, for whom.
+
+    This is what binds a manifest to one transfer. Replay, cross-enclave reuse and stale bundles
+    are detected from these fields, not from the manifest.
+    """
+
+    bundle_id: str
+    created_at: datetime
+    tool: ToolRef
+    policy_digest: str  # the packing side's policy; informational on the receiving side
+    source: str | None = None
+    destination: str | None = None
+    stream: str = "default"  # ordering scope for recurring transfers (e.g. "patches-alma9")
+    profile: str = "routine"
+    request_id: str | None = None
+    extensions: Mapping[str, JSON] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _require_digest(self.policy_digest, "policy_digest")
+
+
+@dataclass(frozen=True, slots=True)
+class BundleDescriptor:
+    """``airlock-bundle.json``: marks a directory as a bundle. A pointer only; never trusted."""
+
+    layout_version: int = 1
+    statement: str = "statement.dsse.json"
+    api_version: str = API_VERSION
+    kind: str = "Bundle"
+
+    def __post_init__(self) -> None:
+        _require_kind(self, "Bundle")
+
+
+# --- Interpretation layer -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Verification:
+    """Outcome of checking one upstream signature or checksum for an artifact or component."""
+
+    type: str  # "gpg", "authenticode", "sigstore", "checksum", "glance", ...
+    level: TrustLevel
+    result: Result
+    signer: str | None = None  # fingerprint or subject of the upstream signer
+    anchor: str | None = None  # name of the policy ``trust.upstream`` entry that was used
+    detail: Mapping[str, JSON] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Artifact:
+    """What one file, link or archive member was found to be."""
+
+    ref: ArtifactRef
+    entry_type: EntryType
+    size: int = 0
+    kinds: tuple[str, ...] = (UNCLASSIFIED,)  # most confident first; polyglots have several
+    hashes: Mapping[str, str] = field(default_factory=dict)
+    link_target: str | None = None
+    mode: int | None = None  # permission bits, where the container format records them
+    media_type: str | None = None  # detected from content, not the extension
+    handlers: tuple[ToolRef, ...] = ()
+    metadata: Mapping[str, JSON] = field(default_factory=dict)
+    verifications: tuple[Verification, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.size < 0:
+            raise ValueError(f"{self.ref}: size must be non-negative")
+        if not self.kinds:
+            raise ValueError(f"{self.ref}: at least one kind is required")
+        _check_hashes(self.hashes, self.ref)
+
+    @property
+    def kind(self) -> str:
+        return self.kinds[0]
+
+    @property
+    def sha256(self) -> str | None:
+        return self.hashes.get("sha256")
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,10 +403,14 @@ class LicenseRef:
 
 @dataclass(frozen=True, slots=True)
 class UpstreamRef:
-    """Where a component came from, precisely enough to fetch the identical bytes again."""
+    """Where something came from, precisely enough to fetch the identical bytes again.
+
+    On its own this is a claim made by the packing side. ``Verification`` records what was
+    actually checked.
+    """
 
     type: str  # "huggingface", "ollama", "oci", "pypi", "npm", "url", ...
-    reference: str  # "Qwen/Qwen2.5-7B-Instruct", "registry.example/app", a URL
+    reference: str  # "example-org/tiny-chat", "registry.example/app", a URL
     revision: str | None = None  # commit SHA, tag, version
     digest: str | None = None  # manifest or content digest published upstream
 
@@ -234,8 +428,10 @@ class Component:
     supplier: str | None = None
     hashes: Mapping[str, str] = field(default_factory=dict)
     upstream: UpstreamRef | None = None
-    evidence: tuple[ArtifactRef, ...] = ()
-    children: tuple[str, ...] = ()
+    evidence: tuple[ArtifactRef, ...] = ()  # every place this component occurs
+    children: tuple[str, ...] = ()  # bom_refs nested inside this component
+    depends_on: tuple[str, ...] = ()  # bom_refs this component needs
+    verifications: tuple[Verification, ...] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -243,6 +439,24 @@ class Component:
 class UnitMember:
     role: str  # "weights-shard", "tokenizer", "chat-template", "lockfile", "wheel", ...
     artifact: ArtifactRef
+    sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Requirement:
+    """Something a unit needs that is not one of its own members.
+
+    Examples: an adapter's base model, a knowledge base's embedding model, the runtime a model
+    was tested on. ``satisfied_by`` is a unit id in this bundle, ``"high-side:<reference>"`` when
+    a high-side inventory supplies it, or None when nothing does (a completeness finding).
+    """
+
+    relation: str  # "base-model", "embedding-model", "runtime", "image", ...
+    name: str
+    kind: UnitKind | None = None
+    digest: str | None = None  # expected unit digest or upstream content digest
+    version: str | None = None
+    satisfied_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,9 +464,10 @@ class UnitClaim:
     """A handler's claim that an artifact belongs to a unit; assemblers build units from these."""
 
     kind: UnitKind
-    root: str
+    root: ArtifactRef
     role: str
     artifact: ArtifactRef
+    sha256: str | None = None
     facts: Mapping[str, JSON] = field(default_factory=dict)
 
 
@@ -262,17 +477,56 @@ class Unit:
 
     kind: UnitKind
     name: str
-    root: str  # bundle path anchoring the unit; unique per kind
+    root: ArtifactRef  # directory, file or archive member anchoring the unit; unique per kind
     members: tuple[UnitMember, ...] = ()
+    requires: tuple[Requirement, ...] = ()
     components: tuple[str, ...] = ()  # bom_refs
     attributes: Mapping[str, JSON] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        validate_bundle_path(self.root)
-
     @property
     def id(self) -> str:
-        return f"{self.kind.value}:{self.root}"
+        return f"{self.kind.value}:{self.root.display}"
+
+    @property
+    def digest(self) -> str:
+        """Content identity: kind plus the sorted (role, sha256) of every member.
+
+        Independent of where the unit sits, so it can pin a unit in an allowlist or waiver, link
+        an adapter to its base model, and compare a unit across bundles.
+        """
+        pairs = sorted((m.role, m.sha256 or "") for m in self.members)
+        members: list[JSON] = [[role, sha256] for role, sha256 in pairs]
+        return digest([self.kind.value, members])
+
+
+@dataclass(frozen=True, slots=True)
+class Analysis:
+    """Interpretation of a bundle by one tool version. Regenerated, never trusted, on import."""
+
+    tool: ToolRef
+    artifacts: tuple[Artifact, ...] = ()
+    units: tuple[Unit, ...] = ()
+    components: tuple[Component, ...] = ()
+    api_version: str = API_VERSION
+    kind: str = "Analysis"
+
+    def __post_init__(self) -> None:
+        _require_kind(self, "Analysis")
+
+    @classmethod
+    def create(
+        cls,
+        tool: ToolRef,
+        artifacts: Iterable[Artifact],
+        units: Iterable[Unit] = (),
+        components: Iterable[Component] = (),
+    ) -> "Analysis":
+        return cls(
+            tool=tool,
+            artifacts=tuple(sorted(artifacts, key=lambda a: a.ref)),
+            units=tuple(sorted(units, key=lambda u: u.id)),
+            components=tuple(sorted(components, key=lambda c: c.bom_ref)),
+        )
 
 
 # --- Findings and assessments -------------------------------------------------------------------
@@ -280,25 +534,39 @@ class Unit:
 
 @dataclass(frozen=True, slots=True)
 class Subject:
-    """What a finding is about."""
+    """What a finding is about, optionally narrowed to a place inside it."""
 
     kind: SubjectKind
     artifact: ArtifactRef | None = None
     unit: str | None = None  # unit id, "<kind>:<root>"
+    component: str | None = None  # bom_ref
+    name: str | None = None  # host or tool-call subjects (phases 2 and 3)
+    locator: str | None = None  # line, byte offset, JSON pointer, tool name, ...
 
     def __post_init__(self) -> None:
-        if (self.artifact is not None) != (self.kind is SubjectKind.ARTIFACT):
-            raise ValueError("artifact is set if and only if kind is 'artifact'")
-        if (self.unit is not None) != (self.kind is SubjectKind.UNIT):
-            raise ValueError("unit is set if and only if kind is 'unit'")
+        for attr, kind in (
+            ("artifact", SubjectKind.ARTIFACT),
+            ("unit", SubjectKind.UNIT),
+            ("component", SubjectKind.COMPONENT),
+        ):
+            if (getattr(self, attr) is not None) != (self.kind is kind):
+                raise ValueError(f"{attr} is set if and only if kind is {kind.value!r}")
 
     @classmethod
-    def of_artifact(cls, ref: ArtifactRef) -> "Subject":
-        return cls(SubjectKind.ARTIFACT, artifact=ref)
+    def of_artifact(cls, ref: ArtifactRef, locator: str | None = None) -> "Subject":
+        return cls(SubjectKind.ARTIFACT, artifact=ref, locator=locator)
+
+    @classmethod
+    def of_path(cls, path: str) -> "Subject":
+        return cls(SubjectKind.ARTIFACT, artifact=ArtifactRef(path))
 
     @classmethod
     def of_unit(cls, unit: Unit) -> "Subject":
         return cls(SubjectKind.UNIT, unit=unit.id)
+
+    @classmethod
+    def of_component(cls, bom_ref: str) -> "Subject":
+        return cls(SubjectKind.COMPONENT, component=bom_ref)
 
     @classmethod
     def bundle(cls) -> "Subject":
@@ -308,17 +576,22 @@ class Subject:
     def request(cls) -> "Subject":
         return cls(SubjectKind.REQUEST)
 
+    @classmethod
+    def policy(cls) -> "Subject":
+        return cls(SubjectKind.POLICY)
+
     @property
     def display(self) -> str:
+        """Stable text form; policy waivers match against it."""
         if self.artifact is not None:
-            return self.artifact.display
-        if self.unit is not None:
-            return self.unit
-        return self.kind.value
+            base = self.artifact.display
+        else:
+            base = self.unit or self.component or self.name or self.kind.value
+        return f"{base}#{self.locator}" if self.locator else base
 
     @property
     def path(self) -> str | None:
-        """Bundle path used for policy path scoping: the artifact path, or the unit root."""
+        """Path used for policy path scoping: the artifact path, or the unit root."""
         if self.artifact is not None:
             return self.artifact.display
         if self.unit is not None:
@@ -340,6 +613,7 @@ class Finding:
     controls: tuple[str, ...]
     tool: ToolRef
     detail: Mapping[str, JSON] = field(default_factory=dict)
+    attributes: Mapping[str, str] = field(default_factory=dict)  # facets policy can select on
     not_assessed_reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -353,9 +627,42 @@ class Decision:
 
     finding: str  # finding id
     disposition: Disposition
-    matched: str  # "rules[4]", "waivers[1]", "defaults.severity.high", "pass"
+    matched: str  # "rules[4]", "waivers[1]", "defaults.severity.high", "floor(...)", "pass"
     approvals_required: int = 0
     waiver: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Approval:
+    """A signed, per-bundle clearance of one ``require-approval`` finding.
+
+    Carried as the data of an ``approved`` custody event; the event's signature identifies the
+    approver. Bound to the manifest and to the exact finding (by digest), so it lapses if either
+    the content or what was found changes.
+    """
+
+    manifest_digest: str
+    finding: str  # finding id
+    finding_digest: str
+    justification: str
+
+
+@dataclass(frozen=True, slots=True)
+class Coverage:
+    """What one rule did during an assessment. Present for every registered rule, so a rule
+    that never ran is visible as such rather than silently absent."""
+
+    rule: str
+    rule_version: str
+    controls: tuple[str, ...]
+    passed: int = 0
+    failed: int = 0
+    not_assessed: int = 0
+    errors: int = 0
+
+    @property
+    def exercised(self) -> bool:
+        return bool(self.passed or self.failed or self.not_assessed or self.errors)
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,12 +684,21 @@ class Summary:
     verdict: Verdict
 
 
-def summarize(findings: Iterable[Finding], decisions: Iterable[Decision]) -> Summary:
+def summarize(
+    findings: Iterable[Finding], decisions: Iterable[Decision], approved: Collection[str] = ()
+) -> Summary:
+    """Counts and overall verdict. ``approved`` holds ids of findings whose approvals are met."""
+    decisions = list(decisions)
     results = Counter(f.result for f in findings)
     dispositions = Counter(d.disposition for d in decisions)
+    pending = [
+        d
+        for d in decisions
+        if d.disposition is Disposition.REQUIRE_APPROVAL and d.finding not in approved
+    ]
     if dispositions[Disposition.BLOCK]:
         verdict = Verdict.BLOCKED
-    elif dispositions[Disposition.REQUIRE_APPROVAL]:
+    elif pending:
         verdict = Verdict.NEEDS_APPROVAL
     else:
         verdict = Verdict.PASSED
@@ -395,7 +711,7 @@ def summarize(findings: Iterable[Finding], decisions: Iterable[Decision]) -> Sum
 
 @dataclass(frozen=True, slots=True)
 class Assessment:
-    """One run of pack, verify or a standalone check. Holds the only timestamps besides custody."""
+    """One run of pack, verify or a standalone check. Holds the only timestamps besides logs."""
 
     tool: ToolRef
     stage: Stage
@@ -403,7 +719,9 @@ class Assessment:
     finished_at: datetime
     policy_digest: str
     summary: Summary
+    manifest_digest: str | None = None
     plugins: tuple[PluginStatus, ...] = ()
+    coverage: tuple[Coverage, ...] = ()
     findings: tuple[Finding, ...] = ()
     decisions: tuple[Decision, ...] = ()
     api_version: str = API_VERSION
@@ -412,84 +730,50 @@ class Assessment:
     def __post_init__(self) -> None:
         _require_kind(self, "Assessment")
         _require_digest(self.policy_digest, "policy_digest")
+        _require_digest(self.manifest_digest, "manifest_digest")
         finding_ids = [f.id for f in self.findings]
         if len(set(finding_ids)) != len(finding_ids):
             raise ValueError("duplicate finding ids")
         if sorted(d.finding for d in self.decisions) != sorted(finding_ids):
             raise ValueError("every finding needs exactly one decision")
 
-
-# --- Bundle documents ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class Manifest:
-    """Deterministic inventory of a bundle. Contains no timestamps or host details."""
-
-    policy_digest: str
-    artifacts: tuple[Artifact, ...]
-    units: tuple[Unit, ...] = ()
-    request_digest: str | None = None
-    api_version: str = API_VERSION
-    kind: str = "Manifest"
-
-    def __post_init__(self) -> None:
-        _require_kind(self, "Manifest")
-        _require_digest(self.policy_digest, "policy_digest")
-        _require_digest(self.request_digest, "request_digest")
-        refs = [a.ref for a in self.artifacts]
-        if refs != sorted(refs) or len(set(refs)) != len(refs):
-            raise ValueError("artifacts must be unique and sorted by ref; use Manifest.create")
-        unit_ids = [u.id for u in self.units]
-        if unit_ids != sorted(unit_ids) or len(set(unit_ids)) != len(unit_ids):
-            raise ValueError("units must be unique and sorted by id; use Manifest.create")
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        policy_digest: str,
-        artifacts: Iterable[Artifact],
-        units: Iterable[Unit] = (),
-        request_digest: str | None = None,
-    ) -> "Manifest":
-        """Build a manifest with artifacts and units in canonical order."""
-        return cls(
-            policy_digest=policy_digest,
-            artifacts=tuple(sorted(artifacts, key=lambda a: a.ref)),
-            units=tuple(sorted(units, key=lambda u: u.id)),
-            request_digest=request_digest,
+    @property
+    def integrity_failed(self) -> bool:
+        return any(
+            f.result is Result.FAIL and f.rule.startswith("integrity.") for f in self.findings
         )
 
 
 @dataclass(frozen=True, slots=True)
-class BundleDescriptor:
-    """``airlock-bundle.json``: the entry point that identifies a directory as a bundle."""
-
-    manifest_digest: str
-    layout_version: int = 1
-    api_version: str = API_VERSION
-    kind: str = "Bundle"
-
-    def __post_init__(self) -> None:
-        _require_kind(self, "Bundle")
-        _require_digest(self.manifest_digest, "manifest_digest")
-
-
-@dataclass(frozen=True, slots=True)
 class Receipt:
-    """Signed high-side import record. Hashes only, so it is safe to send back outbound."""
+    """Signed import record made on the receiving side; one per verification, whatever the verdict.
 
+    Identifiers, digests, a verdict and a time only: no free text, so it is safe to send back
+    outbound. Receipts form the receiving side's ledger of what it has accepted.
+    """
+
+    bundle_id: str
     manifest_digest: str
+    statement_digest: str
     assessment_digest: str
     policy_digest: str
-    verifier_key_id: str
-    verified_at: datetime
     verdict: Verdict
+    verified_at: datetime
+    bundle_created_at: datetime
+    enclave: str | None = None
+    source: str | None = None
+    stream: str = "default"
+    request_id: str | None = None
+    verifier_key_id: str | None = None
+    evidence: Mapping[str, str] = field(default_factory=dict)  # stage/eval result digests
     api_version: str = API_VERSION
     kind: str = "Receipt"
 
     def __post_init__(self) -> None:
         _require_kind(self, "Receipt")
-        for name in ("manifest_digest", "assessment_digest", "policy_digest"):
+        for name in ("manifest_digest", "statement_digest", "assessment_digest", "policy_digest"):
             _require_digest(getattr(self, name), name)
+
+    @property
+    def accepted(self) -> bool:
+        return self.verdict is Verdict.PASSED

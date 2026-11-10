@@ -36,8 +36,15 @@ class ControlCatalog:
     def get(self, control_id: str) -> Control:
         return self.controls[control_id]
 
+    def knows(self, control_id: str) -> bool:
+        """True for a listed control, or an enhancement such as ``SI-7(1)`` of a listed one."""
+        base, paren, rest = control_id.partition("(")
+        if paren and not (rest.endswith(")") and rest[:-1].isdigit()):
+            return False
+        return base in self.controls
+
     def check(self, control_ids: Sequence[str], context: str) -> None:
-        unknown = [c for c in control_ids if c not in self.controls]
+        unknown = [c for c in control_ids if not self.knows(c)]
         if unknown:
             raise RuleError(f"{context}: unknown control(s) for {self.framework}: {unknown}")
 

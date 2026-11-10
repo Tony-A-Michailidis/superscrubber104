@@ -12,6 +12,10 @@ spec:
   source: dev-unclass
   destination: enclave-b
   direction: low-to-high
+  # Bundles in one stream are expected to arrive in the order they were packed.
+  stream: rag-assistant
+  # Who is expected to approve. Whether a signature counts is decided by the keys pinned in
+  # the receiving side's policy, never by this list.
   approvers:
     - name: Example Reviewer
       role: security
@@ -21,7 +25,8 @@ spec:
       unit: model-package
       paths: ["models/tiny-chat/**"]
       upstream:
-        huggingface: example-org/tiny-chat
+        type: huggingface
+        reference: example-org/tiny-chat
         revision: 0123456789abcdef0123456789abcdef01234567
     - name: app
       paths: ["app/**"]

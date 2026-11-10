@@ -55,3 +55,26 @@ def sha256_digest(raw: bytes) -> str:
 def digest(data: JSON) -> str:
     """Digest of the canonical encoding of ``data``."""
     return sha256_digest(canonical_bytes(data))
+
+
+def jsonable(value: object) -> JSON:
+    """Coerce handler-supplied metadata into canonical JSON.
+
+    Canonical documents carry no floats, so floats become decimal strings. Strings are
+    NFC-normalised, bytes become hex, and anything else is stringified.
+    """
+    if value is None or isinstance(value, bool | int):
+        return value
+    if isinstance(value, str):
+        return unicodedata.normalize("NFC", value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, bytes):
+        return value.hex()
+    if isinstance(value, Mapping):
+        return {str(jsonable(k)): jsonable(v) for k, v in value.items()}
+    if isinstance(value, set | frozenset):
+        return sorted((jsonable(v) for v in value), key=repr)
+    if isinstance(value, Sequence):
+        return [jsonable(v) for v in value]
+    return str(value)

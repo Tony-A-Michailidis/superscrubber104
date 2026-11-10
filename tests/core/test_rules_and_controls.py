@@ -2,11 +2,11 @@ import pytest
 
 from airlock.core.controls import ControlCatalog, ControlMapping, ControlOverride
 from airlock.core.errors import RuleError
-from airlock.core.model import ArtifactRef, Result, Severity, Subject
-from airlock.core.rules import FindingFactory, RuleRegistry, RuleSpec
+from airlock.core.model import Result, Severity, Subject
+from airlock.core.rules import FindingFactory, Recorder, RuleRegistry, RuleSpec, finding_digest
 from tests.core.helpers import RULES, TOOL
 
-SUBJECT = Subject.of_artifact(ArtifactRef("models/x.pt"))
+SUBJECT = Subject.of_path("models/x.pt")
 
 
 def test_builtin_catalogue(catalog: ControlCatalog) -> None:
@@ -14,6 +14,14 @@ def test_builtin_catalogue(catalog: ControlCatalog) -> None:
     assert "SI-7" in catalog
     assert catalog.get("SR-11").family == "SR"
     assert len(list(catalog)) == 21
+
+
+@pytest.mark.parametrize(
+    ("control", "known"),
+    [("SI-7", True), ("SI-7(1)", True), ("SI-7(x)", False), ("SI-7(1", False), ("XX-1(2)", False)],
+)
+def test_control_enhancements(catalog: ControlCatalog, control: str, known: bool) -> None:
+    assert catalog.knows(control) is known
 
 
 def test_registry_rejects_duplicates_and_unknown_controls(catalog: ControlCatalog) -> None:
@@ -39,12 +47,6 @@ def test_rule_needs_controls() -> None:
         RuleSpec("a.b", "1", "t", Severity.LOW, (), "r")
 
 
-def test_registry_iterates_sorted(registry: RuleRegistry) -> None:
-    ids = [r.id for r in registry]
-    assert ids == sorted(ids)
-    assert len(registry) == len(RULES)
-
-
 def test_finding_factory(findings: FindingFactory) -> None:
     f = findings("model.pickle.dangerous-import", SUBJECT, Result.FAIL, tool=TOOL)
     assert f.severity is Severity.CRITICAL
@@ -59,6 +61,22 @@ def test_finding_factory(findings: FindingFactory) -> None:
     assert other.id != f.id
 
 
+def test_finding_digest_covers_what_was_found(findings: FindingFactory) -> None:
+    def make(imports: list[str]) -> str:
+        finding = findings(
+            "model.pickle.dangerous-import",
+            SUBJECT,
+            Result.FAIL,
+            tool=TOOL,
+            detail={"imports": [*imports]},
+        )
+        return finding_digest(finding)
+
+    # Same id (same rule and subject), but an approval of one must not cover the other.
+    assert make(["os.system"]) != make(["os.system", "subprocess.Popen"])
+    assert make(["os.system"]) == make(["os.system"])
+
+
 def test_finding_unknown_rule(findings: FindingFactory) -> None:
     with pytest.raises(RuleError):
         findings("not.registered", SUBJECT, Result.FAIL, tool=TOOL)
@@ -69,10 +87,24 @@ def test_not_assessed_needs_reason(findings: FindingFactory) -> None:
         findings("malware.scan.detected", SUBJECT, Result.NOT_ASSESSED, tool=TOOL)
     with pytest.raises(ValueError, match="not_assessed_reason"):
         findings("malware.scan.detected", SUBJECT, Result.FAIL, tool=TOOL, reason="x")
-    [f] = findings.not_assessed(
-        ["malware.scan.detected"], SUBJECT, tool=TOOL, reason="clamav not installed"
-    )
-    assert f.not_assessed_reason == "clamav not installed"
+
+
+def test_recorder_dedupes_and_orders(findings: FindingFactory) -> None:
+    recorder = Recorder(findings)
+    first = recorder.fail("offline.telemetry.enabled", SUBJECT, tool=TOOL)
+    assert recorder.fail("offline.telemetry.enabled", SUBJECT, tool=TOOL) is first
+    recorder.fail("container.user.root", Subject.of_path("b"), tool=TOOL)
+    recorder.fail("container.user.root", Subject.of_path("a"), tool=TOOL)
+    recorder.error("malware.scan.detected", SUBJECT, tool=TOOL, error="boom")
+    assert [(f.rule, f.subject.display) for f in recorder.findings] == [
+        ("container.user.root", "a"),
+        ("container.user.root", "b"),
+        ("malware.scan.detected", "models/x.pt"),
+        ("offline.telemetry.enabled", "models/x.pt"),
+    ]
+    with pytest.raises(RuleError):
+        recorder.passed("not.registered")
+    assert {c.rule for c in recorder.coverage()} == {r.id for r in RULES}
 
 
 def test_control_overrides(registry: RuleRegistry, catalog: ControlCatalog) -> None:

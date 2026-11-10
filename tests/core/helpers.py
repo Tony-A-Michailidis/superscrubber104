@@ -1,9 +1,10 @@
 """Shared test data for core tests."""
 
-from airlock.core.model import Severity, ToolRef
+from airlock.core.model import Disposition, Severity, ToolRef
 from airlock.core.rules import RuleSpec
 
 TOOL = ToolRef("airlock-test", "0")
+KEY_ID = "ed25519:" + "0123456789abcdef" * 4
 
 RULES = (
     RuleSpec(
@@ -45,5 +46,22 @@ RULES = (
         Severity.LOW,
         ("CM-8",),
         "Metadata leakage.",
+    ),
+    RuleSpec(
+        "vuln.component.known",
+        "1",
+        "Component has a known vulnerability",
+        Severity.HIGH,
+        ("RA-5",),
+        "Known vulnerabilities.",
+    ),
+    RuleSpec(
+        "integrity.hash.mismatch",
+        "1",
+        "Content does not match the manifest",
+        Severity.CRITICAL,
+        ("SI-7", "SI-7(1)"),
+        "Tampering.",
+        floor=Disposition.BLOCK,
     ),
 )

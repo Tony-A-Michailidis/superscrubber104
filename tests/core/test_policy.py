@@ -6,17 +6,28 @@ from pathlib import Path
 import pytest
 
 from airlock.core.errors import ConfigError
-from airlock.core.model import ArtifactRef, Disposition, Result, Severity, Subject, Unit, UnitKind
+from airlock.core.model import (
+    ArtifactRef,
+    Disposition,
+    Result,
+    Severity,
+    Subject,
+    TrustLevel,
+    Unit,
+    UnitKind,
+)
 from airlock.core.policy import (
     AllowlistMode,
     KeyRole,
     LicencePolicy,
     Policy,
     UpstreamKeyType,
+    evaluate,
     load_policy,
 )
-from airlock.core.rules import FindingFactory
-from tests.core.helpers import TOOL
+from airlock.core.rules import FindingFactory, RuleRegistry
+from airlock.core.signing import generate_key
+from tests.core.helpers import KEY_ID, TOOL
 
 EXAMPLES = Path(__file__).parents[2] / "examples"
 TODAY = date(2026, 11, 10)
@@ -40,104 +51,172 @@ def pin(tmp_path: Path, name: str, content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def signer_block(tmp_path: Path, name: str = "pack", extra: str = "") -> tuple[str, str]:
+    """A trust.signers entry for a freshly generated key. Returns (yaml, key id)."""
+    key = generate_key()
+    sha = pin(tmp_path, f"keys/{name}.pub", key.verify_key.pem())
+    block = f"""\
+        - keyId: "{key.key_id}"
+          publicKey: keys/{name}.pub
+          sha256: "{sha}"
+          holder: {name}-holder
+          roles: [pack, approve]
+          {extra}
+    """
+    return block, key.key_id
+
+
 # --- Loading ------------------------------------------------------------------------------------
 
 
 def test_example_policy_loads() -> None:
     policy = load_policy(EXAMPLES / "policy.yaml")
     assert policy.name == "example-import"
+    assert policy.identity is not None
+    assert policy.identity.enclave == "enclave-b"
+    assert policy.identity.accept_sources == ("dev-unclass",)
+    assert policy.max_bundle_age == timedelta(days=30)
     assert policy.rules[1].approvals == 2
+    assert policy.rules[3].where == {"kev": "true"}
     assert policy.limits.archive.max_expanded_bytes == 500 * 2**30
+    assert policy.limits.archive.ratio_min_bytes == 16 * 2**20
     assert policy.limits.max_artifact_bytes == 2**40
     assert policy.plugins["clamav"].max_db_age == timedelta(days=7)
     assert policy.feed_max_age == {"default": timedelta(days=7), "kev": timedelta(days=2)}
     assert policy.allowlists["models"].mode is AllowlistMode.ENFORCE
     assert policy.control_overrides[0].controls == ("SC-7", "AC-4", "CM-6")
     assert policy.digest.startswith("sha256:")
+    assert policy.catalog().framework == "nist-800-53r5"
 
 
-def test_minimal_policy_uses_safe_defaults(tmp_path: Path) -> None:
-    policy = load_policy(write_policy(tmp_path, ""))
+def test_default_policy_is_safe() -> None:
+    policy = Policy.default()
     assert policy.defaults.severity[Severity.CRITICAL] is Disposition.BLOCK
     assert policy.defaults.not_assessed is Disposition.WARN
     assert policy.licences.unknown is Disposition.REQUIRE_APPROVAL
     assert policy.limits.archive.max_depth == 4
+    assert policy.signers == ()
 
 
-def test_trust_keys_are_pinned(tmp_path: Path) -> None:
-    key_sha = pin(tmp_path, "keys/pack.pub", b"public key bytes")
+def test_trust_section(tmp_path: Path) -> None:
+    block, key_id = signer_block(tmp_path, extra="sources: [dev]\n          validUntil: 2027-01-01")
     gpg_sha = pin(tmp_path, "keys/alma.asc", b"gpg key")
     body = f"""\
     trust:
       signers:
-        - keyId: "ed25519:0123456789abcdef"
-          publicKey: keys/pack.pub
-          sha256: {key_sha}
-          roles: [pack, approve]
+{block}
       upstream:
         - name: almalinux-9
           type: gpg
           file: keys/alma.asc
-          sha256: {gpg_sha}
-          scope: [rpm, repomd]
+          sha256: "{gpg_sha}"
+          scope: [package.rpm]
+          fingerprints: ["ABCD"]
+      minimum:
+        "package.rpm": signature
+        "model.*": pinned-checksum
     """
     policy = load_policy(write_policy(tmp_path, body))
-    assert policy.signers[0].roles == {KeyRole.PACK, KeyRole.APPROVE}
+    signer = policy.signer(key_id)
+    assert signer is not None
+    assert signer.holder == "pack-holder"
+    assert signer.load().key_id == key_id
     assert policy.signers_with_role(KeyRole.RECEIPT) == ()
     assert policy.upstream[0].type is UpstreamKeyType.GPG
+    assert policy.required_trust("package.rpm") is TrustLevel.SIGNATURE
+    assert policy.required_trust("model.gguf") is TrustLevel.PINNED_CHECKSUM
+    assert policy.required_trust("archive.zip") is TrustLevel.NONE
 
-    # The digest covers pinned files: same policy text, different key content => different digest
-    # (after re-pinning), so swapping a key can never go unnoticed.
-    other = tmp_path / "other"
-    other.mkdir()
-    key2 = pin(other, "keys/pack.pub", b"another key")
-    gpg2 = pin(other, "keys/alma.asc", b"gpg key")
-    body2 = body.replace(key_sha, key2).replace(gpg_sha, gpg2)
-    assert load_policy(write_policy(other, body2)).digest != policy.digest
+    assert signer.problem(KeyRole.PACK, TODAY, "dev") is None
+    assert "role" in (signer.problem(KeyRole.RECEIPT, TODAY, "dev") or "")
+    assert "source" in (signer.problem(KeyRole.PACK, TODAY, "elsewhere") or "")
+    assert "expired" in (signer.problem(KeyRole.PACK, date(2027, 6, 1), "dev") or "")
 
 
-def test_pinned_file_mismatch(tmp_path: Path) -> None:
+def test_revoked_key_and_digest_covers_keys(tmp_path: Path) -> None:
+    block, key_id = signer_block(tmp_path)
+    body = f"    trust:\n      signers:\n{block}"
+    policy = load_policy(write_policy(tmp_path, body))
+    revoked = load_policy(
+        write_policy(tmp_path, body.replace("roles:", "revoked: true\n          roles:"), "r.yaml")
+    )
+    signer = revoked.signer(key_id)
+    assert signer is not None
+    assert signer.problem(KeyRole.PACK, TODAY) == "key is revoked"
+    assert revoked.digest != policy.digest  # rotation or revocation always changes the digest
+
+
+def test_key_id_must_match_key_file(tmp_path: Path) -> None:
+    block, key_id = signer_block(tmp_path)
+    body = f"    trust:\n      signers:\n{block}".replace(key_id, KEY_ID)
+    with pytest.raises(ConfigError, match=r"trust\.signers\[0\]\.keyId: key file has key id"):
+        load_policy(write_policy(tmp_path, body))
+
+
+def test_pinned_file_mismatch_and_missing(tmp_path: Path) -> None:
     pin(tmp_path, "keys/pack.pub", b"tampered")
     body = f"""\
     trust:
       signers:
-        - keyId: "ed25519:0123456789abcdef"
+        - keyId: "{KEY_ID}"
           publicKey: keys/pack.pub
           sha256: "{"0" * 64}"
+          holder: x
           roles: [pack]
     """
     with pytest.raises(ConfigError, match=r"trust\.signers\[0\]\.publicKey: pinned file"):
         load_policy(write_policy(tmp_path, body))
-
-
-def test_pinned_file_missing(tmp_path: Path) -> None:
-    body = f"""\
+    missing = f"""\
     allowlists:
       python: {{mode: enforce, file: allow/python.txt, sha256: "{"0" * 64}"}}
     """
     with pytest.raises(ConfigError, match="cannot read pinned file"):
-        load_policy(write_policy(tmp_path, body))
+        load_policy(write_policy(tmp_path, missing))
+
+
+def test_custom_control_catalogue(tmp_path: Path) -> None:
+    text = b"framework: itsg-33-site\ntitle: Site profile\ncontrols:\n  SI-7: Integrity\n"
+    sha = pin(tmp_path, "controls.yaml", text)
+    body = f"""\
+    controls:
+      catalog: {{file: controls.yaml, sha256: "{sha}"}}
+    """
+    policy = load_policy(write_policy(tmp_path, body))
+    assert policy.catalog().framework == "itsg-33-site"
+
+
+def test_extensions_are_tolerated_but_covered_by_digest(tmp_path: Path) -> None:
+    plain = load_policy(write_policy(tmp_path, "", "a.yaml"))
+    extended = load_policy(write_policy(tmp_path, "extensions: {future: {x: 1}}\n", "b.yaml"))
+    assert extended.rules == plain.rules
+    assert extended.digest != plain.digest
+
+
+_WAIVER = (
+    "waivers:\n  - {{id: W1, rule: {rule}, subject: '{subject}', justification: j,"
+    ' approvedBy: "' + KEY_ID + '", expires: 2027-01-01}}\n'
+)
 
 
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        (
-            "rules:\n  - rule: x.y\n    dispositon: block\n",
-            r"rules\[0\]: unknown key\(s\): dispositon",
-        ),
+        ("rules:\n  - rule: x.y\n    dispositon: block\n", r"rules\[0\]: unknown key.*dispositon"),
         ("rules:\n  - rule: x.y\n", r"rules\[0\]: a rule must set"),
         ("rules:\n  - rule: x.y\n    disposition: maybe\n", r"rules\[0\]\.disposition: 'maybe'"),
         ("rules:\n  - rule: x.y\n    disposition: block\n    approvals: 0\n", "at least 1"),
+        ("rules:\n  - {rule: x.y, disposition: block, where: {cve: 7}}\n", r"where\.cve"),
         ("defaults:\n  severity:\n    severe: block\n", r"defaults\.severity: unknown key"),
         ("defaults: {notAssessed: warn}\ndefaults: {notAssessed: block}\n", "duplicate key"),
         ("limits: {maxArtifactBytes: 12XB}\n", "expected a size"),
         ("plugins: {clamav: {maxDbAge: soon}}\n", "expected a duration"),
         ("extra: 1\n", "unknown key"),
         (f"plugins: {{clamav: {{binarySha256: {'1' * 64}}}}}\n", "quote hashes"),
+        ("identity: {acceptSources: [dev]}\n", r"identity\.enclave: required"),
+        ("trust: {minimum: {'model.*': strong}}\n", "not one of"),
         (
             "waivers:\n  - {id: W1, rule: a.b, subject: x, justification: j,"
-            ' approvedBy: "ed25519:0123456789abcdef"}\n',
+            f' approvedBy: "{KEY_ID}"}}\n',
             "waivers must expire",
         ),
         (
@@ -145,6 +224,8 @@ def test_pinned_file_missing(tmp_path: Path) -> None:
             " approvedBy: bob, expires: 2027-01-01}\n",
             r"approvedBy: expected a key id",
         ),
+        (_WAIVER.format(rule="'integrity.*'", subject="x"), "exactly one rule id"),
+        (_WAIVER.format(rule="a.b", subject="images/**"), "exact subject, or a sha256"),
         ("licences: {allow: Apache-2.0}\n", "expected a list of strings"),
         ("controls: {overrides: {'a.*': SI-7}}\n", "expected a list of control ids"),
     ],
@@ -156,33 +237,24 @@ def test_invalid_policies(tmp_path: Path, body: str, message: str) -> None:
 
 def test_wrong_kind_and_version(tmp_path: Path) -> None:
     path = tmp_path / "p.yaml"
-    path.write_text(
-        "apiVersion: airlock/v1alpha1\nkind: Request\nmetadata: {name: a, version: b}\n"
-    )
+    meta = "metadata: {name: a, version: b}\n"
+    path.write_text("apiVersion: airlock/v1alpha1\nkind: Request\n" + meta)
     with pytest.raises(ConfigError, match="kind"):
         load_policy(path)
-    path.write_text("apiVersion: airlock/v2\nkind: Policy\nmetadata: {name: a, version: b}\n")
+    path.write_text("apiVersion: airlock/v2\nkind: Policy\n" + meta)
     with pytest.raises(ConfigError, match="apiVersion"):
         load_policy(path)
 
 
-def test_digest_changes_with_text(tmp_path: Path) -> None:
-    a = load_policy(write_policy(tmp_path, "rules: []\n", "a.yaml"))
-    b = load_policy(write_policy(tmp_path, "rules: []\n# comment\n", "b.yaml"))
-    assert a.digest != b.digest
-
-
 # --- Evaluation ---------------------------------------------------------------------------------
 
-PT = Subject.of_artifact(ArtifactRef("models/x.pt"))
-IMAGE = Subject.of_artifact(ArtifactRef("images/legacy.tar"))
+PT = Subject.of_path("models/x.pt")
+IMAGE = Subject.of_path("images/legacy.tar")
 
 
 @pytest.fixture
 def policy(tmp_path: Path) -> Policy:
-    body = """\
-    defaults:
-      approvals: 1
+    body = f"""\
     rules:
       - rule: "malware.*"
         notAssessed: block
@@ -194,23 +266,41 @@ def policy(tmp_path: Path) -> Policy:
       - rule: "container.*"
         disposition: require-approval
         approvals: 2
-      - rule: "container.*"
+      - rule: "vuln.component.known"
+        where: {{kev: "true"}}
+        disposition: block
+      - rule: "vuln.*"
+        disposition: warn
+      - rule: "integrity.*"
         disposition: allow
     waivers:
       - id: W-1
         rule: container.user.root
-        subject: images/legacy.tar
-        sha256: "{sha}"
+        subject: "images/*.tar"
+        sha256: "{"c" * 64}"
         justification: isolated namespace
-        approvedBy: "ed25519:0123456789abcdef"
+        approvedBy: "{KEY_ID}"
         expires: 2027-01-31
       - id: W-2
-        rule: "container.*"
-        subject: "images/old-*.tar"
+        rule: container.user.root
+        subject: images/old-app.tar
         justification: expired exception
-        approvedBy: "ed25519:0123456789abcdef"
+        approvedBy: "{KEY_ID}"
         expires: 2026-01-31
-    """.replace("{sha}", "c" * 64)
+      - id: W-3
+        rule: vuln.component.known
+        subject: "pkg:pypi/libfoo@1.0"
+        where: {{cve: CVE-2026-0001}}
+        justification: not reachable
+        approvedBy: "{KEY_ID}"
+        expires: 2027-01-31
+      - id: W-4
+        rule: integrity.hash.mismatch
+        subject: models/x.pt
+        justification: nice try
+        approvedBy: "{KEY_ID}"
+        expires: 2027-01-31
+    """
     return load_policy(write_policy(tmp_path, body))
 
 
@@ -230,7 +320,6 @@ def test_defaults_by_severity(policy: Policy, findings: FindingFactory) -> None:
 def test_rule_without_outcome_for_result_is_skipped(
     policy: Policy, findings: FindingFactory
 ) -> None:
-    # rules[0] only sets notAssessed, so a FAIL falls through to the defaults
     na = findings("malware.scan.detected", PT, Result.NOT_ASSESSED, tool=TOOL, reason="absent")
     assert policy.decide(na, today=TODAY).matched == "rules[0]"
     fail = findings("malware.scan.detected", PT, Result.FAIL, tool=TOOL)
@@ -240,24 +329,41 @@ def test_rule_without_outcome_for_result_is_skipped(
 
 
 def test_first_match_wins_with_path_scope(policy: Policy, findings: FindingFactory) -> None:
-    dev = Subject.of_artifact(ArtifactRef("dev-tools/ide/settings.json"))
+    dev = Subject.of_path("dev-tools/ide/settings.json")
     in_scope = findings("offline.telemetry.enabled", dev, Result.FAIL, tool=TOOL)
     out_of_scope = findings("offline.telemetry.enabled", PT, Result.FAIL, tool=TOOL)
     assert policy.decide(in_scope, today=TODAY).matched == "rules[1]"
     assert policy.decide(out_of_scope, today=TODAY).matched == "rules[2]"
     bundle = findings("offline.telemetry.enabled", Subject.bundle(), Result.FAIL, tool=TOOL)
     assert policy.decide(bundle, today=TODAY).matched == "rules[2]"
+    unit = Subject.of_unit(Unit(UnitKind.CONTAINER_IMAGE, "x", ArtifactRef("dev-tools/img")))
+    in_unit = findings("offline.telemetry.enabled", unit, Result.FAIL, tool=TOOL)
+    assert policy.decide(in_unit, today=TODAY).matched == "rules[1]"
 
 
-def test_unit_subjects_match_on_root(policy: Policy, findings: FindingFactory) -> None:
-    unit = Subject.of_unit(Unit(UnitKind.CONTAINER_IMAGE, "x", "dev-tools/img"))
-    f = findings("offline.telemetry.enabled", unit, Result.FAIL, tool=TOOL)
-    assert policy.decide(f, today=TODAY).matched == "rules[1]"
+def test_where_selects_on_finding_attributes(policy: Policy, findings: FindingFactory) -> None:
+    libfoo = Subject.of_component("pkg:pypi/libfoo@1.0")
+
+    def vuln(cve: str, kev: str) -> Disposition:
+        finding = findings(
+            "vuln.component.known",
+            libfoo,
+            Result.FAIL,
+            tool=TOOL,
+            attributes={"cve": cve, "kev": kev},
+            discriminator=cve,
+        )
+        decision = policy.decide(finding, today=TODAY)
+        return decision.disposition
+
+    assert vuln("CVE-2026-0002", "true") is Disposition.BLOCK
+    assert vuln("CVE-2026-0002", "false") is Disposition.WARN
+    # The waiver covers one CVE on one component, not every vulnerability in it.
+    assert vuln("CVE-2026-0001", "true") is Disposition.ALLOW
 
 
 def test_approvals(policy: Policy, findings: FindingFactory) -> None:
-    other = Subject.of_artifact(ArtifactRef("images/app.tar"))
-    f = findings("container.user.root", other, Result.FAIL, tool=TOOL)
+    f = findings("container.user.root", Subject.of_path("images/app.tar"), Result.FAIL, tool=TOOL)
     d = policy.decide(f, today=TODAY)
     assert (d.disposition, d.approvals_required) == (Disposition.REQUIRE_APPROVAL, 2)
     block = findings("model.pickle.dangerous-import", PT, Result.FAIL, tool=TOOL)
@@ -281,9 +387,35 @@ def test_waiver_pinned_to_content(policy: Policy, findings: FindingFactory) -> N
 
 def test_expired_waivers(policy: Policy, findings: FindingFactory) -> None:
     assert [w.id for w in policy.expired_waivers(TODAY)] == ["W-2"]
-    old = Subject.of_artifact(ArtifactRef("images/old-app.tar"))
-    f = findings("container.user.root", old, Result.FAIL, tool=TOOL)
+    f = findings(
+        "container.user.root", Subject.of_path("images/old-app.tar"), Result.FAIL, tool=TOOL
+    )
     assert policy.decide(f, today=TODAY).waiver is None
+
+
+def test_floor_cannot_be_waived_or_lowered(
+    policy: Policy, findings: FindingFactory, registry: RuleRegistry
+) -> None:
+    tampered = findings("integrity.hash.mismatch", PT, Result.FAIL, tool=TOOL)
+    # Without the floor, the policy's `integrity.*: allow` rule and waiver W-4 would both apply.
+    assert policy.decide(tampered, today=TODAY).waiver == "W-4"
+    [decision] = evaluate(policy, registry, [tampered], today=TODAY)
+    assert decision.disposition is Disposition.BLOCK
+    assert decision.matched == "floor(rules[6])"
+    assert decision.waiver is None
+    # A floor does not turn "could not check" into a block.
+    skipped = findings("integrity.hash.mismatch", PT, Result.NOT_ASSESSED, tool=TOOL, reason="r")
+    [decision] = evaluate(policy, registry, [skipped], today=TODAY)
+    assert decision.disposition is Disposition.WARN
+
+
+def test_evaluate_passes_content_hashes(
+    policy: Policy, findings: FindingFactory, registry: RuleRegistry
+) -> None:
+    f = findings("container.user.root", IMAGE, Result.FAIL, tool=TOOL)
+    hashes = {"images/legacy.tar": "c" * 64}
+    [decision] = evaluate(policy, registry, [f], today=TODAY, content_hashes=hashes)
+    assert decision.waiver == "W-1"
 
 
 @pytest.mark.parametrize(
@@ -295,6 +427,13 @@ def test_expired_waivers(policy: Policy, findings: FindingFactory) -> None:
         ("LicenseRef-llama3.1", Disposition.REQUIRE_APPROVAL),
         ("WTFPL", Disposition.REQUIRE_APPROVAL),
         (None, Disposition.REQUIRE_APPROVAL),
+        ("MIT OR AGPL-3.0-only", Disposition.ALLOW),
+        ("MIT AND AGPL-3.0-only", Disposition.BLOCK),
+        ("(MIT OR Apache-2.0) AND LGPL-3.0-only", Disposition.REQUIRE_APPROVAL),
+        ("Apache-2.0 WITH LLVM-exception", Disposition.ALLOW),
+        ("MIT OR", Disposition.REQUIRE_APPROVAL),
+        ("(MIT", Disposition.REQUIRE_APPROVAL),
+        ("MIT Apache-2.0", Disposition.REQUIRE_APPROVAL),
     ],
 )
 def test_licences(licence: str | None, expected: Disposition) -> None:
