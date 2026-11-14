@@ -14,7 +14,7 @@ from airlock import __version__
 from airlock.analyzer import TOOL
 from airlock.approvals import approve as run_approve
 from airlock.core.errors import AirlockError, ConfigError
-from airlock.core.model import Analysis, Stage
+from airlock.core.model import Analysis, Stage, Verdict
 from airlock.core.policy import Policy, load_policy
 from airlock.core.serde import to_data
 from airlock.core.signing import (
@@ -24,12 +24,27 @@ from airlock.core.signing import (
     load_verify_key,
     save_key,
 )
+from airlock.eval_run import run_eval, write_results
 from airlock.ledger import Ledger
 from airlock.model_inspect import inspect_paths
 from airlock.model_summary import render_packages
+from airlock.offline_report import (
+    offline_findings,
+    offline_summary,
+    recommended_configuration,
+    render_offline,
+)
 from airlock.pack import pack as run_pack
 from airlock.scanners import run_scanners
-from airlock.session import EXIT_USAGE, Session, exit_code, utc_now
+from airlock.session import (
+    EXIT_BLOCKED,
+    EXIT_OK,
+    EXIT_REFUSED,
+    EXIT_USAGE,
+    Session,
+    exit_code,
+    utc_now,
+)
 from airlock.summary import render
 from airlock.verify import verify as run_verify
 
@@ -337,6 +352,86 @@ def plugins_check(policy: Path) -> None:
     sys.exit(exit_code(assessment))
 
 
+@main.command("offline-check")
+@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--policy", type=_FILE, help="Policy file (default: built-in defaults).")
+@click.option("--corpus", multiple=True, help="Path glob of knowledge-base documents (repeatable).")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Print the findings and configuration as JSON."
+)
+@_reports_errors
+def offline_check(
+    inputs: tuple[Path, ...], policy: Path | None, corpus: tuple[str, ...], as_json: bool
+) -> None:
+    """Report what INPUTS will try to download, report or call once disconnected.
+
+    Ends with the configuration to set on the high side. Exit codes are those of
+    'airlock verify', over the offline and runtime findings only.
+    """
+    result = inspect_paths(
+        inputs,
+        policy=_policy(policy),
+        run_plugins=False,
+        corpora=corpus,
+        stage=Stage.OFFLINE_CHECK,
+    )
+    findings = offline_findings(result.assessment)
+    summary = offline_summary(result.assessment)
+    if as_json:
+        environment, settings = recommended_configuration(findings)
+        document = {
+            "verdict": summary.verdict.value,
+            "findings": [to_data(f) for f in findings],
+            "recommended": {"environment": environment, "settings": settings},
+        }
+        click.echo(json.dumps(document, indent=2, sort_keys=True))
+    else:
+        click.echo(render_offline(result.assessment))
+        click.echo(f"Verdict: {summary.verdict.value}")
+    if summary.verdict is Verdict.REFUSED:
+        sys.exit(EXIT_REFUSED)
+    sys.exit(EXIT_OK if summary.verdict is Verdict.PASSED else EXIT_BLOCKED)
+
+
+@main.group("eval")
+def eval_group() -> None:
+    """Behavioural verification: run pinned evaluation sets through a pinned local runtime."""
+
+
+@eval_group.command("run")
+@click.argument("evalset", type=_FILE)
+@click.option("--model", "model_path", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--runtime", required=True, help="Name of a runtime under 'runtimes' in the policy.")
+@click.option("--policy", required=True, type=_FILE, help="Policy that configures the runtime.")
+@click.option("--reference", type=_FILE, help="Results from the other side to compare with.")
+@click.option("--side", type=click.Choice(["low", "high"]), default="low", show_default=True)
+@click.option("-o", "--out", type=click.Path(dir_okay=False, path_type=Path), help="Write results.")
+@_reports_errors
+def eval_run(
+    evalset: Path,
+    model_path: Path,
+    runtime: str,
+    policy: Path,
+    reference: Path | None,
+    side: str,
+    out: Path | None,
+) -> None:
+    """Run EVALSET against the model at --model and record every output.
+
+    On the low side, keep the results (--out) and deliver them with the model. On the high side,
+    pass them as --reference: the set and model must be the same, and every output must match
+    within the set's tolerance. Exit codes are those of 'airlock verify'.
+    """
+    run = run_eval(evalset, model_path, runtime, _policy(policy), reference=reference, side=side)
+    if out is not None:
+        write_results(out, run.results)
+    cases = run.results.get("cases")
+    count = len(cases) if isinstance(cases, list) else 0
+    click.echo(f"{count} case(s) run on {runtime}")
+    click.echo(render(run.assessment))
+    sys.exit(exit_code(run.assessment))
+
+
 @main.group()
 def model() -> None:
     """Inspect AI models."""
@@ -346,16 +441,25 @@ def model() -> None:
 @click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
 @click.option("--policy", type=_FILE, help="Policy file (default: built-in defaults).")
 @click.option("--json", "as_json", is_flag=True, help="Print the records and findings as JSON.")
+@click.option(
+    "--corpus",
+    multiple=True,
+    help="Path glob of documents a knowledge base will be built from (repeatable).",
+)
 @click.option("-v", "--verbose", is_flag=True, help="Also list allowed findings.")
 @_reports_errors
 def model_inspect(
-    inputs: tuple[Path, ...], policy: Path | None, as_json: bool, verbose: bool
+    inputs: tuple[Path, ...],
+    policy: Path | None,
+    as_json: bool,
+    corpus: tuple[str, ...],
+    verbose: bool,
 ) -> None:
     """Record and check the model packages in INPUTS, in place, without packing.
 
     Exit codes are those of 'airlock verify'.
     """
-    result = inspect_paths(inputs, policy=_policy(policy))
+    result = inspect_paths(inputs, policy=_policy(policy), corpora=corpus)
     if as_json:
         document = {
             "units": [to_data(u) for u in result.analysis.units],

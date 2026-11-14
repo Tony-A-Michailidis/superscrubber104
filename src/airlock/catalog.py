@@ -13,6 +13,7 @@ Two classes of rule, with different rules of engagement:
 
 from airlock.catalog_data import DATA_RULES
 from airlock.catalog_models import MODEL_RULES
+from airlock.catalog_offline import OFFLINE_RULES
 from airlock.catalog_scanners import SCANNER_RULES
 from airlock.catalog_software import SOFTWARE_RULES
 from airlock.core.controls import ControlCatalog
@@ -411,6 +412,7 @@ ALL = (
     *SOFTWARE_RULES,
     *SCANNER_RULES,
     *DATA_RULES,
+    *OFFLINE_RULES,
 )
 
 

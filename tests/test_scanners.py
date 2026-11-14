@@ -32,7 +32,13 @@ class FakeTools:
         monkeypatch.setattr(base, "run_process", self._run)
 
     def _run(
-        self, command: Sequence[str], *, timeout: float, workdir: Path, ok: Sequence[int] = (0,)
+        self,
+        command: Sequence[str],
+        *,
+        timeout: float,
+        workdir: Path,
+        ok: Sequence[int] = (0,),
+        stdin: bytes | None = None,
     ) -> Completed:
         self.calls.append(list(command))
         tool = Path(command[0]).stem
@@ -418,5 +424,112 @@ def test_example_policy_configures_every_plugin() -> None:
     from airlock.core.policy import load_policy
 
     policy = load_policy(Path(__file__).parent.parent / "examples" / "policy.yaml")
-    assert set(policy.plugins) == {"clamav", "trivy", "kev"}
+    assert set(policy.plugins) == {"clamav", "trivy", "kev", "semgrep", "bandit"}
+    assert set(policy.runtimes) == {"llama-cpp"} and len(policy.compatibility) == 1
     assert policy.plugins["clamav"].database is not None
+
+
+# --- static analysis ----------------------------------------------------------------------------
+
+
+def _semgrep(args: Sequence[str]) -> Completed:
+    if args == ["--version"]:
+        return Completed(0, "1.86.0\n", "")
+    files = [a for a in args if a.endswith((".py", ".ts"))]
+    results = [
+        {
+            "check_id": "python.lang.security.audit.subprocess-shell-true",
+            "path": f,
+            "start": {"line": 3},
+            "extra": {
+                "severity": "ERROR",
+                "message": "shell=True",
+                "metadata": {"cwe": ["CWE-78"]},
+            },
+        }
+        for f in files
+        if f.endswith("main.py")
+    ]
+    output = Path(args[args.index("--output") + 1])
+    output.write_text(json.dumps({"results": results, "errors": []}), encoding="utf-8")
+    return Completed(0, "", "")
+
+
+def _bandit(args: Sequence[str]) -> Completed:
+    if args == ["--version"]:
+        return Completed(0, "bandit 1.7.9\n  python version = 3.12\n", "")
+    files = [a for a in args if a.endswith(".py")]
+    results = [
+        {
+            "filename": f,
+            "line_number": 1,
+            "test_id": "B403",
+            "test_name": "blacklist",
+            "issue_severity": "LOW",
+            "issue_confidence": "LOW",
+            "issue_text": "Consider possible security implications of pickle.",
+            "issue_cwe": {"id": 502},
+        }
+        for f in files
+    ]
+    output = Path(args[args.index("-o") + 1])
+    output.write_text(json.dumps({"results": results, "errors": []}), encoding="utf-8")
+    return Completed(1 if results else 0, "", "")
+
+
+def _sast_policy(tools: Path) -> str:
+    semgrep, semgrep_sha = _binary(tools, "semgrep")
+    bandit, bandit_sha = _binary(tools, "bandit")
+    rules = tools / "semgrep-rules"
+    rules.mkdir()
+    (rules / "python.yaml").write_text("rules: []\n")
+    return (
+        "plugins:\n"
+        f"  semgrep:\n    path: {semgrep.as_posix()}\n    database: {rules.as_posix()}\n"
+        f"    binarySha256: {semgrep_sha}\n    files: {{python.yaml: {_sha(rules / 'python.yaml')}}}\n"
+        f"  bandit:\n    path: {bandit.as_posix()}\n    binarySha256: {bandit_sha}\n"
+    )
+
+
+def test_static_analysis_of_first_party_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import zipfile
+
+    tools = FakeTools(monkeypatch)
+    tools.handlers["semgrep"] = _semgrep
+    tools.handlers["bandit"] = _bandit
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as archive:
+        archive.writestr("project/run.py", "import os\n")
+    root = write(
+        tmp_path / "d",
+        {
+            "app/main.py": "import pickle\nimport subprocess\nsubprocess.run(cmd, shell=True)\n",
+            "web/app.ts": "export const x = 1;\n",
+            "venv/lib/python3.12/site-packages/lib/mod.py": "import pickle\n",
+            "old/project.zip": zipped.getvalue(),
+        },
+    )
+    result = inspect(root, policy_yaml=_sast_policy(tmp_path / "tools"), plugins=True)
+    found = [f for f in findings_of(result)["sast.finding"]]
+    fails = {
+        (f.subject.display, f.attributes["scanner"]): f for f in found if f.result is Result.FAIL
+    }
+    assert set(fails) == {("app/main.py#line 3", "semgrep"), ("app/main.py#line 1", "bandit")}
+    assert fails[("app/main.py#line 3", "semgrep")].severity is Severity.HIGH
+    assert fails[("app/main.py#line 1", "bandit")].severity is Severity.INFO  # low, low confidence
+    assert fails[("app/main.py#line 1", "bandit")].detail["cwe"] == "CWE-502"
+    gaps = {f.subject.display for f in found if f.result is Result.NOT_ASSESSED}
+    assert gaps == {"old/project.zip"}
+    scanned = [a for c in tools.commands("semgrep") if c[0] == "scan" for a in c]
+    assert not any("site-packages" in a for a in scanned)
+    assert any(a.endswith("app.ts") for a in scanned) and "--metrics=off" in scanned
+
+
+def test_sast_gap_only_when_there_is_source(tmp_path: Path) -> None:
+    found = findings_of(inspect(write(tmp_path / "d", {"a.txt": "x"}), plugins=True))
+    assert "sast.finding" not in found
+    found = findings_of(inspect(write(tmp_path / "e", {"a.py": "x = 1\n"}), plugins=True))
+    assert found["sast.finding"][0].result is Result.NOT_ASSESSED

@@ -80,6 +80,9 @@ class Context:
     recorder: Recorder
     now: datetime
     plugins: Mapping[str, "Plugin"] = field(default_factory=dict)
+    # Path globs whose documents will be fed to a model (knowledge-base corpora): from the
+    # transfer request's ``unit: knowledge-base`` entries, or given on the command line.
+    corpora: tuple[str, ...] = ()
 
 
 @runtime_checkable

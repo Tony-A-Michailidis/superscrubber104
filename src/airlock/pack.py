@@ -82,7 +82,7 @@ def pack(
     request: TransferRequest | None = load_request(request_path) if request_path else None
     planned = plan_inputs(inputs)
     _prepare_output(output, inputs)
-    session = Session.start(policy, now)
+    session = Session.start(policy, now, request.corpora if request else ())
     ctx, recorder = session.ctx, session.ctx.recorder
 
     payload = output / layout.PAYLOAD

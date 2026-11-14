@@ -41,11 +41,12 @@ class Session:
     ctx: Context
 
     @classmethod
-    def start(cls, policy: Policy, now: datetime) -> "Session":
+    def start(cls, policy: Policy, now: datetime, corpora: tuple[str, ...] = ()) -> "Session":
         catalog = policy.catalog()
         registry = builtin_registry(catalog)
         factory = FindingFactory(registry, ControlMapping(catalog, policy.control_overrides))
-        return cls(registry, Context(policy=policy, recorder=Recorder(factory), now=now))
+        ctx = Context(policy=policy, recorder=Recorder(factory), now=now, corpora=corpora)
+        return cls(registry, ctx)
 
     def finish(
         self,

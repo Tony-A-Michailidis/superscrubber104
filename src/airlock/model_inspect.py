@@ -38,10 +38,12 @@ def inspect_paths(
     now: datetime | None = None,
     handlers: Sequence[Handler] | None = None,
     run_plugins: bool = True,
+    corpora: Sequence[str] = (),
+    stage: Stage = Stage.INSPECT,
 ) -> InspectResult:
     now = now or utc_now()
     planned = plan_inputs(inputs)
-    session = Session.start(policy, now)
+    session = Session.start(policy, now, tuple(corpora))
     ctx = session.ctx
     files: dict[str, FileView] = {}
     with tempfile.TemporaryDirectory(prefix="airlock-") as scratch:
@@ -68,7 +70,7 @@ def inspect_paths(
     plugins = run_scanners(ctx, targets(files.values()), analysis) if run_plugins else ()
     check_policy(ctx)
     assessment = session.finish(
-        Stage.INSPECT,
+        stage,
         manifest_digest=None,
         content_hashes={path: view.sha256 for path, view in files.items() if view.sha256},
         plugins=plugins,

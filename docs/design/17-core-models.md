@@ -130,6 +130,9 @@ spec:
       upstream: { type: huggingface, reference: example-org/tiny-chat, revision: 0123… }
     - name: app
       paths: ["app/**"]
+    - name: policies-corpus       # documents a knowledge base will be built from (doc 22)
+      unit: knowledge-base
+      paths: ["rag/docs/**"]
 ```
 
 - The request is written on the packing side, so the receiving side treats it as a claim. Whether an approver's signature counts is decided only by keys pinned in the receiving side's policy.
@@ -171,6 +174,13 @@ trust:
       scope: [package.rpm, repo.dnf]
       fingerprints: ["…"]         # acceptable (sub)keys inside the file
       validUntil: 2030-01-01
+    - name: sigstore-public-good  # model signatures, keyless (doc 24)
+      type: sigstore              # the file is Sigstore's trusted_root.json
+      file: keys/sigstore/trusted_root.json
+      sha256: "…"
+      scope: ["model.*"]
+      identities: ["release@example-org.example"]   # required for sigstore: certificate SANs (globs)
+      issuers: ["https://accounts.google.com"]       # optional: OIDC issuers
   minimum:                        # weakest acceptable upstream trust level per artifact kind
     "package.rpm": signature
     "model.*": pinned-checksum
@@ -241,6 +251,25 @@ plugins:                          # optional external scanners; see doc 21 and d
   kev:                            # a data feed: CISA Known Exploited Vulnerabilities
     path: feeds/known_exploited_vulnerabilities.json
     maxDbAge: 2d
+  semgrep:                        # static analysis; database is a local rules directory
+    path: tools/semgrep/bin/semgrep
+    database: tools/semgrep/rules
+  bandit:
+    path: tools/bandit/bin/bandit
+
+runtimes:                         # model runtimes for airlock eval (doc 24); same fields as plugins
+  llama-cpp:
+    path: tools/llama.cpp/llama-cli
+    binarySha256: "…"
+    args: ["-m", "{model}/model.gguf", "-p", "{prompt}", "--seed", "{seed}", "-n", "{max_tokens}"]
+    stdin: false                  # true: the prompt goes on standard input
+    versionArgs: ["--version"]
+
+runtime:                          # compatibility rules for runtime profiles (doc 23)
+  compatibility:
+    - when: {vllm: "0.6.*"}
+      requires: {torch: "2.4.*", cuda: ">=12.1"}
+      reason: vLLM 0.6 wheels are built against torch 2.4 and CUDA 12
 
 freshness:
   feeds: { default: 7d, kev: 2d }

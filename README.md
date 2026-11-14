@@ -1,6 +1,6 @@
 # airlock
 
-> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Models, datasets, knowledge bases, notebooks, agent and MCP configuration, container images, and Python and npm environments are inspected; secrets and active content are found; ClamAV and Trivy run as optional pinned plugins. Reports are next. Not ready for real transfers. `airlock` is a working name.
+> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Models (with their publishers' signatures), datasets, knowledge bases and corpora, notebooks, agent and MCP configuration, container images, the inference and GPU stack, and Python and npm environments are inspected; secrets, active content and anything that needs the internet are found; ClamAV, Trivy, Semgrep and Bandit run as optional pinned plugins; models can be evaluated on both sides. Reports are next. Not ready for real transfers. `airlock` is a working name.
 
 **Make agentic AI projects accreditable in high-assurance and disconnected environments.**
 
@@ -62,13 +62,17 @@ model package  .  (example-org/tiny-chat)
 
 The same inspection covers the rest of a delivery. MCP configs, agent settings, skills and instruction files are checked for shell launchers, runtime fetches, broad permissions, literal credentials and injected instructions; MCP server code for what its tools can reach. Container images (docker save, OCI archives and layouts) are verified blob by blob, and their layers are inspected like any other archive. Python and npm lockfiles are resolved against the wheels, sdists and tarballs in the delivery, so a requirement that would need the internet on the high side, or a package that does not match its lockfile hash, is caught before transfer. See [agents, containers, packages and source](docs/design/20-software-and-agents.md).
 
-The data around a model is covered too: datasets (Parquet footers, Hugging Face cards and `save_to_disk` layouts, loading scripts), knowledge bases (FAISS, LangChain, Chroma, LlamaIndex) with a prompt-injection scan of their stored documents and a check that the embedding model that built each index is in the delivery, notebooks, and classic ML and MLflow models. See [data and knowledge](docs/design/22-data-and-knowledge.md).
+The data around a model is covered too: datasets (Parquet footers, Hugging Face cards and `save_to_disk` layouts, loading scripts), knowledge bases (FAISS, LangChain, Chroma, LlamaIndex, and document folders the transfer request declares as a corpus) with a scan of their documents for planted instructions and hidden text and a check that the embedding model that built each index is in the delivery, notebooks, and classic ML and MLflow models. See [data and knowledge](docs/design/22-data-and-knowledge.md).
 
-Every text file, including files inside container layers and packages, is searched for credentials, and documents for macros, PDF JavaScript and remote templates. Malware and vulnerability scanning use ClamAV and Trivy, plus the CISA KEV catalogue, as optional plugins that airlock pins and checks before it trusts them; without them those checks are recorded as not assessed. `airlock plugins check` reports their state. See [scanners](docs/scanners.md).
+Every text file, including files inside container layers and packages, is searched for credentials, and documents for macros, PDF JavaScript and remote templates. Malware scanning, vulnerability scanning and static analysis use ClamAV, Trivy (with the CISA KEV catalogue), Semgrep and Bandit as optional plugins that airlock pins and checks before it trusts them; without them those checks are recorded as not assessed. `airlock plugins check` reports their state. See [scanners](docs/scanners.md).
+
+`airlock offline-check` reports what a delivery will try to download, report or call once disconnected (model hubs, installs, telemetry, cloud AI services, external images) and prints the configuration to set on the high side. A `RuntimeProfile` declares the stack models were tested on; airlock checks it against what is delivered and against NVIDIA's driver/CUDA table and the site's own compatibility rules. See [offline readiness and runtime profiles](docs/design/23-offline-and-runtime.md).
+
+Publishers' OpenSSF model signatures are verified offline (a pinned key, a CA, or Sigstore keyless against a pinned trusted root), and `airlock eval run` runs a pinned evaluation set through a pinned local runtime on each side and compares the answers, so a swapped or misbehaving model is caught. See [signatures and evaluation](docs/design/24-signatures-and-eval.md).
 
 `airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 
-Planned: `airlock report`, `airlock offline-check`, `airlock stage`, `airlock patch`, `airlock eval`.
+Planned: `airlock report`, `airlock stage`, `airlock patch`.
 
 ## Roadmap
 

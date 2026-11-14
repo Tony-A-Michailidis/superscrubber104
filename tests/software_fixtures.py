@@ -46,7 +46,13 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def image_config(diff_ids: list[str], *, user: str = "app", env: list[str] | None = None) -> bytes:
+def image_config(
+    diff_ids: list[str],
+    *,
+    user: str = "app",
+    env: list[str] | None = None,
+    cmd: list[str] | None = None,
+) -> bytes:
     return json.dumps(
         {
             "architecture": "amd64",
@@ -55,6 +61,7 @@ def image_config(diff_ids: list[str], *, user: str = "app", env: list[str] | Non
                 "User": user,
                 "Env": env or ["PATH=/usr/local/bin:/usr/bin"],
                 "Entrypoint": ["/app/run"],
+                "Cmd": cmd,
                 "ExposedPorts": {"8080/tcp": {}},
                 "Labels": {"org.opencontainers.image.source": "https://example.org/app"},
             },
@@ -76,12 +83,13 @@ def docker_archive(
     tag: str = "registry.example.org/team/app:1.0",
     user: str = "app",
     env: list[str] | None = None,
+    cmd: list[str] | None = None,
     tamper_layer: bool = False,
     drop_layer: bool = False,
 ) -> bytes:
     """A legacy ``docker save`` archive: <id>/layer.tar plus <config>.json and manifest.json."""
     layer_tars = [tar_bytes(files) for files in (layers or [BASE_LAYER])]
-    config = image_config([sha(t) for t in layer_tars], user=user, env=env)
+    config = image_config([sha(t) for t in layer_tars], user=user, env=env, cmd=cmd)
     config_name = f"{sha(config)}.json"
     files: dict[str, bytes | str] = {config_name: config}
     paths = []

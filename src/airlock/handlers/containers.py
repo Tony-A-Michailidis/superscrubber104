@@ -249,9 +249,31 @@ class _Reader:
         return images
 
 
+# Environment values that are recorded (names of everything else only): offline and telemetry
+# switches, and the CUDA stack a base image declares. None of them is a secret.
+RECORDED_ENV = frozenset(
+    {
+        "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE", "HF_HUB_DISABLE_TELEMETRY",
+        "DO_NOT_TRACK", "ANONYMIZED_TELEMETRY", "GRADIO_ANALYTICS_ENABLED",
+        "STREAMLIT_BROWSER_GATHER_USAGE_STATS", "VLLM_NO_USAGE_STATS", "WANDB_MODE",
+        "TIKTOKEN_CACHE_DIR", "NLTK_DATA", "HF_HOME", "CUDA_VERSION", "NVIDIA_REQUIRE_CUDA",
+        "NV_CUDNN_VERSION", "CUDNN_VERSION", "NCCL_VERSION", "NV_LIBNCCL_PACKAGE_VERSION",
+        "TENSORRT_VERSION", "TRT_VERSION", "PYTORCH_VERSION", "NVIDIA_VISIBLE_DEVICES",
+        "ROCM_VERSION", "OLLAMA_VERSION",
+    }
+)  # fmt: skip
+_START_DOWNLOAD = re.compile(
+    r"\bollama\s+pull\b|\b(?:pip3?|uv\s+pip|npm|apt-get|apk|dnf|yum)\s+(?:install|add|ci)\b"
+    r"|\b(?:wget|curl)\s+\S*https?://|\bgit\s+clone\b|\bhuggingface-cli\s+download\b"
+)
+
+
 def _summary(image: _Image) -> dict[str, object]:
     config = image.config.get("config") or {} if image.config else {}
     env = [e for e in config.get("Env") or [] if isinstance(e, str)]
+    settings = {
+        key: value for key, _, value in (e.partition("=") for e in env) if key in RECORDED_ENV
+    }
     return {
         "name": image.name,
         "manifestDigest": image.manifest_digest,
@@ -265,6 +287,7 @@ def _summary(image: _Image) -> dict[str, object]:
         "workingDir": config.get("WorkingDir"),
         "exposedPorts": sorted((config.get("ExposedPorts") or {}).keys()),
         "env": sorted(e.split("=", 1)[0] for e in env),
+        "settings": settings,
         "labels": dict(list((config.get("Labels") or {}).items())[:50]),
         "layers": len(image.layers),
         "history": len(image.config.get("history") or []),
@@ -300,6 +323,20 @@ def _check_config(image: _Image, ctx: Context, view: ArtifactView) -> None:
         )
     else:
         ctx.recorder.passed("container.env.credential")
+    start = [str(p) for key in ("Entrypoint", "Cmd") for p in (config.get(key) or [])]
+    command = " ".join(start)
+    if _START_DOWNLOAD.search(command):
+        ctx.recorder.fail(
+            "offline.download.runtime",
+            subject,
+            tool=TOOL,
+            detail={
+                "what": "the image downloads or installs when it starts",
+                "evidence": command[:300],
+            },
+            attributes={"impact": "will-break", "what": "download at container start"},
+            discriminator="start",
+        )
 
 
 def _inspect(store: _Store, ctx: Context, view: ArtifactView, kind: str) -> Inspection:

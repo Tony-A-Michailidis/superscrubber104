@@ -79,7 +79,7 @@ A `site-packages` without a lockfile forms an installed-environment unit instead
 
 ## 20.5 Source
 
-Source files are classified by extension (`source.python`, `source.typescript`, `source.go`, ...) so that they are inventoried as what they are rather than as unclassified. Minified or generated JavaScript and CSS (very long lines, little whitespace) is `source.minified` at info: a reviewer cannot read it, so its provenance matters. Git bundles (`# v2 git bundle`) record their refs. Static analysis, secret scanning and egress checks on source arrive with task 7.
+Source files are classified by extension (`source.python`, `source.typescript`, `source.go`, ...) so that they are inventoried as what they are rather than as unclassified. Minified or generated JavaScript and CSS (very long lines, little whitespace) is `source.minified` at info: a reviewer cannot read it, so its provenance matters. Git bundles (`# v2 git bundle`) record their refs. Static analysis, secret scanning and egress checks on source are in [21](21-scanners-and-basics.md) and [23](23-offline-and-runtime.md).
 
 ## 20.6 Package allowlists
 
@@ -125,5 +125,5 @@ New controls: **AC-6** (least privilege: permissions, root user, capabilities), 
 - **Installed Python packages** are listed but their `RECORD` is not verified (installers rewrite it); only wheels are.
 - **Environment markers** are not evaluated against a target; conditional requirements are reported at low severity instead. Target matching arrives with runtime profiles (1b).
 - **Node installed packages** cannot be checked against lockfile integrity (npm keeps no hash of an installed package). Ship tarballs, or an offline mirror, for integrity.
-- **Vulnerability matching** (OSV, Grype) is not done here; it arrives with the scanner plugins (task 7). So do SAST, secret scanning in source and egress checks.
+- **Vulnerability matching**, SAST, secret scanning and egress checks are not done by these handlers; see [21](21-scanners-and-basics.md) and [23](23-offline-and-runtime.md).
 - **Other ecosystems** (Go modules, Cargo, Maven, NuGet, Conda) are inventoried by the generic handler only.

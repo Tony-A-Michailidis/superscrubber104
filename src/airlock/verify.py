@@ -9,7 +9,7 @@ assessment are covered by the signature but are never read as input.
 import json
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -292,8 +292,10 @@ class _Verifier:
 
     def inspect(self, handlers: Sequence[Handler]) -> None:
         """Re-run inspection on everything present, with this side's handlers and limits."""
+        # The request (verified with the statement) says which folders are knowledge-base corpora.
+        corpora = self.request.corpora if self.request else ()
         with tempfile.TemporaryDirectory(prefix="airlock-") as scratch:
-            analyzer = Analyzer(self.ctx, handlers, Path(scratch))
+            analyzer = Analyzer(replace(self.ctx, corpora=corpora), handlers, Path(scratch))
             for view in self.files.values():
                 analyzer.analyze(view)
             analysis = finish(analyzer, default_assemblers())

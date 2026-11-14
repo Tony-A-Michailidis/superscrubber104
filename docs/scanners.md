@@ -1,4 +1,4 @@
-# Scanners: ClamAV, Trivy and the CISA KEV feed
+# Scanners: ClamAV, Trivy, Semgrep, Bandit and the CISA KEV feed
 
 airlock works without any external scanner. Its own checks cover integrity, model formats, packages, agents, secrets and active content. Two questions need a scanner and a database that changes every day:
 
@@ -7,6 +7,7 @@ airlock works without any external scanner. Its own checks cover integrity, mode
 | Is there known malware in the delivery? | **ClamAV** (`clamscan`) | `malware.detected`: *not assessed* |
 | Do the packages and images have known vulnerabilities? | **Trivy** | `vuln.component.known`: *not assessed* |
 | Which of those vulnerabilities are being exploited? | **CISA KEV** catalogue (a data file) | vulnerability findings carry `kev=unknown` |
+| Does the delivery's own code have weaknesses? | **Semgrep** and/or **Bandit** | `sast.finding`: *not assessed* (when there is source) |
 
 "Not assessed" is a recorded gap, never a silent pass. By default it is a warning. A site that requires scanning makes it a blocker in the policy:
 
@@ -156,6 +157,54 @@ plugins:
     path: feeds/known_exploited_vulnerabilities.json
     files: { known_exploited_vulnerabilities.json: "…" }   # relative to the file's directory
     maxDbAge: 2d
+```
+
+## Semgrep (static analysis, many languages)
+
+### Get it (connected side)
+
+Semgrep is a Python package: `python -m pip install semgrep==<version>` into a dedicated virtual environment, from a pinned and hash-checked requirements file (`pip install --require-hashes -r semgrep.txt`), then carry that environment across. Semgrep runs best on Linux and macOS; on Windows use WSL.
+
+### Get the rules (connected side)
+
+airlock only ever gives Semgrep a local rules directory; it never lets it fetch rules from a registry. Pick the rule sets you trust (for example the open-source `semgrep-rules` repository, or your own), copy the `.yml`/`.yaml` files into one directory, and pin every file. A rule file in that directory that the policy does not pin is refused.
+
+### Configure
+
+```yaml
+plugins:
+  semgrep:
+    path: tools/semgrep/bin/semgrep
+    database: tools/semgrep/rules          # local rules only
+    binarySha256: "…"
+    files: { python.yaml: "…", javascript.yaml: "…" }
+    minVersion: "1.80"
+    timeout: 1h
+```
+
+airlock runs `semgrep scan --config <rules> --json --output <file> --metrics=off --disable-version-check --quiet [args...] <files...>` over the delivery's own top-level source files, scripts, MCP servers, agent hooks and model custom code, in batches. Third-party code under `site-packages`, `node_modules` and virtual environments is left out; the vulnerability scan covers it.
+
+## Bandit (static analysis, Python)
+
+Install `bandit` the same way (a pinned virtual environment) and point the policy at its launcher:
+
+```yaml
+plugins:
+  bandit:
+    path: tools/bandit/bin/bandit
+    binarySha256: "…"
+    minVersion: "1.7"
+    args: ["--skip", "B101"]               # optional: your site's choices
+```
+
+airlock runs `bandit -f json -q -o <file> [args...] <files...>` over the same first-party Python files. Bandit's severity is used, lowered one step when Bandit reports low confidence.
+
+Static-analysis findings are `sast.finding` at the severity the tool reports. Many sites treat them as a review item rather than a blocker:
+
+```yaml
+rules:
+  - rule: sast.finding
+    disposition: require-approval
 ```
 
 ## Carrying the scanners across

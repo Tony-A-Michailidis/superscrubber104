@@ -246,7 +246,8 @@ def office_zip(files: Mapping[str, str | bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("[Content_Types].xml", "<Types/>")
-        archive.writestr("word/document.xml", "<w:document/>")
+        if "word/document.xml" not in files:
+            archive.writestr("word/document.xml", "<w:document/>")
         for name, content in files.items():
             archive.writestr(name, content)
     return buffer.getvalue()

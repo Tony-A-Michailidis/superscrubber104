@@ -33,6 +33,18 @@ transfer:
 #       file: keys/RPM-GPG-KEY-AlmaLinux-9
 #       sha256: "<sha256 of the key file>"
 #       scope: [package.rpm, repo.dnf]
+#     - name: sigstore-public-good      # OpenSSF model signatures, keyless (docs/design/24)
+#       type: sigstore                  # Sigstore's trusted_root.json
+#       file: keys/sigstore/trusted_root.json
+#       sha256: "<sha256 of the file>"
+#       scope: ["model.*"]
+#       identities: ["release@example-org.example"]
+#       issuers: ["https://accounts.google.com"]
+#     - name: example-org-models        # or a publisher's own model-signing key
+#       type: x509
+#       file: keys/example-org-model-signing.pub.pem
+#       sha256: "<sha256 of the file>"
+#       scope: ["model.*"]
 #   minimum:                            # weakest acceptable proof of genuineness, per kind
 #     "package.rpm": signature
 #     "model.*": pinned-checksum
@@ -134,6 +146,30 @@ plugins:
   kev:
     path: feeds/known_exploited_vulnerabilities.json
     maxDbAge: 2d
+  semgrep:                     # static analysis of the delivery's own code; local rules only
+    path: tools/semgrep/bin/semgrep
+    database: tools/semgrep/rules
+    binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  bandit:
+    path: tools/bandit/bin/bandit
+    binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
+
+# Model runtimes for `airlock eval run` (docs/design/24). airlock never loads a model itself.
+runtimes:
+  llama-cpp:
+    path: tools/llama.cpp/llama-cli
+    binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    args: ["-m", "{model}/model.gguf", "-p", "{prompt}", "--seed", "{seed}", "--temp", "{temperature}",
+           "-n", "{max_tokens}", "--no-display-prompt"]
+    versionArgs: ["--version"]
+    timeout: 10m
+
+# Site compatibility rules for runtime profiles (docs/design/23); NVIDIA's driver table is built in.
+runtime:
+  compatibility:
+    - when: {vllm: "0.6.*"}
+      requires: {torch: "2.4.*", cuda: ">=12.1"}
+      reason: vLLM 0.6 wheels are built against torch 2.4 and CUDA 12
 
 freshness:
   feeds:

@@ -1,6 +1,6 @@
 # 21. The basics: secrets, executables, active content, and scanner plugins
 
-> **Status: implemented** (task 7, first part). Spec: [§17](13-checks-and-controls.md) (secrets, malware, vulnerability matching, scanner plugins), the binaries and documents rows of [§6](04-artifact-coverage.md). Setup guide for operators: [docs/scanners.md](../scanners.md).
+> **Status: implemented** (task 7). Spec: [§17](13-checks-and-controls.md) (secrets, malware, vulnerability matching, scanner plugins), the binaries and documents rows of [§6](04-artifact-coverage.md). Setup guide for operators: [docs/scanners.md](../scanners.md).
 
 Every delivery gets these checks, AI or not. Three are built in and need nothing external; two need a scanner and a database that changes daily, and are optional plugins. The rule from CLAUDE.md applies throughout: what could not be checked is recorded as *not assessed*, never left out.
 
@@ -85,6 +85,15 @@ Always offline: `--skip-db-update --skip-java-db-update --offline-scan --cache-d
 
 The KEV feed is a data-only plugin (no binary) so that it gets the same pinning, age check and status record as a scanner. It loads first; Trivy marks each finding `kev=true` if the vulnerability id or any vendor alias is in the catalogue, `kev=false` if not, `kev=unknown` if no catalogue was loaded.
 
+### Semgrep and Bandit (static analysis)
+
+Static analysis looks at the delivery's **own** code: top-level source files, scripts, agent hooks and skills, MCP servers and model custom code (`modeling_*.py`). Code under `site-packages`, `node_modules` and virtual environments is left out. It is third-party code, covered by the vulnerability scan, and running static analysis over other people's libraries produces noise nobody reviews. Source inside a zipped project (an archive that is not a package or an image) is recorded as not assessed: deliver it unpacked.
+
+* **Semgrep** (`semgrep scan`) runs with the pinned local rules directory as `--config`, `--metrics=off` and `--disable-version-check`. It never fetches rules from a registry, and a rules directory holding an unpinned rule file is refused like an unpinned ClamAV signature. Severity: `ERROR` high, `WARNING` medium, `INFO` low.
+* **Bandit** runs its built-in tests over Python files. Severity is Bandit's; a low-confidence result is lowered one step.
+
+Files go to the tools in batches of 200, so command lines stay within Windows' limit. Each result is `sast.finding` on the file and line, with the rule, message, CWE and confidence. When neither tool is configured and the delivery holds first-party source, `sast.finding` is not assessed for the bundle.
+
 ### Gaps are explicit
 
 If no malware scanner ran, `malware.detected` is not assessed for the bundle, with the reason "no malware scanner is configured (plugins.clamav)". The same goes for `vuln.component.known`. Defaults make that a warning; `notAssessed: block` on the rule makes scanning mandatory.
@@ -99,6 +108,7 @@ If no malware scanner ran, `malware.detected` is not assessed for the bundle, wi
 | `malware.detected` | critical | policy (a site may set `overridable: false`) |
 | `secret.detected` | high (per type; low under test paths) | policy |
 | `vuln.component.known` | from the scanner | policy |
+| `sast.finding` | from the analyser (medium by default) | policy |
 | `plugin.version.unsupported`, `plugin.scan.error`, `plugin.required.missing` | high | policy |
 | `document.active-content` | medium (high for launch actions, JavaScript, external templates, OLE packages) | policy |
 | `plugin.data.stale` | medium | policy |
@@ -112,3 +122,4 @@ If no malware scanner ran, `malware.detected` is not assessed for the bundle, wi
 - **PDF:** streams other than object streams are not inflated, and encrypted PDFs are not decrypted; obfuscated JavaScript inside an ordinary content stream would be missed by the keyword search (ClamAV covers known samples).
 - **ClamAV** reports the archive that contains a detection, not the member.
 - **Trivy:** a root filesystem inside a non-image archive is not scanned; lockfile entries without a distribution in the delivery are not scanned (they are reported as unresolvable). Grype and OSV-Scanner are not wrapped yet; the `Scanner` protocol is where they would go.
+- **Static analysis** sees only top-level first-party files. Semgrep's native Windows support is limited; run it on Linux, macOS or WSL. Neither tool was run in development (the same stand-in approach as the other scanners).

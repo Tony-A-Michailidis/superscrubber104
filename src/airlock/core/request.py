@@ -67,6 +67,16 @@ class TransferRequest:
     approvers: tuple[Approver, ...] = ()
     allow_undeclared: bool = False
 
+    @property
+    def corpora(self) -> tuple[str, ...]:
+        """Paths declared as knowledge bases: their documents will be fed to a model."""
+        return tuple(
+            path
+            for entry in self.contents
+            if entry.unit is UnitKind.KNOWLEDGE_BASE
+            for path in entry.paths
+        )
+
     def entries_for(self, path: str) -> tuple[ContentEntry, ...]:
         """Every content entry that declares ``path``. A file may belong to several."""
         return tuple(entry for entry in self.contents if entry.covers(path))

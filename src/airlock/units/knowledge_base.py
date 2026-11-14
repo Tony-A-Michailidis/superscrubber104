@@ -40,7 +40,7 @@ TOOL = ToolRef("airlock.knowledge-base", __version__)
 _CORE = frozenset(
     {
         "vector-index", "chroma-db", "llamaindex-vector-store", "llamaindex-docstore",
-        "llamaindex-index-store", "lance-manifest", "qdrant-snapshot",
+        "llamaindex-index-store", "lance-manifest", "qdrant-snapshot", "corpus-document",
     }
 )  # fmt: skip
 

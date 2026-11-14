@@ -7,7 +7,7 @@ the whole delivery so that the gap is visible in the evidence, never silent. See
 """
 
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 from airlock.core.interfaces import Context
@@ -22,17 +22,28 @@ from airlock.scanners.base import (
 )
 from airlock.scanners.clamav import ClamAV
 from airlock.scanners.kev import KevFeed
+from airlock.scanners.sast import Bandit, Semgrep, has_source
 from airlock.scanners.trivy import Trivy
 from airlock.walker import FileView
 
 __all__ = ["Target", "default_scanners", "run_scanners", "targets"]
 
-# What each capability checks, and how to fill the gap when nothing provides it.
-CAPABILITIES = {
-    "malware": (("malware.detected",), "no malware scanner is configured (plugins.clamav)"),
+# What each capability checks, when it applies, and how to fill the gap when nothing provides it.
+CAPABILITIES: dict[str, tuple[tuple[str, ...], Callable[[Analysis], bool], str]] = {
+    "malware": (
+        ("malware.detected",),
+        lambda _: True,
+        "no malware scanner is configured (plugins.clamav)",
+    ),
     "vulnerabilities": (
         ("vuln.component.known",),
+        lambda _: True,
         "no vulnerability scanner is configured (plugins.trivy)",
+    ),
+    "sast": (
+        ("sast.finding",),
+        has_source,
+        "no static analysis scanner is configured (plugins.semgrep or plugins.bandit)",
     ),
 }
 
@@ -45,7 +56,7 @@ def targets(files: Iterable[FileView]) -> list[Target]:
 def default_scanners() -> tuple[Scanner, ...]:
     """In run order: the KEV feed first, so vulnerability findings can be marked."""
     kev = KevFeed()
-    return (kev, ClamAV(), Trivy(kev))
+    return (kev, ClamAV(), Trivy(kev), Semgrep(), Bandit())
 
 
 def run_scanners(
@@ -94,7 +105,7 @@ def run_scanners(
                 ctx.recorder.error("plugin.scan.error", subject, tool=ready.tool, error=str(exc))
                 continue
             ran.add(scanner.capability)
-    for capability, (rules, reason) in CAPABILITIES.items():
-        if capability not in ran and not preflight_only:
+    for capability, (rules, applies, reason) in CAPABILITIES.items():
+        if capability not in ran and not preflight_only and applies(analysis):
             ctx.recorder.not_assessed(rules, Subject.bundle(), tool=TOOL, reason=reason)
     return tuple(sorted(statuses, key=lambda s: s.name))

@@ -29,7 +29,12 @@ def make_policy(directory: Path, extra: str = "", *, licences: bool = True) -> P
 
 
 def inspect(
-    root: Path, *, policy_yaml: str = "", licences: bool = False, plugins: bool = False
+    root: Path,
+    *,
+    policy_yaml: str = "",
+    licences: bool = False,
+    plugins: bool = False,
+    corpora: tuple[str, ...] = (),
 ) -> InspectResult:
     """Inspect ``root`` with a policy built from ``policy_yaml`` (kept outside ``root``).
 
@@ -37,7 +42,7 @@ def inspect(
     records, which tests of handlers do not care about.
     """
     policy = make_policy(root.parent / f"policy-{root.name}", policy_yaml, licences=licences)
-    return inspect_paths([root], policy=policy, now=NOW, run_plugins=plugins)
+    return inspect_paths([root], policy=policy, now=NOW, run_plugins=plugins, corpora=corpora)
 
 
 def findings_of(result: InspectResult) -> dict[str, list[Finding]]:

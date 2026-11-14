@@ -1,7 +1,9 @@
 """Built-in rules for the data side of an AI system: notebooks, datasets, knowledge bases (RAG
 indexes and their corpora), classic ML models and MLflow models.
 
-None of these is final: they describe what content does or lacks, which is a policy matter.
+Only the publisher-signature failures are final: a signature that does not hold, or a file that
+differs from what its publisher signed, is an authenticity failure like a bundle hash mismatch.
+Everything else describes what content does or lacks, which is a policy matter.
 """
 
 from airlock.core.model import Severity
@@ -18,8 +20,9 @@ def _rule(
     rationale: str,
     *,
     remediation: str = "",
+    final: bool = False,
 ) -> RuleSpec:
-    return RuleSpec(rule_id, "1", title, severity, controls, rationale, remediation, False)
+    return RuleSpec(rule_id, "1", title, severity, controls, rationale, remediation, final)
 
 
 NOTEBOOKS = (
@@ -120,11 +123,118 @@ KNOWLEDGE = (
         "model still reads it.",
     ),
     _rule(
+        "kb.corpus.hidden-text",
+        "Knowledge-base document hides text from a reader",
+        M,
+        ("SI-3", "SI-10"),
+        "CSS that hides an element, Word's hidden or white text, PDF text in the invisible "
+        "rendering mode: a reviewer does not see it, a text extractor passes it to the model.",
+    ),
+    _rule(
         "kb.index.malformed",
         "Vector index or store is malformed",
         M,
         ("SI-7",),
         "The index does not hold together (bad header, truncated, unreadable database).",
+    ),
+)
+
+SIGNATURES = (
+    _rule(
+        "model.signature.invalid",
+        "Model signature does not verify",
+        C,
+        ("SI-7", "SR-4", "SR-11"),
+        "The publisher's signature, its transparency-log promise or its log entry does not hold: "
+        "the signature or the statement it covers was altered.",
+        final=True,
+    ),
+    _rule(
+        "model.signature.digest-mismatch",
+        "Model file differs from what its publisher signed",
+        C,
+        ("SI-7", "SR-11"),
+        "The file's sha256 is not the one in the publisher's signed statement.",
+        final=True,
+    ),
+    _rule(
+        "model.signature.untrusted",
+        "Model signature is not from a key, CA or identity the policy trusts",
+        M,
+        ("SR-4", "SR-11"),
+        "The signature may well be genuine, but nothing pinned in the policy says whose it is. "
+        "Pin the publisher's key, CA or Sigstore identity under trust.upstream.",
+    ),
+    _rule(
+        "model.signature.incomplete",
+        "Model package holds files its signature does not cover, or lacks files it does",
+        M,
+        ("SI-7", "CM-8"),
+        "A file added after signing (or left out of the delivery) is not vouched for by the "
+        "publisher.",
+    ),
+)
+
+EVALS = (
+    _rule(
+        "eval.set.malformed",
+        "Evaluation set or results file is malformed",
+        M,
+        ("SA-11",),
+        "An evaluation set that cannot be read cannot verify anything.",
+    ),
+    _rule(
+        "eval.model.missing",
+        "Evaluation set names a model that is not in the delivery",
+        H,
+        ("SA-11", "CM-8"),
+        "The set crosses to verify a model; the model must cross with it.",
+    ),
+    _rule(
+        "eval.reference.mismatch",
+        "Reference results are not for the delivered evaluation set",
+        H,
+        ("SA-11", "SI-7"),
+        "Results from a different set (or a different version of it) prove nothing about this one.",
+    ),
+    _rule(
+        "eval.model.digest-mismatch",
+        "The evaluated model is not the delivered model",
+        C,
+        ("SI-7", "SR-11"),
+        "The reference results were produced with a model whose files differ from the ones that "
+        "crossed: a swapped model.",
+        final=True,
+    ),
+    _rule(
+        "eval.output.diverged",
+        "Model output differs from the reference beyond the allowed tolerance",
+        H,
+        ("SA-11", "SI-7"),
+        "Same set, same model files, same settings, different behaviour: the runtime differs, or "
+        "the model is not behaving as it did on the low side.",
+    ),
+    _rule(
+        "eval.case.failed",
+        "Model output does not meet a case's expectation",
+        M,
+        ("SA-11",),
+        "The model does not do what the evaluation set says it should.",
+    ),
+    _rule(
+        "eval.canary.failed",
+        "Model fails a canary prompt",
+        H,
+        ("SA-11", "SI-3"),
+        "Canary prompts probe for known backdoor triggers and guardrail verdicts; a failure is a "
+        "behaviour the model should not have.",
+    ),
+    _rule(
+        "eval.runtime.error",
+        "The runtime failed on a case",
+        H,
+        ("SA-11",),
+        "A case that did not run was not evaluated.",
     ),
 )
 
@@ -147,4 +257,4 @@ MODELS = (
     ),
 )
 
-DATA_RULES = (*NOTEBOOKS, *DATASETS, *KNOWLEDGE, *MODELS)
+DATA_RULES = (*NOTEBOOKS, *DATASETS, *KNOWLEDGE, *MODELS, *SIGNATURES, *EVALS)

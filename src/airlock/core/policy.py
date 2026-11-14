@@ -108,6 +108,10 @@ class UpstreamKey:
     scope: tuple[str, ...]  # what it may vouch for: artifact kinds, repo ids, publishers
     fingerprints: tuple[str, ...] = ()  # acceptable (sub)key fingerprints inside the file
     validity: Validity = field(default_factory=Validity)
+    # Sigstore keyless signing: who may have signed (certificate SAN, globs) and through which
+    # OpenID Connect issuer. Required for type sigstore, where the file is a trusted root.
+    identities: tuple[str, ...] = ()
+    issuers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,6 +308,24 @@ class PluginPolicy:
     max_db_age: timedelta | None = None
     timeout: timedelta = timedelta(hours=1)
     args: tuple[str, ...] = ()  # extra arguments, appended to airlock's own
+    # Runtimes for airlock eval only: placeholders {model} {prompt} {seed} {temperature}
+    # {max_tokens} in args; the prompt goes on standard input instead when stdin is true.
+    stdin: bool = False
+    version_args: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibilityRule:
+    """When every ``when`` constraint holds for the stack, every ``requires`` must hold too.
+
+    Keys name stack components (``cuda``, ``nvidia-driver``, ``cudnn``, ``vllm``, ``torch``,
+    any Python distribution); values are version constraints (see ``airlock.versions``).
+    """
+
+    when: Mapping[str, str]
+    requires: Mapping[str, str]
+    reason: str
+    severity: Severity = Severity.HIGH
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +347,8 @@ class Policy:
     allowlists: Mapping[str, Allowlist] = field(default_factory=dict)
     limits: Limits = field(default_factory=Limits)
     plugins: Mapping[str, PluginPolicy] = field(default_factory=dict)
+    runtimes: Mapping[str, PluginPolicy] = field(default_factory=dict)  # for airlock eval
+    compatibility: tuple[CompatibilityRule, ...] = ()
     feed_max_age: Mapping[str, timedelta] = field(default_factory=dict)
     control_framework: str = DEFAULT_FRAMEWORK
     control_catalog: PinnedFile | None = None
@@ -486,6 +510,8 @@ class _Parser:
             allowlists=self._allowlists(doc),
             limits=self._limits(doc.opt_section("limits")),
             plugins=self._plugins(doc),
+            runtimes=self._plugins(doc, "runtimes"),
+            compatibility=self._compatibility(doc.opt_section("runtime")),
             feed_max_age=self._freshness(doc.opt_section("freshness")),
             control_framework=framework,
             control_catalog=catalog,
@@ -627,8 +653,12 @@ class _Parser:
                     scope=u.str_list("scope"),
                     fingerprints=u.str_list("fingerprints"),
                     validity=_validity(u),
+                    identities=u.str_list("identities"),
+                    issuers=u.str_list("issuers"),
                 )
             )
+            if upstream[-1].type is UpstreamKeyType.SIGSTORE and not upstream[-1].identities:
+                raise u.error("a sigstore trust root needs the identities it accepts", "identities")
             u.done()
         minimum = []
         if m := section.opt_section("minimum"):
@@ -706,9 +736,24 @@ class _Parser:
         section.done()
         return result
 
-    def _plugins(self, doc: Reader) -> dict[str, PluginPolicy]:
+    def _compatibility(self, section: Reader | None) -> tuple[CompatibilityRule, ...]:
+        if section is None:
+            return ()
+        rules = []
+        for entry in section.sections("compatibility"):
+            constraints = []
+            for key in ("when", "requires"):
+                part = entry.section(key)
+                constraints.append({name: part.req_str(name) for name in part.names()})
+                part.done()
+            rules.append(CompatibilityRule(constraints[0], constraints[1], entry.req_str("reason")))
+            entry.done()
+        section.done()
+        return tuple(rules)
+
+    def _plugins(self, doc: Reader, key: str = "plugins") -> dict[str, PluginPolicy]:
         plugins = {}
-        for name, _, reader in doc.mapping("plugins"):
+        for name, _, reader in doc.mapping(key):
             section = reader()
             files = {}
             if f := section.opt_section("files"):
@@ -729,6 +774,8 @@ class _Parser:
                 max_db_age=section.opt_duration("maxDbAge"),
                 timeout=section.opt_duration("timeout") or timedelta(hours=1),
                 args=section.str_list("args"),
+                stdin=bool(section.opt_bool("stdin")),
+                version_args=section.str_list("versionArgs"),
             )
             section.done()
         return plugins

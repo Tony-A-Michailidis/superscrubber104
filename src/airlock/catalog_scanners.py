@@ -89,6 +89,19 @@ PLUGINS = (
     ),
 )
 
+SAST = (
+    _rule(
+        "sast.finding",
+        "Static analysis reports a weakness in the delivery's own code",
+        M,
+        ("SA-11", "RA-5", "SI-10"),
+        "Injection, unsafe deserialisation, shell use and similar weaknesses in first-party code: "
+        "agents, MCP servers, hooks, model custom code and applications. Severity comes from "
+        "the analyser, lowered one step when it reports low confidence.",
+        remediation="Fix the code, or record why the pattern is safe here.",
+    ),
+)
+
 BASICS = (
     _rule(
         "secret.detected",
@@ -109,4 +122,4 @@ BASICS = (
     ),
 )
 
-SCANNER_RULES = (*PLUGINS, *BASICS)
+SCANNER_RULES = (*PLUGINS, *SAST, *BASICS)

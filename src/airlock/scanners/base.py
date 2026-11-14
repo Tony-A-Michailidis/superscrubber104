@@ -76,13 +76,16 @@ class Ready:
     workdir: Path
     tool: ToolRef
 
-    def run(self, args: Sequence[str], *, ok: Sequence[int] = (0,)) -> "Completed":
+    def run(
+        self, args: Sequence[str], *, ok: Sequence[int] = (0,), stdin: bytes | None = None
+    ) -> "Completed":
         assert self.binary is not None  # noqa: S101 - data-only plugins never run
         return run_process(
             [str(self.binary), *args],
             timeout=self.policy.timeout.total_seconds(),
             workdir=self.workdir,
             ok=ok,
+            stdin=stdin,
         )
 
 
@@ -123,16 +126,21 @@ def scrubbed_environment(workdir: Path) -> dict[str, str]:
 
 
 def run_process(
-    command: Sequence[str], *, timeout: float, workdir: Path, ok: Sequence[int] = (0,)
+    command: Sequence[str],
+    *,
+    timeout: float,
+    workdir: Path,
+    ok: Sequence[int] = (0,),
+    stdin: bytes | None = None,
 ) -> Completed:
-    """Run one scanner command. Raises ScanError on a timeout or an unexpected exit code."""
+    """Run one command. Raises ScanError on a timeout or an unexpected exit code."""
     out_path = workdir / f"stdout-{len(list(workdir.glob('stdout-*')))}.txt"
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     try:
         with out_path.open("wb") as out:
             proc = subprocess.run(  # noqa: S603 - argument list, no shell
                 list(command),
-                stdin=subprocess.DEVNULL,
+                input=stdin if stdin is not None else b"",
                 stdout=out,
                 stderr=subprocess.PIPE,
                 cwd=workdir,

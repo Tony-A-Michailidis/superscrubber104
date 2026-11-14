@@ -42,6 +42,7 @@ from airlock.core.model import (
 )
 from airlock.core.policy import AllowlistMode
 from airlock.handlers.ai.common import name_of, parent_of
+from airlock.handlers.common import relative_to
 from airlock.licences import Declared, normalise_identifier
 
 TOOL = ToolRef("airlock.model-package", __version__)
@@ -211,6 +212,7 @@ class _Checks:
         self.card()
         self.licence()
         self.provenance()
+        self.signature()
         if not self.missing_reported:
             self.passed("model.package.file-missing")
 
@@ -636,7 +638,7 @@ class _Checks:
                 method = "gguf-metadata (asserted)"
         weights = p.weights()
         conversion = next((m for c in weights if (m := _dict(c.facts.get("metadata")))), None)
-        p.attributes["provenance"] = {
+        p.attributes["provenance"] = {  # signature() adds the publisher's signature
             "method": method,
             "upstream": _upstream(p.upstream),
             "verifiedFiles": verified,
@@ -645,6 +647,59 @@ class _Checks:
             ),
             "conversion": conversion,
         }
+
+    def signature(self) -> None:
+        """The publisher's model signature: verified files, and package files it leaves out."""
+        p = self.p
+        signature = p.first("signature")
+        if not signature:
+            return
+        covered = {_signed_path(p.root, str(n)) for n in _list(signature.get("covered"))}
+        if signature.get("status") == "verified":
+            for ref in covered:
+                p.verifications.setdefault(ref, []).append(
+                    Verification(
+                        "model-signing",
+                        TrustLevel.SIGNATURE,
+                        Result.PASS,
+                        signer=_str(signature.get("signer")),
+                        anchor=_str(signature.get("anchor")),
+                        detail={"method": signature.get("method")},
+                    )
+                )
+        ignored = {str(n) for n in _list(signature.get("ignored"))}
+        own = _str(signature.get("signature"))
+        unsigned = sorted(
+            name
+            for c in p.claims
+            if c.role != "signature"
+            and c.artifact not in covered
+            and (name := relative_to(c.artifact, p.root) or c.artifact.display) != own
+        )
+        missing = [str(n) for n in _list(signature.get("missing"))]
+        p.attributes["signature"] = {
+            "status": signature.get("status"),
+            "method": signature.get("method"),
+            "signer": signature.get("signer"),
+            "signedFiles": len(covered),
+        }
+        if unsigned or missing:
+            self.fail(
+                "model.signature.incomplete",
+                {
+                    "unsigned": unsigned[:100],
+                    "signedButMissing": missing[:100],
+                    "ignoredBySigner": sorted(ignored & set(unsigned)),
+                },
+            )
+        else:
+            self.passed("model.signature.incomplete")
+
+
+def _signed_path(root: ArtifactRef, name: str) -> ArtifactRef:
+    if root.member:
+        return ArtifactRef(root.path, (*root.member[:-1], f"{root.member[-1]}/{name}"))
+    return ArtifactRef(name if root.path == "." else f"{root.path}/{name}")
 
 
 def _upstream(upstream: UpstreamRef | None) -> dict[str, str | None] | None:

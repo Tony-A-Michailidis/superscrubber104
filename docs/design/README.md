@@ -25,4 +25,6 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [19-model-packages.md](19-model-packages.md) | new | Model formats, model packages, pickle classification, provenance and trust levels, known limits (implemented) |
 | [20-software-and-agents.md](20-software-and-agents.md) | new | Agents and MCP, container images, OS, Python and npm packages, offline resolvability, source, known limits (implemented) |
 | [21-scanners-and-basics.md](21-scanners-and-basics.md) | new | Secrets, executables, active content in documents; scanner plugins (ClamAV, Trivy, CISA KEV) and how they are trusted (implemented) |
-| [22-data-and-knowledge.md](22-data-and-knowledge.md) | new | Notebooks, datasets, knowledge bases (vector stores, corpus injection, embedding-model link), classic ML and MLflow (implemented) |
+| [22-data-and-knowledge.md](22-data-and-knowledge.md) | new | Notebooks, datasets, knowledge bases (vector stores, declared corpora, corpus injection and hidden text, embedding-model link), classic ML and MLflow (implemented) |
+| [23-offline-and-runtime.md](23-offline-and-runtime.md) | new | Offline readiness (downloads, telemetry, updates, cloud AI, registries, recommended configuration), detected inference stack, runtime profiles, CUDA/driver and policy compatibility (implemented) |
+| [24-signatures-and-eval.md](24-signatures-and-eval.md) | new | OpenSSF model signatures verified offline (key, certificate, Sigstore keyless), evaluation sets and `airlock eval` (implemented) |

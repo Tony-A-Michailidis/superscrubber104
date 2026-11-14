@@ -73,6 +73,11 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "node.environment.integrity-mismatch",
         # a scanner that is not the one the policy pins
         "plugin.integrity.mismatch",
+        # a model that does not match its publisher's signature
+        "model.signature.invalid",
+        "model.signature.digest-mismatch",
+        # reference results produced with a different model
+        "eval.model.digest-mismatch",
     }
     assert all(r.rationale for r in registry)
 

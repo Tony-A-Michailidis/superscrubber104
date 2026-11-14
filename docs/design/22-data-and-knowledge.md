@@ -63,6 +63,25 @@ Validated against the public GSM8K test split (1319 rows, two columns, read corr
 | `kb.corpus.hidden-characters`, `kb.index.malformed` | medium |
 | `kb.embedding-model.unrecorded` | low |
 
+### Declared corpora
+
+Nothing in a folder of Markdown, PDFs or Word files says that it will be fed to a model, so the delivery says so. A transfer request content entry with `unit: knowledge-base` marks its paths as a corpus:
+
+```yaml
+contents:
+  - {name: policies-corpus, paths: ["rag/docs/**"], unit: knowledge-base}
+```
+
+`airlock model inspect --corpus 'rag/docs/**'` and `airlock offline-check --corpus ...` do the same without a request. Every document under a corpus path (`.md`, `.txt`, `.html`, `.json`, `.csv`, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.pdf`, `.rtf`, ...), including documents inside archives there, is read the way a retrieval pipeline reads it (`airlock/formats/doctext.py`) and scanned like a vector store's stored text:
+
+| Rule | What |
+|---|---|
+| `kb.corpus.injection` | instructions aimed at a model, in the extracted text (HTML comments and markup included, since loaders differ in what they keep) |
+| `kb.corpus.hidden-characters` | invisible characters |
+| `kb.corpus.hidden-text` | constructs that hide text from a human reader: CSS `display:none`, `visibility:hidden`, zero font size or opacity, white text, off-screen positioning; Word's hidden (`w:vanish`), white and one-point text; comments and speaker notes; PDF text in the invisible rendering mode (`3 Tr`); RTF hidden text (`\v`) |
+
+PDF text is taken from the content streams (inflated, bounded), with kerning gaps inside `TJ` arrays joined so that split words are whole again. A PDF with no extractable text (scanned images, fonts without a text map) or one that is encrypted is not assessed. Office files are read as a whole; their internal XML parts are not scanned again as separate documents. The documents form a `knowledge-base` unit (store `corpus`) rooted at the declared folder, so the request's unit check and the embedding-model link apply. Validated against a real arXiv PDF and a public Word test document.
+
 ## 22.4 Classic ML and MLflow
 
 | Kind | Recognised by | Notes |
@@ -80,7 +99,7 @@ Each forms a model package (roles `classic-model`, `mlflow-model`) like any othe
 
 - **Parquet** column data is not read: values (and so PII or injected text in a fine-tuning set) are not scanned. JSON Lines and CSV are covered by the secrets scan, not by the corpus scan, because training data legitimately contains adversarial text.
 - **Arrow** files are recognised but not parsed: no row count.
-- **Plain document folders** destined for a RAG corpus (PDFs, Markdown) are not scanned for injection unless they are stored in a recognised vector store; nothing marks a folder as a corpus yet.
+- **Corpus folders** are scanned only when declared (request or `--corpus`). Images in documents are not read (no OCR), so text in an image is not scanned; PDF text in fonts without a text map is not extractable.
 - **LangChain docstores** are pickles: their text is not extracted, though the pickle itself is flagged.
 - **Chroma** databases over 512 MiB are not opened (not assessed). **LanceDB, Qdrant, Milvus, Weaviate, pgvector and Neo4j** contents are not read.
 - **Embedding model matching** is by name. A knowledge base built with a model the delivery renamed will not match; record the pairing in the transfer request.

@@ -8,6 +8,7 @@ controls:
   AC-4: Information Flow Enforcement
   AC-6: Least Privilege
   AU-10: Non-repudiation
+  CM-2: Baseline Configuration
   CM-3: Configuration Change Control
   CM-4: Impact Analyses
   CM-6: Configuration Settings

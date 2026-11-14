@@ -8,6 +8,7 @@ from airlock.handlers.ai.onnx import ONNXHandler
 from airlock.handlers.ai.opaque import OpaqueModelHandler
 from airlock.handlers.ai.package_files import PackageFileHandler
 from airlock.handlers.ai.pickles import NumpyHandler, PickleHandler, TorchZipHandler
+from airlock.handlers.ai.signature import ModelSignatureHandler
 from airlock.handlers.ai.weights import GGUFHandler, SafetensorsHandler
 
 
@@ -23,5 +24,6 @@ def ai_handlers() -> tuple[Handler, ...]:
         OpaqueModelHandler(),
         OllamaManifestHandler(),
         ClassicModelHandler(),
+        ModelSignatureHandler(),
         PackageFileHandler(),
     )
