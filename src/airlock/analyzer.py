@@ -34,6 +34,7 @@ from airlock.core.model import (
     ArtifactRef,
     Component,
     EntryType,
+    Severity,
     Subject,
     ToolRef,
     UnitClaim,
@@ -44,6 +45,9 @@ from airlock.hashing import hash_stream
 from airlock.walker import FileView, HeadView
 
 TOOL = ToolRef("airlock", __version__)
+_ROOTFS_DIRS = frozenset(
+    {"bin", "sbin", "etc", "usr", "lib", "lib64", "var", "opt", "root", "home"}
+)
 _HEAD = 65536
 _SUFFIXES = (".gz", ".bz2", ".xz")
 
@@ -256,6 +260,9 @@ class Analyzer:
         seen: set[str] = set()
         failed: Counter[str] = Counter()
         total = 0
+        top_level: set[str] = set()
+        # Decided once the whole archive is seen: whether it is a root filesystem.
+        deferred: list[tuple[str, ArtifactRef, dict[str, str]]] = []
 
         def fail(rule: str, ref: ArtifactRef, **detail: str) -> None:
             failed[rule] += 1
@@ -267,6 +274,7 @@ class Analyzer:
             if not name:
                 continue  # the archive's own root directory
             total += 1
+            top_level.add(name.split("/", 1)[0])
             ref = view.ref.child(name, unsafe=issue is not None)
             if issue is NameIssue.TRAVERSAL:
                 fail("archive.member.path-traversal", ref, name=name)
@@ -283,7 +291,7 @@ class Analyzer:
             elif kind in (EntryType.SYMLINK, EntryType.HARDLINK):
                 target = member.link_target or ""
                 if link_escapes(member.name, target, hard=kind is EntryType.HARDLINK):
-                    fail("archive.member.link-escape", ref, target=target)
+                    deferred.append(("archive.member.link-escape", ref, {"target": target}))
                 self.artifacts.append(Artifact(ref, kind, link_target=target, mode=member.mode))
             elif kind is EntryType.OTHER:
                 fail("archive.member.special-file", ref)
@@ -293,9 +301,23 @@ class Analyzer:
                 self.artifacts.append(Artifact(ref, kind, size=member.size, mode=member.mode))
             else:
                 if member.mode is not None and member.mode & 0o6000:
-                    fail("archive.member.setuid", ref, mode=oct(member.mode))
+                    deferred.append(("archive.member.setuid", ref, {"mode": oct(member.mode)}))
                 self._member(ref, member, depth, budget)
 
+        # In a root filesystem (an image layer, a rootfs tarball) a link target resolves inside
+        # that filesystem, so it cannot escape it, and setuid binaries such as passwd are normal.
+        rootfs = len(top_level & _ROOTFS_DIRS) >= 3
+        for rule, ref, detail in deferred:
+            if rootfs and rule == "archive.member.link-escape":
+                continue
+            failed[rule] += 1
+            recorder.fail(
+                rule,
+                Subject.of_artifact(ref),
+                tool=TOOL,
+                detail=detail | ({"context": "root filesystem"} if rootfs else {}),
+                severity=Severity.LOW if rootfs else None,
+            )
         for rule in ARCHIVE_MEMBER_RULES:
             recorder.passed(rule, total - failed[rule])
 

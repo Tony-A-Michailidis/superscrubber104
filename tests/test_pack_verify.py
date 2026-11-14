@@ -127,7 +127,8 @@ def test_analysis_looks_inside_archives(bundle: Path) -> None:
     by_ref = {"!/".join([a["ref"]["path"], *a["ref"]["member"]]): a for a in analysis["artifacts"]}
     assert by_ref["vendor/lib.zip"]["kinds"] == ["archive.zip"]
     assert by_ref["vendor/lib.zip!/lib/a.py"]["mediaType"] == "text/plain"
-    assert by_ref["app/main.py"]["kinds"] == ["unclassified"]
+    assert by_ref["app/main.py"]["kinds"] == ["source.python"]
+    assert by_ref["docs/README.md"]["kinds"] == ["unclassified"]
 
 
 def test_output_must_be_new_and_outside_the_inputs(

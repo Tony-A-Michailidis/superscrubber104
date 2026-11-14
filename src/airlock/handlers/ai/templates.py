@@ -16,6 +16,8 @@ import hashlib
 import re
 from dataclasses import dataclass
 
+from airlock.text import invisible_characters
+
 _SUSPICIOUS = (
     (re.compile(r"__[A-Za-z0-9_]+__"), "dunder attribute"),
     (re.compile(r"\|\s*attr\s*\("), "attr filter"),
@@ -32,18 +34,6 @@ _SUSPICIOUS = (
         "template global access",
     ),
 )
-# Zero-width and directional marks, bidi embeddings and overrides, invisible operators, bidi
-# isolates, the byte-order mark, and Unicode tag characters. Built from code points so this
-# source file itself contains no invisible characters.
-_INVISIBLE_RANGES = (
-    (0x200B, 0x200F),
-    (0x202A, 0x202E),
-    (0x2060, 0x2064),
-    (0x2066, 0x2069),
-    (0xFEFF, 0xFEFF),
-    (0xE0000, 0xE007F),
-)
-_INVISIBLE = re.compile("[" + "".join(f"{chr(a)}-{chr(b)}" for a, b in _INVISIBLE_RANGES) + "]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,10 +51,10 @@ def inspect_template(text: str) -> TemplateReport:
         if match:
             start = max(match.start() - 20, 0)
             suspicious.append((reason, text[start : match.end() + 20]))
-    invisible = sorted({f"U+{ord(c):04X}" for c in _INVISIBLE.findall(text)})
+    invisible = invisible_characters(text)
     return TemplateReport(
         sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         length=len(text),
         suspicious=tuple(suspicious),
-        invisible=tuple(invisible),
+        invisible=invisible,
     )

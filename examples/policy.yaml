@@ -82,6 +82,9 @@ licences:
   unknown: require-approval
 
 allowlists:
+  python:                      # names canonicalised per PEP 503; exact pins match that version only
+    mode: report
+    entries: ["requests==2.32.3", "numpy", "urllib3>=2"]
   npm:
     mode: report
     entries: ["react@^18", "zod"]

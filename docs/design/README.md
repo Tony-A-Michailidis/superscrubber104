@@ -23,3 +23,4 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [17-core-models.md](17-core-models.md) | new | Core data models, policy schema, keys, logs and interfaces (implemented) |
 | [18-bundle-and-verification.md](18-bundle-and-verification.md) | new | Bundle layout, signed statement, pack and verify steps, archive inspection, known limits (implemented) |
 | [19-model-packages.md](19-model-packages.md) | new | Model formats, model packages, pickle classification, provenance and trust levels, known limits (implemented) |
+| [20-software-and-agents.md](20-software-and-agents.md) | new | Agents and MCP, container images, OS, Python and npm packages, offline resolvability, source, known limits (implemented) |

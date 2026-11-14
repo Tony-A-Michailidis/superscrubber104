@@ -66,6 +66,11 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "delta.base.unknown",
         "path.name.unsafe",  # the file cannot be stored at all, so there is nothing to approve
         "model.provenance.checksum-mismatch",  # a hash mismatch against the publisher's record
+        # content that differs from the digest it is named or locked by
+        "container.layer.digest-mismatch",
+        "python.environment.hash-mismatch",
+        "python.wheel.record-mismatch",
+        "node.environment.integrity-mismatch",
     }
     assert all(r.rationale for r in registry)
 

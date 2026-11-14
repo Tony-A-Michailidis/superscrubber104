@@ -6,6 +6,7 @@ framework: nist-800-53r5
 title: NIST SP 800-53 Rev. 5
 controls:
   AC-4: Information Flow Enforcement
+  AC-6: Least Privilege
   AU-10: Non-repudiation
   CM-3: Configuration Change Control
   CM-4: Impact Analyses
@@ -14,6 +15,7 @@ controls:
   CM-8: System Component Inventory
   CM-10: Software Usage Restrictions
   CM-11: User-installed Software
+  IA-5: Authenticator Management
   MP-5: Media Transport
   RA-5: Vulnerability Monitoring and Scanning
   SA-11: Developer Testing and Evaluation
@@ -22,6 +24,7 @@ controls:
   SI-2: Flaw Remediation
   SI-3: Malicious Code Protection
   SI-7: Software, Firmware, and Information Integrity
+  SI-10: Information Input Validation
   SR-3: Supply Chain Controls and Processes
   SR-4: Provenance
   SR-10: Inspection of Systems or Components

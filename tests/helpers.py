@@ -51,7 +51,7 @@ def make_delivery(root: Path) -> Path:
         root,
         {
             "app/main.py": b'print("hello")\n',
-            "app/requirements.lock": b"example==1.0\n",
+            "app/settings.ini": b"[app]\nname = example\n",
             "models/tiny/weights.bin": bytes(range(256)) * 4,
             "docs/README.md": b"# Example delivery\n",
             "vendor/lib.zip": zip_bytes({"lib/a.py": b"A = 1\n", "lib/b.py": b"B = 2\n"}),
