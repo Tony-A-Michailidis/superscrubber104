@@ -19,6 +19,7 @@ from airlock.core.model import Analysis, ArtifactRef, Assessment, EntryType, Sta
 from airlock.core.policy import Policy
 from airlock.handlers import default_handlers
 from airlock.hashing import hash_stream
+from airlock.scanners import run_scanners, targets
 from airlock.session import Session, utc_now
 from airlock.units import default_assemblers
 from airlock.walker import FileView, plan_inputs, scan
@@ -36,6 +37,7 @@ def inspect_paths(
     policy: Policy,
     now: datetime | None = None,
     handlers: Sequence[Handler] | None = None,
+    run_plugins: bool = True,
 ) -> InspectResult:
     now = now or utc_now()
     planned = plan_inputs(inputs)
@@ -63,10 +65,12 @@ def inspect_paths(
         for view in files.values():
             analyzer.analyze(view)
         analysis = finish(analyzer, default_assemblers())
+    plugins = run_scanners(ctx, targets(files.values()), analysis) if run_plugins else ()
     check_policy(ctx)
     assessment = session.finish(
         Stage.INSPECT,
         manifest_digest=None,
         content_hashes={path: view.sha256 for path, view in files.items() if view.sha256},
+        plugins=plugins,
     )
     return InspectResult(analysis, assessment)

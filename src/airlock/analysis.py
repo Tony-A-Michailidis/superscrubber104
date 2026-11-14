@@ -16,6 +16,7 @@ from airlock.core.model import (
     Unit,
     Verification,
 )
+from airlock.units.knowledge_base import link_knowledge_bases
 
 
 def finish(analyzer: Analyzer, assemblers: Sequence[UnitAssembler]) -> Analysis:
@@ -44,5 +45,6 @@ def finish(analyzer: Analyzer, assemblers: Sequence[UnitAssembler]) -> Analysis:
         replace(a, verifications=(*a.verifications, *verified[a.ref])) if a.ref in verified else a
         for a in analyzer.artifacts
     ]
+    units = link_knowledge_bases(units, ctx)
     check_upstream_trust(artifacts, ctx)
     return Analysis.create(TOOL, artifacts, units, components)

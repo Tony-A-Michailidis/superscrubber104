@@ -50,12 +50,12 @@ CORE_ROLES = frozenset(
     {
         "weights", "weights-shard", "weights-index", "adapter-weights", "adapter-config",
         "config", "gguf", "keras", "onnx", "llamafile", "opaque-model", "sentence-transformers",
-        "modelfile", "ollama-manifest", "projector",
+        "modelfile", "ollama-manifest", "projector", "classic-model", "mlflow-model",
     }
 )  # fmt: skip
 WEIGHT_ROLES = (
     "weights", "weights-shard", "adapter-weights", "projector", "gguf", "keras", "onnx",
-    "llamafile", "opaque-model",
+    "llamafile", "opaque-model", "classic-model",
 )  # fmt: skip
 _SHARED_ROLES = frozenset({"licence", "model-card"})  # a directory's, shared with its GGUF files
 _TOKENIZER_ROLES = ("tokenizer", "tokenizer-added")

@@ -31,6 +31,7 @@ from airlock.handlers.ai.common import (
     read_bytes,
     read_json,
 )
+from airlock.handlers.datasets import is_dataset_card
 from airlock.licences import identify_text
 
 _REMOTE_CODE = re.compile(
@@ -290,6 +291,8 @@ def _model_card(view: ArtifactView, ctx: Context) -> Result:
             except yaml.YAMLError:
                 front = None
             if isinstance(front, dict):
+                if is_dataset_card(front):
+                    return None  # the datasets handler reads it
                 facts = _card_facts(front)
     for heading, key in (
         ("intended use", "intendedUse"),

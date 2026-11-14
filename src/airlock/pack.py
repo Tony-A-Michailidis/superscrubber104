@@ -34,6 +34,7 @@ from airlock.core.request import TransferRequest, load_request
 from airlock.core.signing import Signer, sign_envelope
 from airlock.handlers import default_handlers
 from airlock.hashing import CHUNK_SIZE, hash_stream
+from airlock.scanners import run_scanners, targets
 from airlock.session import Session, utc_now
 from airlock.units import default_assemblers
 from airlock.walker import FileView, plan_inputs, scan
@@ -129,6 +130,7 @@ def pack(
             analyzer.analyze(view)
         analysis = finish(analyzer, default_assemblers())
 
+    plugins = run_scanners(ctx, targets(files.values()), analysis)
     check_paths(entries, ctx)
     check_request(request, entries, ctx)
     check_request_units(request, analysis.units, ctx)
@@ -144,6 +146,7 @@ def pack(
         Stage.PACK,
         manifest_digest=manifest_digest,
         content_hashes={e.path: e.hashes["sha256"] for e in entries if e.sha256},
+        plugins=plugins,
     )
     subjects[layout.ASSESSMENT] = layout.write(output / layout.ASSESSMENT, assessment)
 

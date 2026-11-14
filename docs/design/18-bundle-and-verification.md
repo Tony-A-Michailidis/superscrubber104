@@ -144,7 +144,7 @@ The adjustment does not relax anything else: bundles are still checked for age, 
 
 Archives are **inspected, never extracted**.
 
-- Member bytes are streamed through a hash. A member is written to a private scratch file, under a generated name, only when something must read it again (a nested archive, or a handler that recognised it). **Member names never touch the filesystem**, so path traversal, link tricks and device nodes can be reported but cannot take effect.
+- Member bytes are streamed through a hash. A member is kept only when something must read it again (a nested archive, or a handler that recognised it): in memory up to 1 MiB, otherwise in a private scratch file under a generated name. Every text member is kept, because the secrets scan reads it. **Member names never touch the filesystem**, so path traversal, link tricks and device nodes can be reported but cannot take effect.
 - Format is detected from magic bytes, never from the file name. zip (and everything built on it: wheels, JARs, VSIX, Office documents), tar, and gzip/bzip2/xz streams are read. zstd, 7z and RAR are recognised but cannot be opened by the standard library; their member checks are reported as "not assessed".
 - **One budget per top-level artifact**, shared by everything nested inside it, counting bytes actually produced rather than sizes declared in headers:
   - `maxRatio`: expanded bytes per byte of the outermost archive (judged only above `ratioMinBytes`, so small, highly compressible files are not false positives)

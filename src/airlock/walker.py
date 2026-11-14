@@ -4,6 +4,7 @@ Links are recorded and never followed. Names that cannot be bundle paths are rep
 escaped form and never descended into.
 """
 
+import io
 import os
 import posixpath
 import stat
@@ -75,6 +76,9 @@ def scan(prefix: str, location: Path, *, safe: bool = True) -> Iterator[Source]:
         yield from scan(f"{prefix}/{child}" if prefix else child, location / name, safe=child_safe)
 
 
+_HEAD_CACHE = 65536
+
+
 class FileView:
     """An on-disk file as handlers see it."""
 
@@ -91,10 +95,22 @@ class FileView:
         self.sha256 = sha256
         self._location = location
         self._lookup = lookup
+        self._head: bytes | None = None
+
+    @property
+    def location(self) -> Path:
+        """Where the bytes are on disk; for external scanners, never for handlers."""
+        return self._location
 
     def head(self, n: int = 65536) -> bytes:
-        with self._location.open("rb") as stream:
-            return stream.read(n)
+        # Every handler's detect() reads the head; read it from disk once.
+        if n > _HEAD_CACHE:
+            with self._location.open("rb") as stream:
+                return stream.read(n)
+        if self._head is None:
+            with self._location.open("rb") as stream:
+                self._head = stream.read(_HEAD_CACHE)
+        return self._head[:n]
 
     def open(self) -> BinaryIO:
         return self._location.open("rb")
@@ -106,6 +122,25 @@ class FileView:
         if target.startswith(("../", "/")) or target == "..":
             return None
         return self._lookup(target)
+
+
+class BytesView:
+    """A small archive member held in memory: no scratch file to write, scan and delete."""
+
+    def __init__(self, ref: ArtifactRef, data: bytes, sha256: str | None) -> None:
+        self.ref = ref
+        self.size = len(data)
+        self.sha256 = sha256
+        self._data = data
+
+    def head(self, n: int = 65536) -> bytes:
+        return self._data[:n]
+
+    def open(self) -> BinaryIO:
+        return io.BytesIO(self._data)
+
+    def resolve(self, relative: str) -> None:
+        return None
 
 
 class HeadView:

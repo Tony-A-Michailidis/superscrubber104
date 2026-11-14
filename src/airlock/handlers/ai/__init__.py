@@ -1,6 +1,7 @@
 """Handlers for AI artifacts: weights, code-capable model formats and model package files."""
 
 from airlock.core.interfaces import Handler
+from airlock.handlers.ai.classic import ClassicModelHandler
 from airlock.handlers.ai.keras import KerasHandler
 from airlock.handlers.ai.ollama import OllamaManifestHandler
 from airlock.handlers.ai.onnx import ONNXHandler
@@ -21,5 +22,6 @@ def ai_handlers() -> tuple[Handler, ...]:
         ONNXHandler(),
         OpaqueModelHandler(),
         OllamaManifestHandler(),
+        ClassicModelHandler(),
         PackageFileHandler(),
     )

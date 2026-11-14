@@ -133,6 +133,7 @@ class UnitKind(StrEnum):
     VM_IMAGE = "vm-image"
     PATCH_SET = "patch-set"
     KNOWLEDGE_BASE = "knowledge-base"
+    DATASET = "dataset"
 
 
 class ComponentType(StrEnum):

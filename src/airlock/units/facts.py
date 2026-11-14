@@ -7,6 +7,11 @@ def as_int(value: object) -> int:
     return value if type(value) is int else 0
 
 
+def opt_int(value: object) -> int | None:
+    """An integer, or None when the value is missing or not an integer."""
+    return value if type(value) is int else None
+
+
 def as_str(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 

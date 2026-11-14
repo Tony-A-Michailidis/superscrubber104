@@ -3,6 +3,7 @@
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 BLOCK = 1 << 20
@@ -59,3 +60,9 @@ def hash_stream(
     if filled and chunks:
         chunks.append(part.hexdigest())
     return FileDigest(size, whole.hexdigest(), tuple(chunks) if len(chunks) > 1 else ())
+
+
+def hash_file(path: Path) -> FileDigest:
+    """Stream one file on disk through the hash."""
+    with path.open("rb") as stream:
+        return hash_stream(stream)

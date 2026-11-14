@@ -289,11 +289,21 @@ class Limits:
 
 @dataclass(frozen=True, slots=True)
 class PluginPolicy:
+    """One external scanner, or data feed, that the site has chosen to use.
+
+    A plugin runs only when the policy configures it: nothing is picked up from ``PATH`` unless
+    the policy says so, and every path is resolved against the policy file's directory.
+    """
+
     required: bool = False  # true: a missing plugin is a failing ``plugin.required.missing``
+    path: Path | None = None  # the binary (or, for a feed, the data file); None: look on PATH
+    database: Path | None = None  # signature database or vulnerability DB cache directory
     binary_sha256: str | None = None
-    files: Mapping[str, str] = field(default_factory=dict)  # other pinned files: name -> sha256
+    files: Mapping[str, str] = field(default_factory=dict)  # pinned data: relative path -> sha256
     min_version: str | None = None
     max_db_age: timedelta | None = None
+    timeout: timedelta = timedelta(hours=1)
+    args: tuple[str, ...] = ()  # extra arguments, appended to airlock's own
 
 
 @dataclass(frozen=True, slots=True)
@@ -707,12 +717,18 @@ class _Parser:
                     assert pin is not None  # noqa: S101
                     files[file_name] = pin
                 f.done()
+            path = section.opt_str("path")
+            database = section.opt_str("database")
             plugins[name] = PluginPolicy(
                 required=bool(section.opt_bool("required")),
+                path=(self.base / path).resolve() if path else None,
+                database=(self.base / database).resolve() if database else None,
                 binary_sha256=_sha256_field(section, "binarySha256", required=False),
                 files=files,
                 min_version=section.opt_str("minVersion"),
                 max_db_age=section.opt_duration("maxDbAge"),
+                timeout=section.opt_duration("timeout") or timedelta(hours=1),
+                args=section.str_list("args"),
             )
             section.done()
         return plugins

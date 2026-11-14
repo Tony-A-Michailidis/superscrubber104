@@ -13,6 +13,7 @@ from airlock.core.model import (
     Assessment,
     Decision,
     Finding,
+    PluginStatus,
     Stage,
     Verdict,
     summarize,
@@ -53,6 +54,7 @@ class Session:
         manifest_digest: str | None,
         content_hashes: Mapping[str, str],
         approvals: ApprovalCounter | None = None,
+        plugins: tuple[PluginStatus, ...] = (),
     ) -> Assessment:
         """Decide every finding and close the run.
 
@@ -80,6 +82,7 @@ class Session:
             policy_digest=policy.digest,
             manifest_digest=manifest_digest,
             summary=summarize(findings, decisions, approved),
+            plugins=plugins,
             coverage=recorder.coverage(),
             findings=findings,
             decisions=decisions,

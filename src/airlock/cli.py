@@ -11,8 +11,10 @@ from typing import ParamSpec
 import click
 
 from airlock import __version__
+from airlock.analyzer import TOOL
 from airlock.approvals import approve as run_approve
 from airlock.core.errors import AirlockError, ConfigError
+from airlock.core.model import Analysis, Stage
 from airlock.core.policy import Policy, load_policy
 from airlock.core.serde import to_data
 from airlock.core.signing import (
@@ -26,7 +28,8 @@ from airlock.ledger import Ledger
 from airlock.model_inspect import inspect_paths
 from airlock.model_summary import render_packages
 from airlock.pack import pack as run_pack
-from airlock.session import EXIT_USAGE, exit_code, utc_now
+from airlock.scanners import run_scanners
+from airlock.session import EXIT_USAGE, Session, exit_code, utc_now
 from airlock.summary import render
 from airlock.verify import verify as run_verify
 
@@ -286,6 +289,52 @@ def adjust_clock(state: Path, reason: str, key: Path | None, passphrase_env: str
     click.echo(
         f"recorded clock adjustment to {now.isoformat()}" + ("" if signer else " (unsigned)")
     )
+
+
+@main.group()
+def plugins() -> None:
+    """External scanners (ClamAV, Trivy) and feeds (CISA KEV)."""
+
+
+@plugins.command("check")
+@click.option("--policy", required=True, type=_FILE, help="The policy that configures them.")
+@_reports_errors
+def plugins_check(policy: Path) -> None:
+    """Check every scanner the policy configures, without scanning anything.
+
+    Finds each binary, compares it and its database with the pinned hashes, reads its version
+    and the age of its database. Exit codes are those of 'airlock verify'.
+    """
+    loaded = _policy(policy)
+    session = Session.start(loaded, utc_now())
+    if not loaded.plugins:
+        click.echo("The policy configures no plugins (see docs/scanners.md).")
+    empty = Analysis.create(TOOL, [], [], [])
+    statuses = run_scanners(session.ctx, [], empty, preflight_only=True)
+    for status in statuses:
+        state = "ready" if status.present and status.reason is None else "NOT USABLE"
+        click.echo(f"{status.name:<8} {state}")
+        for label, value in (
+            ("version", status.version),
+            ("database", status.data_version),
+            (
+                "age",
+                f"{status.data_age_seconds // 3600} h"
+                if status.data_age_seconds is not None
+                else None,
+            ),
+            ("binary", status.binary_sha256 and f"sha256:{status.binary_sha256}"),
+            ("pinned", None if status.pinned is None else ("yes" if status.pinned else "no")),
+            ("reason", status.reason),
+        ):
+            if value:
+                click.echo(f"         {label:<9}{value}")
+    assessment = session.finish(
+        Stage.INSPECT, manifest_digest=None, content_hashes={}, plugins=statuses
+    )
+    click.echo()
+    click.echo(render(assessment))
+    sys.exit(exit_code(assessment))
 
 
 @main.group()

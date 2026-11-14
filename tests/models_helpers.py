@@ -28,10 +28,16 @@ def make_policy(directory: Path, extra: str = "", *, licences: bool = True) -> P
     return load_policy(path)
 
 
-def inspect(root: Path, *, policy_yaml: str = "", licences: bool = False) -> InspectResult:
-    """Inspect ``root`` with a policy built from ``policy_yaml`` (kept outside ``root``)."""
+def inspect(
+    root: Path, *, policy_yaml: str = "", licences: bool = False, plugins: bool = False
+) -> InspectResult:
+    """Inspect ``root`` with a policy built from ``policy_yaml`` (kept outside ``root``).
+
+    Scanner plugins are off unless asked for: with none configured they only add "not assessed"
+    records, which tests of handlers do not care about.
+    """
     policy = make_policy(root.parent / f"policy-{root.name}", policy_yaml, licences=licences)
-    return inspect_paths([root], policy=policy, now=NOW)
+    return inspect_paths([root], policy=policy, now=NOW, run_plugins=plugins)
 
 
 def findings_of(result: InspectResult) -> dict[str, list[Finding]]:

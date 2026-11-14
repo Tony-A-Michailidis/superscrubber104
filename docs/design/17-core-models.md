@@ -224,13 +224,23 @@ limits:
   maxArtifactBytes: 1TiB
   maxPathLength: 1024
 
-plugins:
+plugins:                          # optional external scanners; see doc 21 and docs/scanners.md
   clamav:
     required: false               # true: absence is a failing plugin.required.missing
+    path: tools/clamav/clamscan   # the binary, relative to this file (default: looked up on PATH)
+    database: tools/clamav/db     # signature directory (required: never the host's own)
     binarySha256: "…"
-    files: { "main.cvd": "…" }    # other pinned files (libraries, rule packs, databases)
+    files: { "main.cvd": "…" }    # pinned data, relative to database; unpinned signature files are refused
     minVersion: "1.4"
-    maxDbAge: 7d
+    maxDbAge: 7d                  # from the CVD headers; older is plugin.data.stale
+    timeout: 2h
+    args: []                      # extra arguments, appended
+  trivy:
+    path: tools/trivy/trivy
+    database: tools/trivy/cache   # --cache-dir; db/trivy.db and db/metadata.json must be there
+  kev:                            # a data feed: CISA Known Exploited Vulnerabilities
+    path: feeds/known_exploited_vulnerabilities.json
+    maxDbAge: 2d
 
 freshness:
   feeds: { default: 7d, kev: 2d }
@@ -361,7 +371,7 @@ Status: **done** (implemented and tested), **shaped** (the model or schema has t
 | 13 | Pinned keys too thin | done | Validity, revocation, holder, sources, fingerprints; full key ids; rotation logged via `policy.digest.changed` |
 | 14 | Policy unsigned; two trust roots | done / deferred | Policy is the single root, `--pubkey` only when nothing is pinned. A signature over the policy is deferred |
 | 15 | Approvals had no model | done | Owner's decision: integrity and authenticity failures are final; policy blockers are overridable by a quorum with a written justification; the packer cannot approve; overrides are signed evidence. `airlock approve`, `count_approvals`, `ApprovalRecord` (§17.7) |
-| 16 | Scanner pinning incomplete | shaped | `files`, `minVersion`, `plugin.required.missing`; enforced with the plugins (task 7) |
+| 16 | Scanner pinning incomplete | done | `path`, `database`, `binarySha256`, `files`, `minVersion`, `maxDbAge`; a mismatch is final (`plugin.integrity.mismatch`); see doc 21 |
 | 17 | Time | done | `Context.now` is a datetime; `replay.clock.regression` with a drift tolerance and a logged recovery path (`airlock ledger adjust-clock`); `replay.clock.skew` as an early warning ([18 §18.6](18-bundle-and-verification.md)) |
 | 18 | Algorithm agility | done | Digest and key-id grammars accept other algorithms |
 | 19 | Runtime profile inputs | deferred to 1b | `Requirement` can already express "supplied by the high side" |

@@ -32,6 +32,7 @@ from airlock.core.model import (
     EntryType,
     Finding,
     Manifest,
+    PluginStatus,
     Provenance,
     Receipt,
     Stage,
@@ -44,6 +45,7 @@ from airlock.core.signing import Envelope, Signer, VerifyKey, sign_envelope
 from airlock.handlers import default_handlers
 from airlock.hashing import hash_stream
 from airlock.ledger import Ledger
+from airlock.scanners import run_scanners, targets
 from airlock.session import Session, utc_now
 from airlock.units import default_assemblers
 from airlock.walker import FileView, scan
@@ -82,6 +84,7 @@ class _Verifier:
         self.files: dict[str, FileView] = {}
         self.packers: list[str] = []  # trusted keys that signed the statement
         self.custody_check: chainlog.ChainCheck | None = None
+        self.plugins: tuple[PluginStatus, ...] = ()
 
     # --- trust ----------------------------------------------------------------------------------
 
@@ -294,6 +297,7 @@ class _Verifier:
             for view in self.files.values():
                 analyzer.analyze(view)
             analysis = finish(analyzer, default_assemblers())
+        self.plugins = run_scanners(self.ctx, targets(self.files.values()), analysis)
         if self.manifest is not None:
             check_paths(self.manifest.entries, self.ctx)
             check_request(self.request, self.manifest.entries, self.ctx)
@@ -414,6 +418,7 @@ def verify(
         manifest_digest=verifier.manifest_digest,
         content_hashes={path: view.sha256 for path, view in verifier.files.items() if view.sha256},
         approvals=verifier.approvals,
+        plugins=verifier.plugins,
     )
     assessment_bytes = layout.encode(assessment)
 

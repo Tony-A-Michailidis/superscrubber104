@@ -1,17 +1,19 @@
 """Interpretation of content: run handlers on every artifact and look inside archives.
 
 Archives are inspected, never extracted. Member bytes are streamed through a hash; a member is
-written to a private, randomly named scratch file only when something needs to read it again (a
-nested archive, or a handler that recognised it). Member names never touch the filesystem.
+kept only when something needs to read it again (a nested archive, or a handler that recognised
+it): in memory up to 1 MiB, otherwise in a private, sequentially named scratch file. Member names
+never touch the filesystem.
 
 A single budget covers one top-level artifact and everything nested inside it, and counts bytes
 actually produced rather than sizes declared in headers, so decompression bombs stop inspection
 at the policy limit however they are nested.
 """
 
+import io
 import posixpath
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import IO
 
@@ -42,13 +44,14 @@ from airlock.core.model import (
 from airlock.core.paths import NameIssue, check_member_name, link_escapes
 from airlock.core.policy import ArchiveLimits
 from airlock.hashing import hash_stream
-from airlock.walker import FileView, HeadView
+from airlock.walker import BytesView, FileView, HeadView
 
 TOOL = ToolRef("airlock", __version__)
 _ROOTFS_DIRS = frozenset(
     {"bin", "sbin", "etc", "usr", "lib", "lib64", "var", "opt", "root", "home"}
 )
 _HEAD = 65536
+_IN_MEMORY = 1 << 20  # archive members up to this size are kept in memory, not on disk
 _SUFFIXES = (".gz", ".bz2", ".xz")
 
 
@@ -96,6 +99,34 @@ class _Prefixed:
             data, self._prefix = self._prefix[:n], self._prefix[n:]
             return data
         return self._stream.read(n)
+
+
+class _Spill:
+    """A write sink that stays in memory up to ``_IN_MEMORY`` bytes, then moves to a file."""
+
+    def __init__(self, new_file: Callable[[], Path]) -> None:
+        self.memory = io.BytesIO()
+        self.path: Path | None = None
+        self._new_file = new_file
+        self._file: IO[bytes] | None = None
+
+    def write(self, data: bytes) -> int:
+        if self._file is None and self.memory.tell() + len(data) > _IN_MEMORY:
+            self.path = self._new_file()
+            self._file = self.path.open("wb")
+            self._file.write(self.memory.getvalue())
+            self.memory = io.BytesIO()
+        target = self._file if self._file is not None else self.memory
+        return target.write(data)
+
+    def close(self) -> None:
+        if self._file is not None:
+            self._file.close()
+
+    def discard(self) -> None:
+        self.close()
+        if self.path is not None:
+            self.path.unlink(missing_ok=True)
 
 
 class Analyzer:
@@ -322,28 +353,33 @@ class Analyzer:
             recorder.passed(rule, total - failed[rule])
 
     def _member(self, ref: ArtifactRef, member: Member, depth: int, budget: Budget) -> None:
-        """Hash one member's bytes; keep a scratch copy only if something will read it again."""
+        """Hash one member's bytes; keep a copy only if something will read it again.
+
+        Small members are kept in memory; larger ones spill to a private scratch file.
+        """
         assert member.open is not None  # noqa: S101
-        scratch: Path | None = None
+        sink: _Spill | None = None
         try:
             with member.open() as raw:
                 head = raw.read(_HEAD)
                 source = _Prefixed(head, raw)
                 if detect_format(head) is not None or self._recognised(ref, head):
-                    scratch = self._scratch_file()
-                    with scratch.open("wb") as sink:
-                        content = hash_stream(source, sink=sink, on_bytes=budget.consume)
+                    sink = _Spill(self._scratch_file)
+                    content = hash_stream(source, sink=sink, on_bytes=budget.consume)
+                    sink.close()
                 else:
                     content = hash_stream(source, on_bytes=budget.consume)
             view: ArtifactView
-            if scratch is not None:
-                view = FileView(ref, scratch, content.size, content.sha256)
-            else:
+            if sink is None:
                 view = HeadView(ref, head, content.size, content.sha256)
+            elif sink.path is None:
+                view = BytesView(ref, sink.memory.getvalue(), content.sha256)
+            else:
+                view = FileView(ref, sink.path, content.size, content.sha256)
             self._analyze(view, depth + 1, budget, mode=member.mode)
         finally:
-            if scratch is not None:
-                scratch.unlink(missing_ok=True)
+            if sink is not None:
+                sink.discard()
 
     def _recognised(self, ref: ArtifactRef, head: bytes) -> bool:
         probe = HeadView(ref, head, len(head), None)

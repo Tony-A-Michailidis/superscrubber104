@@ -109,10 +109,31 @@ limits:
   maxArtifactBytes: 1TiB
   maxPathLength: 1024
 
+# Optional scanners. Paths are relative to this file. See docs/scanners.md for getting them,
+# verifying them and carrying them across. Without them, malware and vulnerability checks are
+# recorded as "not assessed" (warn by default; the malware rule above makes that a block).
 plugins:
   clamav:
-    required: false
+    required: true
+    path: tools/clamav/clamscan
+    database: tools/clamav/db
+    binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    files:
+      main.cvd: "0000000000000000000000000000000000000000000000000000000000000000"
+      daily.cvd: "0000000000000000000000000000000000000000000000000000000000000000"
+      bytecode.cvd: "0000000000000000000000000000000000000000000000000000000000000000"
+    minVersion: "1.4"
     maxDbAge: 7d
+  trivy:
+    required: true
+    path: tools/trivy/trivy
+    database: tools/trivy/cache
+    binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    minVersion: "0.60"
+    maxDbAge: 7d
+  kev:
+    path: feeds/known_exploited_vulnerabilities.json
+    maxDbAge: 2d
 
 freshness:
   feeds:

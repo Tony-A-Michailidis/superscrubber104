@@ -71,6 +71,8 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "python.environment.hash-mismatch",
         "python.wheel.record-mismatch",
         "node.environment.integrity-mismatch",
+        # a scanner that is not the one the policy pins
+        "plugin.integrity.mismatch",
     }
     assert all(r.rationale for r in registry)
 

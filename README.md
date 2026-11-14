@@ -1,6 +1,6 @@
 # airlock
 
-> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Models, agent and MCP configuration, container images, and Python and npm environments are inspected; scanner plugins and reports are next. Not ready for real transfers. `airlock` is a working name.
+> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Models, datasets, knowledge bases, notebooks, agent and MCP configuration, container images, and Python and npm environments are inspected; secrets and active content are found; ClamAV and Trivy run as optional pinned plugins. Reports are next. Not ready for real transfers. `airlock` is a working name.
 
 **Make agentic AI projects accreditable in high-assurance and disconnected environments.**
 
@@ -61,6 +61,10 @@ model package  .  (example-org/tiny-chat)
 `airlock model inspect` records and checks model packages in place: safetensors, GGUF, PyTorch and other pickle-based formats (statically; nothing is ever unpickled), Keras, ONNX, Ollama stores, adapters and sentence-transformers. It checks shards against indexes, configs against tensors, tokenizers against vocabularies, chat templates, `trust_remote_code`, licences and publisher checksums. See [model packages](docs/design/19-model-packages.md).
 
 The same inspection covers the rest of a delivery. MCP configs, agent settings, skills and instruction files are checked for shell launchers, runtime fetches, broad permissions, literal credentials and injected instructions; MCP server code for what its tools can reach. Container images (docker save, OCI archives and layouts) are verified blob by blob, and their layers are inspected like any other archive. Python and npm lockfiles are resolved against the wheels, sdists and tarballs in the delivery, so a requirement that would need the internet on the high side, or a package that does not match its lockfile hash, is caught before transfer. See [agents, containers, packages and source](docs/design/20-software-and-agents.md).
+
+The data around a model is covered too: datasets (Parquet footers, Hugging Face cards and `save_to_disk` layouts, loading scripts), knowledge bases (FAISS, LangChain, Chroma, LlamaIndex) with a prompt-injection scan of their stored documents and a check that the embedding model that built each index is in the delivery, notebooks, and classic ML and MLflow models. See [data and knowledge](docs/design/22-data-and-knowledge.md).
+
+Every text file, including files inside container layers and packages, is searched for credentials, and documents for macros, PDF JavaScript and remote templates. Malware and vulnerability scanning use ClamAV and Trivy, plus the CISA KEV catalogue, as optional plugins that airlock pins and checks before it trusts them; without them those checks are recorded as not assessed. `airlock plugins check` reports their state. See [scanners](docs/scanners.md).
 
 `airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 
