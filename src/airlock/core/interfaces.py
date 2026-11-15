@@ -70,6 +70,9 @@ class Inspection:
     components: tuple[Component, ...] = ()
     claims: tuple[UnitClaim, ...] = ()
     findings: tuple[Finding, ...] = ()
+    # Upstream proof established for artifacts (this one, or others it vouches for, such as
+    # the files a signed checksum list names).
+    verifications: Mapping[ArtifactRef, tuple[Verification, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

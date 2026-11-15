@@ -40,6 +40,7 @@ from airlock.core.model import (
     Subject,
     ToolRef,
     UnitClaim,
+    Verification,
 )
 from airlock.core.paths import NameIssue, check_member_name, link_escapes
 from airlock.core.policy import ArchiveLimits
@@ -136,6 +137,7 @@ class Analyzer:
         self.artifacts: list[Artifact] = []
         self.claims: list[UnitClaim] = []
         self.components: list[Component] = []
+        self.verifications: dict[ArtifactRef, list[Verification]] = {}
         self._workdir = workdir
         self._scratch = 0
 
@@ -203,6 +205,8 @@ class Analyzer:
             media_type = media_type or inspection.media_type
             self.claims.extend(inspection.claims)
             self.components.extend(inspection.components)
+            for ref, checks in inspection.verifications.items():
+                self.verifications.setdefault(ref, []).extend(checks)
             for finding in inspection.findings:
                 recorder.record(finding)
 

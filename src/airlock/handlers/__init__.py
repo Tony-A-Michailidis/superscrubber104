@@ -13,12 +13,14 @@ from airlock.handlers.generic import GenericHandler
 from airlock.handlers.knowledge import KnowledgeBaseHandler
 from airlock.handlers.notebooks import NotebookHandler
 from airlock.handlers.offline import OfflineHandler
+from airlock.handlers.packages.linux import LinuxPackageHandler
 from airlock.handlers.packages.node import NodePackageHandler
 from airlock.handlers.packages.os import OSPackageHandler
 from airlock.handlers.packages.python import PythonPackageHandler
 from airlock.handlers.runtime import RuntimeHandler
 from airlock.handlers.secrets import SecretsHandler
 from airlock.handlers.source import SourceHandler
+from airlock.handlers.upstream import UpstreamHandler
 
 
 def default_handlers() -> tuple[Handler, ...]:
@@ -28,6 +30,7 @@ def default_handlers() -> tuple[Handler, ...]:
         *ai_handlers(),
         AgentHandler(),
         ContainerImageHandler(),
+        LinuxPackageHandler(),
         OSPackageHandler(),
         PythonPackageHandler(),
         NodePackageHandler(),
@@ -39,6 +42,7 @@ def default_handlers() -> tuple[Handler, ...]:
         DocumentHandler(),
         RuntimeHandler(),
         ExecutableHandler(),
+        UpstreamHandler(),
         SourceHandler(),
         OfflineHandler(),
         SecretsHandler(),

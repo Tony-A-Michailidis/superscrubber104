@@ -2,8 +2,7 @@
 
 Inside container layers (and, later, VM images) these say what the OS layer contains. Debian and
 Ubuntu (``var/lib/dpkg/status``) and Alpine (``lib/apk/db/installed``) databases are plain text and
-parsed here. RPM databases (SQLite or Berkeley DB holding binary headers) are recognised and
-recorded as not parsed.
+parsed here. RPM databases (``rpmdb.sqlite``) are read by the Linux package handler.
 """
 
 import hashlib
@@ -16,7 +15,6 @@ from airlock.handlers.common import full_path, read_text
 
 TOOL = ToolRef("airlock.os-packages", __version__)
 _LIMIT = 64 << 20
-_RPMDB = ("var/lib/rpm/rpmdb.sqlite", "var/lib/rpm/Packages", "usr/lib/sysimage/rpm/rpmdb.sqlite")
 
 
 def _bom_ref(purl: str, ref: ArtifactRef) -> str:
@@ -121,7 +119,7 @@ def _os_release(view: ArtifactView) -> tuple[dict[str, str], list[Component]]:
 class OSPackageHandler:
     name = "os-packages"
     version = "1"
-    kinds = frozenset({"os.dpkg-status", "os.apk-installed", "os.release", "os.rpmdb"})
+    kinds = frozenset({"os.dpkg-status", "os.apk-installed", "os.release"})
 
     @staticmethod
     def _kind(view: ArtifactView) -> str | None:
@@ -132,8 +130,6 @@ class OSPackageHandler:
             return "os.apk-installed"
         if path.endswith(("etc/os-release", "usr/lib/os-release")):
             return "os.release"
-        if path.endswith(_RPMDB):
-            return "os.rpmdb"
         return None
 
     def detect(self, artifact: ArtifactView) -> Detection | None:
@@ -143,13 +139,6 @@ class OSPackageHandler:
     def inspect(self, artifact: ArtifactView, ctx: Context) -> Inspection:
         kind = self._kind(artifact)
         assert kind is not None  # noqa: S101
-        if kind == "os.rpmdb":
-            return Inspection(
-                kind=kind,
-                metadata={
-                    "osPackages": {"parsed": False, "note": "RPM databases are not parsed yet"}
-                },
-            )
         if kind == "os.release":
             values, components = _os_release(artifact)
             summary = {

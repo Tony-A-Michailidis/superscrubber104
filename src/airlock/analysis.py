@@ -44,6 +44,8 @@ def finish(analyzer: Analyzer, assemblers: Sequence[UnitAssembler]) -> Analysis:
                 tool=ToolRef(assembler.name, assembler.version),
                 error=f"{type(exc).__name__}: {exc}",
             )
+    for ref, checks in analyzer.verifications.items():
+        verified[ref].extend(checks)
     artifacts = [
         replace(a, verifications=(*a.verifications, *verified[a.ref])) if a.ref in verified else a
         for a in analyzer.artifacts

@@ -265,4 +265,69 @@ PACKAGES = (
     ),
 )
 
-SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES)
+UPSTREAM = (
+    _rule(
+        "package.digest-mismatch",
+        "Package does not match its own recorded digest",
+        C,
+        ("SI-7", "SR-11"),
+        "An RPM's header digest or payload digest does not match the package: it was altered after "
+        "it was built and signed.",
+        final=True,
+    ),
+    _rule(
+        "package.signature.invalid",
+        "Package signature does not verify",
+        C,
+        ("SI-7", "SR-4", "SR-11"),
+        "The vendor's signature is from a pinned key but does not hold over the package.",
+        final=True,
+    ),
+    _rule(
+        "package.signature.untrusted",
+        "Package is not signed by a key the policy pins",
+        M,
+        ("SR-4", "SR-11"),
+        "Pin the vendor's key under trust.upstream with scope package.rpm.",
+    ),
+    _rule(
+        "package.signature.missing",
+        "Package is not signed",
+        M,
+        ("SR-4", "SR-11"),
+        "Vendor packages are signed; an unsigned one was built elsewhere or had its signature "
+        "removed.",
+    ),
+    _rule(
+        "package.maintainer-scripts",
+        "OS package runs scripts when installed",
+        I,
+        ("CM-7",),
+        "Normal for OS packages and recorded for review: these scripts run as root on install.",
+    ),
+    _rule(
+        "upstream.checksum-mismatch",
+        "File differs from its publisher's checksum list",
+        C,
+        ("SI-7", "SR-11"),
+        "The publisher's SHA256SUMS (or similar) lists a different hash for this file.",
+        final=True,
+    ),
+    _rule(
+        "upstream.signature.invalid",
+        "Publisher's signature does not verify",
+        C,
+        ("SI-7", "SR-4", "SR-11"),
+        "A detached signature or signed checksum list from a pinned key does not hold.",
+        final=True,
+    ),
+    _rule(
+        "upstream.signature.untrusted",
+        "Publisher's signature is from a key the policy does not pin",
+        M,
+        ("SR-4",),
+        "Pin the publisher's key under trust.upstream (scope file.signed or file.checksums).",
+    ),
+)
+
+SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM)

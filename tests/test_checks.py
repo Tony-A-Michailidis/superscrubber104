@@ -78,6 +78,11 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "model.signature.digest-mismatch",
         # reference results produced with a different model
         "eval.model.digest-mismatch",
+        # vendor packages and files that differ from what their publisher signed or listed
+        "package.digest-mismatch",
+        "package.signature.invalid",
+        "upstream.checksum-mismatch",
+        "upstream.signature.invalid",
     }
     assert all(r.rationale for r in registry)
 
