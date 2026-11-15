@@ -29,7 +29,7 @@ This is the shared core that every module (pack/verify, patch, eval, controls-as
 | `Verdict` | passed, needs-approval, blocked (a policy blocker stands; overridable), refused (an integrity or authenticity failure; final) |
 | `TrustLevel` | none < asserted < checksum < pinned-checksum < signature |
 | `EntryType` | file, directory, symlink, hardlink, other |
-| `UnitKind` | model-package, runtime-profile, python-environment, node-environment, repo-mirror, container-image, vm-image, patch-set, knowledge-base |
+| `UnitKind` | model-package, runtime-profile, python-environment, node-environment, jvm-environment, go-environment, rust-environment, dotnet-environment, repo-mirror, container-image, vm-image, patch-set, knowledge-base, dataset |
 | `SubjectKind` | artifact, unit, component, bundle, request, policy, host (phase 2), tool-call (phase 3) |
 
 Artifact kinds are dotted strings (`archive.zip`, `model.safetensors`), not an enum: handlers own their namespace.

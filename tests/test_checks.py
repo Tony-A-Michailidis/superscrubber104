@@ -86,6 +86,8 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "repo.metadata.digest-mismatch",
         "repo.content.digest-mismatch",
         "repo.metadata.signature.invalid",
+        "environment.lock.hash-mismatch",
+        "package.checksum-mismatch",
     }
     assert all(r.rationale for r in registry)
 

@@ -340,6 +340,21 @@ _SUMMARY: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("hashed", ("hashed",)),
     ),
     "node-environment": (("locked", ("locked",)), ("unresolvable", ("unresolvable",))),
+    **{
+        kind: (
+            ("requirements", ("requirements",)),
+            ("unresolvable", ("unresolvable",)),
+            ("hash checked", ("hashChecked",)),
+        )
+        for kind in ("jvm-environment", "go-environment", "rust-environment", "dotnet-environment")
+    },
+    "repo-mirror": (
+        ("format", ("format",)),
+        ("packages", ("packages",)),
+        ("verified", ("verifiedPackages",)),
+        ("missing", ("missing",)),
+        ("snapshots", ("snapshots",)),
+    ),
     "dataset": (("rows", ("rows",)), ("formats", ("formats",)), ("licence", ("licence",))),
     "knowledge-base": (
         ("stores", ("stores",)),

@@ -433,4 +433,40 @@ MIRRORS = (
     ),
 )
 
-SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS)
+LOCKED = (
+    _rule(
+        "environment.lock.hash-mismatch",
+        "Package differs from the hash its lockfile records",
+        C,
+        ("SI-7", "SR-11"),
+        "go.sum, Cargo.lock, packages.lock.json or Gradle verification metadata records another "
+        "hash for this package; the build tool would refuse it.",
+        final=True,
+    ),
+    _rule(
+        "environment.lock.unresolvable",
+        "Locked dependencies are missing from the delivery",
+        M,
+        ("CM-8", "SR-11"),
+        "An offline build or restore will fail on the high side.",
+    ),
+    _rule(
+        "package.checksum-mismatch",
+        "Package differs from the checksum recorded beside it",
+        C,
+        ("SI-7", "SR-11"),
+        "A Maven .sha1/.sha256/.sha512, NuGet .nupkg.sha512, Go .ziphash, Gradle cache path or "
+        "cargo .cargo-checksum.json records another hash.",
+        final=True,
+    ),
+    _rule(
+        "package.build-hooks",
+        "Package runs code when it is built or installed",
+        I,
+        ("CM-7",),
+        "Cargo build scripts and procedural macros, MSBuild targets, NuGet PowerShell scripts: "
+        "recorded for review.",
+    ),
+)
+
+SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED)

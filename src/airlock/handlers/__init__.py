@@ -14,8 +14,12 @@ from airlock.handlers.knowledge import KnowledgeBaseHandler
 from airlock.handlers.mirrors import MirrorHandler
 from airlock.handlers.notebooks import NotebookHandler
 from airlock.handlers.offline import OfflineHandler
+from airlock.handlers.packages.cargo import CargoHandler
+from airlock.handlers.packages.golang import GoHandler
+from airlock.handlers.packages.jvm import JvmHandler
 from airlock.handlers.packages.linux import LinuxPackageHandler
 from airlock.handlers.packages.node import NodePackageHandler
+from airlock.handlers.packages.nuget import NuGetHandler
 from airlock.handlers.packages.os import OSPackageHandler
 from airlock.handlers.packages.python import PythonPackageHandler
 from airlock.handlers.runtime import RuntimeHandler
@@ -32,6 +36,10 @@ def default_handlers() -> tuple[Handler, ...]:
         AgentHandler(),
         ContainerImageHandler(),
         LinuxPackageHandler(),
+        JvmHandler(),
+        GoHandler(),
+        CargoHandler(),
+        NuGetHandler(),
         MirrorHandler(),
         OSPackageHandler(),
         PythonPackageHandler(),
