@@ -13,6 +13,7 @@ import click
 from airlock import __version__
 from airlock.analyzer import TOOL
 from airlock.approvals import approve as run_approve
+from airlock.bundle import encode
 from airlock.core.errors import AirlockError, ConfigError
 from airlock.core.model import Analysis, Stage, Verdict
 from airlock.core.policy import Policy, load_policy
@@ -35,6 +36,8 @@ from airlock.offline_report import (
     render_offline,
 )
 from airlock.pack import pack as run_pack
+from airlock.report import FORMATS, load_source
+from airlock.report import render as render_report
 from airlock.scanners import run_scanners
 from airlock.session import (
     EXIT_BLOCKED,
@@ -393,6 +396,36 @@ def offline_check(
     sys.exit(EXIT_OK if summary.verdict is Verdict.PASSED else EXIT_BLOCKED)
 
 
+@main.command("report")
+@click.argument("source", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-f",
+    "--format",
+    "fmt",
+    type=click.Choice(FORMATS),
+    default="md",
+    show_default=True,
+    help="md and html for reviewers; json; cyclonedx (SBOM/ML-BOM); oscal (assessment results).",
+)
+@click.option("-o", "--out", type=click.Path(dir_okay=False, path_type=Path), help="Write here.")
+@click.option("--policy", type=_FILE, help="Policy whose control catalogue to report against.")
+@_reports_errors
+def report(source: Path, fmt: str, out: Path | None, policy: Path | None) -> None:
+    """Render a report from SOURCE: a bundle, an 'airlock verify' or 'model inspect' output
+    directory, or an assessment file.
+
+    A bundle holds the packing side's assessment; for this side's own, report on the directory
+    'airlock verify --out' wrote.
+    """
+    catalog = _policy(policy).catalog() if policy else None
+    text = render_report(load_source(source), fmt, catalog)
+    if out is None:
+        click.echo(text, nl=False)
+    else:
+        out.write_text(text, encoding="utf-8")
+        click.echo(f"wrote:    {out}")
+
+
 @main.group("eval")
 def eval_group() -> None:
     """Behavioural verification: run pinned evaluation sets through a pinned local runtime."""
@@ -446,6 +479,11 @@ def model() -> None:
     multiple=True,
     help="Path glob of documents a knowledge base will be built from (repeatable).",
 )
+@click.option(
+    "--out",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Also write analysis.inspect.json and assessment.inspect.json here (for airlock report).",
+)
 @click.option("-v", "--verbose", is_flag=True, help="Also list allowed findings.")
 @_reports_errors
 def model_inspect(
@@ -453,6 +491,7 @@ def model_inspect(
     policy: Path | None,
     as_json: bool,
     corpus: tuple[str, ...],
+    out: Path | None,
     verbose: bool,
 ) -> None:
     """Record and check the model packages in INPUTS, in place, without packing.
@@ -460,6 +499,10 @@ def model_inspect(
     Exit codes are those of 'airlock verify'.
     """
     result = inspect_paths(inputs, policy=_policy(policy), corpora=corpus)
+    if out is not None:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "analysis.inspect.json").write_bytes(encode(result.analysis))
+        (out / "assessment.inspect.json").write_bytes(encode(result.assessment))
     if as_json:
         document = {
             "units": [to_data(u) for u in result.analysis.units],

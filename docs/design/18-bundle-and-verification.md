@@ -85,7 +85,8 @@ Points worth knowing:
 
 ```
 DIR/ledger.jsonl                      hash-chained log of receipts (signed if --key is given)
-DIR/imports/<time>-<bundle id>/       assessment.verify.json, receipt.dsse.json (or receipt.json)
+DIR/imports/<time>-<bundle id>/       assessment.verify.json, analysis.verify.json, request.yaml,
+                                      receipt.dsse.json (or receipt.json); airlock report reads it
 ```
 
 The receipt holds identifiers, digests, a verdict and a time, and no free text, so it is safe to send back outbound if policy allows. The custody log stays with the bundle (approvals made on either side are appended to it); the ledger stays on the receiving side. Neither is sent back.

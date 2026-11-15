@@ -1,6 +1,6 @@
 # airlock
 
-> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Models (with their publishers' signatures), datasets, knowledge bases and corpora, notebooks, agent and MCP configuration, container images, the inference and GPU stack, and Python and npm environments are inspected; secrets, active content and anything that needs the internet are found; ClamAV, Trivy, Semgrep and Bandit run as optional pinned plugins; models can be evaluated on both sides. Reports are next. Not ready for real transfers. `airlock` is a working name.
+> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Models (with their publishers' signatures), datasets, knowledge bases and corpora, notebooks, agent and MCP configuration, container images, the inference and GPU stack, and Python and npm environments are inspected; secrets, active content and anything that needs the internet are found; ClamAV, Trivy, Semgrep and Bandit run as optional pinned plugins; models can be evaluated on both sides. Reports (Markdown, HTML, JSON, CycloneDX, OSCAL) are rendered from the evidence. Not ready for real transfers. `airlock` is a working name.
 
 **Make agentic AI projects accreditable in high-assurance and disconnected environments.**
 
@@ -24,11 +24,13 @@ What works today:
 ```console
 $ airlock keygen -o keys --name pack --holder build-pipeline
 $ airlock pack ./delivery --request request.yaml --key keys/pack.key -o bundle/
-$ airlock verify bundle/ --policy policy.yaml --state /var/lib/airlock --key keys/receipt.key
+$ airlock verify bundle/ --policy policy.yaml --state /var/lib/airlock --key keys/receipt.key --out review/
+$ airlock report review/ --format html -o review/report.html
 ```
 
 - `keygen` prints the snippet that pins the new key in the receiving side's policy.
 - `pack` inventories, hashes, inspects and signs.
+- `report` renders the evidence for reviewers and assessors: Markdown or a self-contained HTML page, JSON, a CycloneDX 1.6 SBOM/ML-BOM, or OSCAL assessment results, with a control matrix that shows, for each NIST SP 800-53 control, what airlock checked, what it found and what it could not assess. See [reports and control mapping](docs/design/25-reports-and-controls.md).
 - `verify` trusts nothing the packer said. It checks the signature against keys pinned in its own policy, re-hashes every byte, re-inspects the content with its own limits, and records the import in a hash-chained ledger so that replayed, stale or out-of-order bundles are caught.
 
 Exit codes make the commands usable as CI gates:
@@ -72,7 +74,7 @@ Publishers' OpenSSF model signatures are verified offline (a pinned key, a CA, o
 
 `airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 
-Planned: `airlock report`, `airlock stage`, `airlock patch`.
+Planned: `airlock stage`, `airlock patch`.
 
 ## Roadmap
 

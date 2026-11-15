@@ -25,6 +25,7 @@ from airlock.core.canonical import canonical_bytes, sha256_digest
 from airlock.core.errors import AirlockError, ConfigError
 from airlock.core.interfaces import Context, Handler
 from airlock.core.model import (
+    Analysis,
     ApprovalRecord,
     ArtifactRef,
     Assessment,
@@ -63,6 +64,7 @@ class VerifyResult:
     provenance: Provenance | None
     receipt: Receipt | None
     outputs: tuple[Path, ...] = ()
+    analysis: Analysis | None = None
 
 
 class _Verifier:
@@ -85,6 +87,7 @@ class _Verifier:
         self.packers: list[str] = []  # trusted keys that signed the statement
         self.custody_check: chainlog.ChainCheck | None = None
         self.plugins: tuple[PluginStatus, ...] = ()
+        self.analysis: Analysis | None = None  # this side's own analysis, for reports
 
     # --- trust ----------------------------------------------------------------------------------
 
@@ -299,6 +302,7 @@ class _Verifier:
             for view in self.files.values():
                 analyzer.analyze(view)
             analysis = finish(analyzer, default_assemblers())
+        self.analysis = analysis
         self.plugins = run_scanners(self.ctx, targets(self.files.values()), analysis)
         if self.manifest is not None:
             check_paths(self.manifest.entries, self.ctx)
@@ -452,6 +456,12 @@ def verify(
         out.mkdir(parents=True, exist_ok=True)
         outputs.append(out / "assessment.verify.json")
         outputs[-1].write_bytes(assessment_bytes)
+        if verifier.analysis is not None:  # re-derived here; what reports on this import read
+            outputs.append(out / "analysis.verify.json")
+            outputs[-1].write_bytes(layout.encode(verifier.analysis))
+        if verifier.request is not None and (bundle / layout.REQUEST).is_file():
+            outputs.append(out / layout.REQUEST)
+            outputs[-1].write_bytes((bundle / layout.REQUEST).read_bytes())
         if receipt is not None:
             payload = layout.encode(receipt)
             if receipt_signer is not None:
@@ -461,4 +471,4 @@ def verify(
             else:
                 outputs.append(out / "receipt.json")
                 outputs[-1].write_bytes(payload)
-    return VerifyResult(assessment, provenance, receipt, tuple(outputs))
+    return VerifyResult(assessment, provenance, receipt, tuple(outputs), verifier.analysis)

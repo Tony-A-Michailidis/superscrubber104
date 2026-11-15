@@ -98,7 +98,12 @@ def test_pack_then_verify_is_accepted(site: Site, bundle: Path, tmp_path: Path) 
     assert receipt.accepted
     assert receipt.enclave == "enclave-b"
     assert receipt.verifier_key_id == site.receipt_key.key_id
-    assert [p.name for p in result.outputs] == ["assessment.verify.json", "receipt.dsse.json"]
+    assert [p.name for p in result.outputs] == [
+        "assessment.verify.json",
+        "analysis.verify.json",  # this side's own analysis, for airlock report
+        "request.yaml",
+        "receipt.dsse.json",
+    ]
     assert (tmp_path / "state" / "ledger.jsonl").read_bytes().count(b"\n") == 1
 
 
