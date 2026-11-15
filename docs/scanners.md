@@ -1,4 +1,4 @@
-# Scanners: ClamAV, Trivy, Semgrep, Bandit, qemu-img and the CISA KEV feed
+# Scanners: ClamAV, Trivy, Semgrep, Bandit, qemu-img, osslsigncode and the CISA KEV feed
 
 airlock works without any external scanner. Its own checks cover integrity, model formats, packages, agents, secrets and active content. Two questions need a scanner and a database that changes every day:
 
@@ -224,6 +224,21 @@ plugins:
 For every top-level disk image airlock runs `qemu-img info --output=json -U -f <format> <file>` and, for formats qemu can check (qcow2, VHDX), `qemu-img check --output=json -U -f <format> <file>`. The format is always passed explicitly, so qemu never probes it, which is the format-confusion attack doc 32 guards against. `-U` takes no locks. Neither command writes to the image. Any difference from airlock's reading (virtual size, backing file, dirty or corrupt flags, encryption) or any corruption or leak is `vm.image.check`.
 
 `qemu-img` parses untrusted input, like any scanner. Keep it current and pinned.
+
+## osslsigncode (Authenticode, Windows packages)
+
+Verifies Authenticode signatures on Windows updates and binaries from the Linux host (doc 33). Build or install `osslsigncode` 2.x on the connected side and pin it. Export the root certificates you trust (for Microsoft updates, the Microsoft Root Certificate Authority 2010 and 2011, plus the timestamping roots) as PEM into one directory, and pin each file:
+
+```yaml
+plugins:
+  osslsigncode:
+    path: tools/osslsigncode/osslsigncode
+    binarySha256: "…"
+    database: tools/osslsigncode/roots      # roots.pem, and tsa-roots.pem for timestamps
+    files: { roots.pem: "…", tsa-roots.pem: "…" }
+```
+
+airlock runs `osslsigncode verify -in <file> -CAfile roots.pem [-TSA-CAfile tsa-roots.pem]` on every top-level `.msu`, `.cab`, `.msi`, `.exe`, `.dll`, `.sys`, `.msix`, `.appx` and PE file. A digest mismatch is `authenticode.signature.invalid` (final). A signature that does not chain to your roots is `authenticode.signature.untrusted`. No signature is `authenticode.signature.missing`.
 
 ## Carrying the scanners across
 

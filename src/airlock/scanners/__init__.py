@@ -12,6 +12,7 @@ from pathlib import Path
 
 from airlock.core.interfaces import Context
 from airlock.core.model import Analysis, PluginStatus, Subject
+from airlock.scanners.authenticode import Authenticode, has_windows_packages
 from airlock.scanners.base import (
     TOOL,
     Preflight,
@@ -46,6 +47,15 @@ CAPABILITIES: dict[str, tuple[tuple[str, ...], Callable[[Analysis], bool], str]]
         has_source,
         "no static analysis scanner is configured (plugins.semgrep or plugins.bandit)",
     ),
+    "authenticode": (
+        (
+            "authenticode.signature.invalid",
+            "authenticode.signature.untrusted",
+            "authenticode.signature.missing",
+        ),
+        has_windows_packages,
+        "no Authenticode verifier is configured (plugins.osslsigncode)",
+    ),
     "vm-images": (
         ("vm.image.check",),
         has_disk_images,
@@ -62,7 +72,7 @@ def targets(files: Iterable[FileView]) -> list[Target]:
 def default_scanners() -> tuple[Scanner, ...]:
     """In run order: the KEV feed first, so vulnerability findings can be marked."""
     kev = KevFeed()
-    return (kev, ClamAV(), Trivy(kev), Semgrep(), Bandit(), QemuImg())
+    return (kev, ClamAV(), Trivy(kev), Semgrep(), Bandit(), QemuImg(), Authenticode())
 
 
 def run_scanners(

@@ -583,3 +583,146 @@ def model_inspect(
         click.echo()
         click.echo(render(result.assessment, verbose=verbose))
     sys.exit(exit_code(result.assessment))
+
+
+@main.group()
+def patch() -> None:
+    """Patch disconnected hosts: inventory (high side), plan (low side), confirm."""
+
+
+@patch.command("inventory")
+@click.option(
+    "--root",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Root filesystem of the Linux host to inventory (default /).",
+)
+@click.option("--label", required=True, help="Name for this host in the plan (never the hostname).")
+@click.option("--windows-hotfixes", type=_FILE, help="Get-HotFix output as JSON (Windows hosts).")
+@click.option("--windows-product", help='Windows product name, e.g. "Windows Server 2022".')
+@click.option("--windows-build", help="Windows OS build, e.g. 10.0.20348.2700.")
+@click.option("--key", type=_FILE, help="Private key that signs the inventory (the receipt key).")
+@click.option("--key-passphrase-env", help="Environment variable holding the key's passphrase.")
+@click.option("-o", "--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
+@_reports_errors
+def patch_inventory(
+    root: Path | None,
+    label: str,
+    windows_hotfixes: Path | None,
+    windows_product: str | None,
+    windows_build: str | None,
+    key: Path | None,
+    key_passphrase_env: str | None,
+    out: Path,
+) -> None:
+    """Record what is installed, to carry to the low side. Holds names and versions only."""
+    from airlock.patch.inventory import collect, from_windows, sign
+    from airlock.patch.inventory import encode as encode_inventory
+    from airlock.session import utc_now
+
+    now = utc_now()
+    if windows_hotfixes is not None:
+        if not windows_product or not windows_build:
+            raise ConfigError("--windows-product and --windows-build go with --windows-hotfixes")
+        inventory = from_windows(windows_hotfixes, windows_product, windows_build, label, now)
+    else:
+        inventory = collect(root or Path("/"), label, now)
+    signer = _key(key, key_passphrase_env)
+    data = sign(inventory, signer) if signer else encode(encode_inventory(inventory))
+    out.write_bytes(data)
+    click.echo(
+        f"{len(inventory.packages)} "
+        f"{'updates' if inventory.os.family == 'windows' else 'packages'} "
+        f"on {inventory.os.id} {inventory.os.version_id}"
+        f"{', signed' if signer else ', unsigned'} -> {out}"
+    )
+
+
+@patch.command("plan")
+@click.option(
+    "--inventory", "inventory_path", required=True, type=_FILE, help="The host's inventory."
+)
+@click.option(
+    "--feed",
+    "feeds",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Feed snapshot: OSV file/dir/zip, updateinfo.xml, MSRC CVRF JSON, KEV JSON (repeatable).",
+)
+@click.option("--policy", type=_FILE, help="Policy: pinned inventory keys and freshness.feeds.")
+@click.option(
+    "--cve", "cves", multiple=True, help="Emergency plan: only advisories fixing this CVE."
+)
+@click.option("--kev", "kev_only", is_flag=True, help="Emergency plan: only KEV-listed CVEs.")
+@click.option("-o", "--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
+@click.option("--markdown", "markdown_out", type=click.Path(dir_okay=False, path_type=Path))
+@_reports_errors
+def patch_plan(
+    inventory_path: Path,
+    feeds: tuple[Path, ...],
+    policy: Path | None,
+    cves: tuple[str, ...],
+    kev_only: bool,
+    out: Path,
+    markdown_out: Path | None,
+) -> None:
+    """Match an inventory against offline feed snapshots. Exit 3 if a feed is stale."""
+    from airlock.core.policy import KeyRole
+    from airlock.feeds.readers import load_feeds
+    from airlock.patch.inventory import load as load_inventory
+    from airlock.patch.plan import markdown, plan
+    from airlock.session import utc_now
+
+    loaded = _policy(policy)
+    keys = [s.load() for s in loaded.signers_with_role(KeyRole.RECEIPT)]
+    inventory, signers = load_inventory(inventory_path, keys)
+    if keys and not signers:
+        raise ConfigError("the inventory is not signed by a receipt key the policy pins")
+    result = plan(
+        inventory,
+        load_feeds(feeds),
+        utc_now(),
+        max_age=loaded.feed_max_age,
+        cves=cves,
+        kev_only=kev_only,
+    )
+    out.write_bytes(encode(result))
+    if markdown_out is not None:
+        markdown_out.write_text(markdown(result), encoding="utf-8")
+    click.echo(
+        f"{len(result.gaps)} advisories, {sum(g.kev for g in result.gaps)} on KEV, "
+        f"{len(result.fetch)} packages to fetch -> {out}"
+    )
+    if result.stale_feeds:
+        click.echo(f"stale or unreadable feeds: {', '.join(result.stale_feeds)}", err=True)
+        sys.exit(3)
+
+
+@patch.command("confirm")
+@click.option("--plan", "plan_path", required=True, type=_FILE, help="The earlier plan.")
+@click.option("--inventory", "inventory_path", required=True, type=_FILE, help="A fresh inventory.")
+@click.option(
+    "--feed", "feeds", multiple=True, required=True, type=click.Path(exists=True, path_type=Path)
+)
+@click.option("--policy", type=_FILE, help="Policy: pinned inventory keys.")
+@_reports_errors
+def patch_confirm(
+    plan_path: Path, inventory_path: Path, feeds: tuple[Path, ...], policy: Path | None
+) -> None:
+    """Show which gaps of a plan are closed. Exit 2 while any remain open."""
+    from airlock.core.policy import KeyRole
+    from airlock.core.serde import from_data
+    from airlock.feeds.readers import load_feeds
+    from airlock.patch.inventory import load as load_inventory
+    from airlock.patch.plan import PatchPlan, confirm
+    from airlock.session import utc_now
+
+    loaded = _policy(policy)
+    keys = [s.load() for s in loaded.signers_with_role(KeyRole.RECEIPT)]
+    inventory, signers = load_inventory(inventory_path, keys)
+    if keys and not signers:
+        raise ConfigError("the inventory is not signed by a receipt key the policy pins")
+    previous = from_data(PatchPlan, json.loads(plan_path.read_bytes()))
+    outcome = confirm(previous, inventory, load_feeds(feeds), utc_now())
+    click.echo(json.dumps(outcome, indent=2))
+    sys.exit(2 if outcome["open"] else 0)

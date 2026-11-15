@@ -598,4 +598,41 @@ VM = (
     ),
 )
 
-SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED, *IAC, *IDE, *VM)
+WINDOWS = (
+    _rule(
+        "authenticode.signature.invalid",
+        "Windows package or binary does not match its Authenticode signature",
+        C,
+        ("SI-7", "SR-4", "SR-11"),
+        "The content was changed after it was signed.",
+        final=True,
+    ),
+    _rule(
+        "authenticode.signature.untrusted",
+        "Authenticode signature does not chain to a pinned root",
+        M,
+        ("SR-4", "SR-11"),
+        "Pin the vendor's root certificates in plugins.osslsigncode.database/roots.pem.",
+    ),
+    _rule(
+        "authenticode.signature.missing",
+        "Windows package or binary is not signed",
+        M,
+        ("SR-4", "SR-11"),
+        "Microsoft updates and most vendor installers are signed; an unsigned one was not "
+        "published that way.",
+    ),
+)
+
+SOFTWARE_RULES = (
+    *AGENTS,
+    *CONTAINERS,
+    *PACKAGES,
+    *UPSTREAM,
+    *MIRRORS,
+    *LOCKED,
+    *IAC,
+    *IDE,
+    *VM,
+    *WINDOWS,
+)

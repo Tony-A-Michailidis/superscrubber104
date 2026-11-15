@@ -36,3 +36,4 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [30-infrastructure-code.md](30-infrastructure-code.md) | new | Kubernetes and Compose posture, unpinned images, Helm/Terraform/Ansible dependencies, Terraform provider hashes, YAML alias budget (implemented) |
 | [31-ide-extensions.md](31-ide-extensions.md) | new | VS Code and JetBrains extensions: identity, approved lists, start-up activation, telemetry, proposed APIs, dependencies (implemented) |
 | [32-vm-images.md](32-vm-images.md) | new | qcow2, VMDK, VHD, VHDX, raw and ISO headers; incomplete, encrypted, unclean and confused images; OVA/OVF manifests; Glance hashes and signatures; the qemu-img plugin (implemented) |
+| [33-patching-and-feeds.md](33-patching-and-feeds.md) | new | `airlock patch inventory/plan/confirm`, OSV, updateinfo, MSRC CVRF and KEV feeds with freshness, emergency plans, Authenticode via osslsigncode (implemented) |
