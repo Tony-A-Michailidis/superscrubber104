@@ -509,4 +509,28 @@ IAC = (
     ),
 )
 
-SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED, *IAC)
+IDE = (
+    _rule(
+        "ide.extension.startup",
+        "IDE extension activates on every start",
+        I,
+        ("CM-7",),
+        "It runs whether or not it is used; recorded for review.",
+    ),
+    _rule(
+        "ide.extension.proposed-api",
+        "VS Code extension uses proposed APIs",
+        L,
+        ("CM-2",),
+        "Proposed APIs only work on Insiders builds or with flags; the extension may not load.",
+    ),
+    _rule(
+        "ide.extension.unresolvable",
+        "IDE extension depends on extensions that are not in the delivery",
+        M,
+        ("CM-8",),
+        "Extension dependencies, packs and required plugins must cross with it.",
+    ),
+)
+
+SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED, *IAC, *IDE)

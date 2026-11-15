@@ -34,3 +34,4 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [28-package-mirrors.md](28-package-mirrors.md) | new | dnf, apt, PyPI simple, npm storage and Helm mirrors as units: the chain from signed metadata to each package, missing and unlisted content, freshness and rollback against the ledger (implemented) |
 | [29-more-ecosystems.md](29-more-ecosystems.md) | new | Java (Maven, Gradle), Go, Rust and .NET: lockfiles resolved against the delivery, lockfile and sidecar hashes, build hooks (implemented) |
 | [30-infrastructure-code.md](30-infrastructure-code.md) | new | Kubernetes and Compose posture, unpinned images, Helm/Terraform/Ansible dependencies, Terraform provider hashes, YAML alias budget (implemented) |
+| [31-ide-extensions.md](31-ide-extensions.md) | new | VS Code and JetBrains extensions: identity, approved lists, start-up activation, telemetry, proposed APIs, dependencies (implemented) |

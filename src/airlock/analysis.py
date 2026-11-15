@@ -18,6 +18,7 @@ from airlock.core.model import (
     Unit,
     Verification,
 )
+from airlock.handlers.ide import check_extension_dependencies
 from airlock.units.knowledge_base import link_knowledge_bases
 from airlock.units.repo_mirror import check_mirror_content
 from airlock.units.runtime_profile import link_runtime_profiles
@@ -56,5 +57,6 @@ def finish(analyzer: Analyzer, assemblers: Sequence[UnitAssembler]) -> Analysis:
     check_evals(analyzer.artifacts, units, ctx)
     units = link_runtime_profiles(units, analyzer.artifacts, components, ctx)
     check_mirror_content(analyzer.artifacts, units, ctx)
+    check_extension_dependencies(analyzer.artifacts, ctx)
     check_upstream_trust(artifacts, ctx)
     return Analysis.create(TOOL, artifacts, units, components)
