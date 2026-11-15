@@ -1,6 +1,17 @@
 # airlock
 
-> **Status: pre-alpha.** `keygen`, `pack` and `verify` work end to end (integrity, signing, archive inspection, replay protection). Models (with their publishers' signatures), datasets, knowledge bases and corpora, notebooks, agent and MCP configuration, container images, the inference and GPU stack, and Python and npm environments are inspected; secrets, active content and anything that needs the internet are found; ClamAV, Trivy, Semgrep and Bandit run as optional pinned plugins; models can be evaluated on both sides. Reports (Markdown, HTML, JSON, CycloneDX, OSCAL) are rendered from the evidence. Not ready for real transfers. `airlock` is a working name.
+> **Status: pre-alpha.** `keygen`, `pack`, `verify` and `stage` work end to end, with multi-volume and delta bundles. airlock inspects:
+>
+> * models, with their publishers' signatures;
+> * datasets, knowledge bases and corpora, and notebooks;
+> * agent and MCP configuration;
+> * container images and VM images;
+> * the inference and GPU stack;
+> * Python, npm, Java, Go, Rust and .NET environments;
+> * OS packages and package mirrors, with vendor signatures;
+> * infrastructure code and IDE extensions.
+>
+> It finds secrets, active content and anything that needs the internet. `airlock patch` plans and stages OS patches from offline security feeds. ClamAV, Trivy, Semgrep, Bandit, qemu-img and osslsigncode run as optional pinned plugins, and models can be evaluated on both sides. Reports (Markdown, HTML, JSON, CycloneDX, OSCAL) are rendered from the evidence. Not ready for real transfers. `airlock` is a working name.
 
 **Make agentic AI projects accreditable in high-assurance and disconnected environments.**
 
@@ -53,7 +64,7 @@ WARN     malware.detected (not assessed)  [f6490e189d646738]
          bundle: Malware scanner reports a detection
          reason: no malware scanner is configured (plugins.clamav)
 ...
-81 of 160 rules exercised, 315 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+81 of 204 rules exercised, 315 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
 verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
 ```
 
@@ -127,17 +138,52 @@ Every text file, including files inside container layers and packages, is search
 
 Publishers' OpenSSF model signatures are verified offline (a pinned key, a CA, or Sigstore keyless against a pinned trusted root), and `airlock eval run` runs a pinned evaluation set through a pinned local runtime on each side and compares the answers, so a swapped or misbehaving model is caught. See [signatures and evaluation](docs/design/24-signatures-and-eval.md).
 
-`airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
+OS packages and mirrors are checked as their vendors sign them, with keys pinned in the policy and limited by scope:
+* RPM header and payload digests and signatures, and Debian packages;
+* dnf and apt mirrors, as a chain from signed `repomd.xml` or `InRelease` to every package;
+* PyPI simple, npm and Helm repositories;
+* publishers' `SHA256SUMS` and detached signatures.
 
-Planned: `airlock stage`, `airlock patch`.
+Stale, expired or rolled-back repository metadata is caught against the receiving side's ledger. See [vendor trust](docs/design/27-vendor-trust.md) and [package mirrors](docs/design/28-package-mirrors.md).
+
+Gradle, Go, Cargo and NuGet lockfiles are resolved against the delivery with their hashes (Go's `h1:`, crate checksums, NuGet content hashes), and build-time hooks are recorded ([more ecosystems](docs/design/29-more-ecosystems.md)). For infrastructure code ([infrastructure code](docs/design/30-infrastructure-code.md)):
+* Kubernetes and Compose workloads are checked for privileged and host access and for images by tag rather than digest;
+* Helm, Terraform and Ansible dependencies must be vendored;
+* Terraform providers are checked against `.terraform.lock.hcl`.
+
+VS Code and JetBrains extensions are identified for approved lists, with telemetry and start-up activation recorded ([IDE extensions](docs/design/31-ide-extensions.md)). VM disk images are read from their headers and never mounted ([VM images](docs/design/32-vm-images.md)):
+* qcow2, VMDK, VHD, VHDX, raw and ISO;
+* incomplete, encrypted, unclean and format-confused images are caught;
+* OVA manifests and Glance hashes and signatures are checked.
+
+Large deliveries can be cut into volumes, one per medium, under one signed index (`pack --volume-size`). Recurring transfers can be deltas against a bundle the receiving side already accepted (`pack --delta-from`). See [volumes and deltas](docs/design/26-volumes-and-deltas.md).
+
+```console
+$ airlock patch inventory --root / --label web-01 --key keys/receipt.key -o web-01.json     # high side
+$ airlock patch plan --inventory web-01.json --feed updateinfo.xml.gz --feed kev.json \
+      --policy policy.yaml -o plan.json --markdown plan.md                                  # low side
+$ airlock patch stage bundle/ --inventory web-01.json --policy policy.yaml \
+      --state /var/lib/airlock --key keys/receipt.key --target dnf=/srv/repos               # high side
+```
+
+`airlock patch` keeps disconnected AlmaLinux, Ubuntu and Windows hosts patched:
+* The high side's inventory crosses outbound, signed, and holds package names and versions only.
+* It is matched against offline OSV, dnf `updateinfo`, Microsoft CVRF and CISA KEV snapshots. Stale feeds are refused.
+* Emergency plans narrow the result to `--kev` or `--cve`.
+* `patch stage` refuses downgrades unless they are justified.
+* `patch confirm` shows the gap closed.
+
+See [patching and feeds](docs/design/33-patching-and-feeds.md). `airlock stage` places an accepted bundle into local stores (a PEP 503 index, Verdaccio storage, dnf and apt mirrors, OCI layouts, model directories, a Windows share). It re-hashes every file as it copies it and records the event in the ledger. It never pushes over the network. See [staging](docs/design/34-staging.md).
+
+`airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 
 ## Roadmap
 
 | Phase | Module | Purpose | Status |
 |---|---|---|---|
 | 1 | `pack` / `verify` / `report` | Inventory, hash, scan, sign, bundle and verify any delivery, AI and non-AI, with control-mapped evidence | built |
-| 1b | offline readiness | Prove the delivery runs disconnected with no egress paths; runtime profiles | built (VM images, IaC, IDE extensions, more ecosystems to come) |
-| 1c | `patch` | Keep disconnected Windows, AlmaLinux and Ubuntu systems patched, with a fast lane for actively exploited CVEs | planned |
+| 1b | offline readiness and coverage | Prove the delivery runs disconnected; runtime profiles, mirrors, VM images, IaC, IDE extensions, Java/Go/Rust/.NET, multi-volume bundles | built |
+| 1c | `patch` / `stage` | Keep disconnected Windows, AlmaLinux and Ubuntu systems patched, with a fast lane for actively exploited CVEs; delta bundles; staging | built (GPU driver and firmware advisories to come) |
 | 1d | `eval` | Behavioural verification of models on both sides of the gap; model signatures | built |
 | 2 | controls-as-code | Control-mapped gap reports for coding-agent setups | planned |
 | 3 | MCP policy gateway | Runtime enforcement between agents and MCP servers | planned |

@@ -100,10 +100,8 @@ class Authenticode:
             )
             return
         ctx.recorder.passed("authenticode.signature.missing")
-        if (
-            "mismatch" in text
-            or ("signature verification: failed" in text
-            and "certificate" not in text)
+        if "mismatch" in text or (
+            "signature verification: failed" in text and "certificate" not in text
         ):
             ctx.recorder.fail(
                 "authenticode.signature.invalid",

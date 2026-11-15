@@ -9,7 +9,7 @@ assessment are covered by the signature but are never read as input.
 import json
 import shutil
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -61,6 +61,19 @@ _CONTENT_RULES = (
     "integrity.entry.missing",
     "integrity.entry.unexpected",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class Verified:
+    """What ``verify(use=...)`` hands over: the trusted manifest, the re-derived analysis and
+    assessment, and every payload file as it was re-hashed (``FileView.location`` on disk)."""
+
+    manifest: Manifest
+    manifest_digest: str | None
+    analysis: Analysis
+    assessment: Assessment
+    files: dict[str, FileView]
+    bundle_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +466,7 @@ def verify(
     now: datetime | None = None,
     volume_dirs: Sequence[Path] = (),
     bases: Sequence[Path] = (),
+    use: Callable[[Verified], None] | None = None,
 ) -> VerifyResult:
     """Verify ``bundle`` against ``policy``.
 
@@ -462,6 +476,10 @@ def verify(
 
     ``state`` is this side's state directory; with it, the import is checked against, and then
     recorded in, the ledger. ``out`` receives the assessment and receipt (default: under ``state``).
+
+    ``use`` is called with the verified content while it is still on disk (split files of a
+    multi-volume bundle are reassembled only for the duration of the call): that is how
+    ``airlock stage`` copies exactly what was just verified.
     """
     if not (bundle / layout.DESCRIPTOR).is_file():
         raise ConfigError(f"not an airlock bundle (no {layout.DESCRIPTOR}): {bundle}")
@@ -480,16 +498,26 @@ def verify(
         verifier.inspect(handlers or default_handlers())
         verifier.custody()
         verifier.history(ledger)
+        assessment = session.finish(
+            Stage.VERIFY,
+            manifest_digest=verifier.manifest_digest,
+            content_hashes={p: view.sha256 for p, view in verifier.files.items() if view.sha256},
+            approvals=verifier.approvals,
+            plugins=verifier.plugins,
+        )
+        if use is not None and verifier.manifest is not None and verifier.analysis is not None:
+            use(
+                Verified(
+                    manifest=verifier.manifest,
+                    manifest_digest=verifier.manifest_digest,
+                    analysis=verifier.analysis,
+                    assessment=assessment,
+                    files=dict(verifier.files),
+                    bundle_id=verifier.provenance.bundle_id if verifier.provenance else None,
+                )
+            )
     finally:
         shutil.rmtree(verifier.scratch, ignore_errors=True)
-
-    assessment = session.finish(
-        Stage.VERIFY,
-        manifest_digest=verifier.manifest_digest,
-        content_hashes={path: view.sha256 for path, view in verifier.files.items() if view.sha256},
-        approvals=verifier.approvals,
-        plugins=verifier.plugins,
-    )
     assessment_bytes = layout.encode(assessment)
 
     receipt: Receipt | None = None

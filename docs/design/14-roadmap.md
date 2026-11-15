@@ -22,6 +22,8 @@
   - security feeds with freshness checks
   - delta bundles
 - **1d:** `airlock eval`, OpenSSF model-signature verification, sandboxed model conversion.
+
+> Status (as built): 1a complete; the 1b and 1c items above are implemented (docs 22-23 and 26-34) except GPU driver/CUDA and firmware advisories; from 1d, `airlock eval` and model signatures (doc 24). `airlock stage` (doc 34) also exists.
 - **2:** controls-as-code for coding agents.
 - **3:** MCP policy gateway.
 - **Later:** libguestfs deep inspection, OVA/VMDK/ISO internals, firmware advisory mapping, deeper binary analysis, datasets at scale, outbound (high-to-low) release checks.

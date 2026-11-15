@@ -49,6 +49,7 @@ from airlock.session import (
     exit_code,
     utc_now,
 )
+from airlock.stage import StageReport
 from airlock.summary import render
 from airlock.verify import verify as run_verify
 from airlock.volumes import check_volume
@@ -726,3 +727,139 @@ def patch_confirm(
     outcome = confirm(previous, inventory, load_feeds(feeds), utc_now())
     click.echo(json.dumps(outcome, indent=2))
     sys.exit(2 if outcome["open"] else 0)
+
+
+def _targets(values: tuple[str, ...]) -> dict[str, Path]:
+    targets: dict[str, Path] = {}
+    for value in values:
+        kind, eq, destination = value.partition("=")
+        if not eq or not destination:
+            raise ConfigError(f"--target takes KIND=DIRECTORY, not {value!r}")
+        targets[kind.strip()] = Path(destination)
+    return targets
+
+
+_STAGE_OPTIONS = [
+    click.option("--policy", required=True, type=_FILE, help="This side's policy."),
+    click.option(
+        "--state",
+        required=True,
+        type=click.Path(file_okay=False, path_type=Path),
+        help="This side's state directory: the bundle must have been accepted there.",
+    ),
+    click.option(
+        "--target",
+        "target_values",
+        multiple=True,
+        required=True,
+        help="KIND=DIRECTORY, KIND one of files, models, pypi, npm, dnf, apt, oci, windows.",
+    ),
+    click.option("--key", type=_FILE, help="Private key that signs the ledger's stage event."),
+    click.option("--key-passphrase-env", help="Environment variable holding the key's passphrase."),
+    click.option(
+        "--volume",
+        "volume_dirs",
+        multiple=True,
+        type=click.Path(exists=True, file_okay=False, path_type=Path),
+        help="Medium holding volumes of a multi-volume bundle (repeatable).",
+    ),
+    click.option(
+        "--base",
+        "bases",
+        multiple=True,
+        type=click.Path(exists=True, file_okay=False, path_type=Path),
+        help="Accepted bundle a delta bundle's carried files come from (repeatable).",
+    ),
+]
+
+
+def _stage_options(function: Callable[..., None]) -> Callable[..., None]:
+    for option in reversed(_STAGE_OPTIONS):
+        function = option(function)
+    return function
+
+
+def _print_stage(report: "StageReport") -> None:
+    for target in report.targets:
+        click.echo(
+            f"{target.kind}: {target.copied} copied, {target.present} already present "
+            f"-> {target.destination}"
+        )
+        for note in target.notes:
+            click.echo(f"  next: {note}")
+
+
+@main.command("stage")
+@click.argument("bundle", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@_stage_options
+@_reports_errors
+def stage_command(
+    bundle: Path,
+    policy: Path,
+    state: Path,
+    target_values: tuple[str, ...],
+    key: Path | None,
+    key_passphrase_env: str | None,
+    volume_dirs: tuple[Path, ...],
+    bases: tuple[Path, ...],
+) -> None:
+    """Copy an accepted bundle's content into local repositories, re-hashing each file."""
+    from airlock.session import utc_now
+    from airlock.stage import stage
+
+    report = stage(
+        bundle,
+        policy=load_policy(policy),
+        state=state,
+        targets=_targets(target_values),
+        now=utc_now(),
+        signer=_key(key, key_passphrase_env),
+        volume_dirs=volume_dirs,
+        bases=bases,
+    )
+    _print_stage(report)
+
+
+@patch.command("stage")
+@click.argument("bundle", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option(
+    "--inventory", "inventory_path", required=True, type=_FILE, help="The host's inventory."
+)
+@click.option(
+    "--allow-downgrade", "justification", help="Stage older packages anyway, with this reason."
+)
+@_stage_options
+@_reports_errors
+def patch_stage(
+    bundle: Path,
+    inventory_path: Path,
+    justification: str | None,
+    policy: Path,
+    state: Path,
+    target_values: tuple[str, ...],
+    key: Path | None,
+    key_passphrase_env: str | None,
+    volume_dirs: tuple[Path, ...],
+    bases: tuple[Path, ...],
+) -> None:
+    """Stage patches, refusing any package older than the one installed."""
+    from airlock.patch.inventory import load as load_inventory
+    from airlock.patch.stage import downgrade_check
+    from airlock.session import utc_now
+    from airlock.stage import stage
+
+    inventory, _ = load_inventory(inventory_path)
+    report = stage(
+        bundle,
+        policy=load_policy(policy),
+        state=state,
+        targets=_targets(target_values),
+        now=utc_now(),
+        signer=_key(key, key_passphrase_env),
+        volume_dirs=volume_dirs,
+        bases=bases,
+        check=downgrade_check(inventory, justification),
+    )
+    _print_stage(report)
+    if report.downgrades_allowed:
+        click.echo(f"downgrades staged: {report.downgrades_allowed}")

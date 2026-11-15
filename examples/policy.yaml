@@ -172,9 +172,12 @@ runtime:
       reason: vLLM 0.6 wheels are built against torch 2.4 and CUDA 12
 
 freshness:
-  feeds:
+  feeds:                          # security feeds for airlock patch plan (docs/design/33)
     default: 7d
     kev: 2d
+  mirrors:                        # repository metadata age (docs/design/28)
+    default: 30d
+    apt: 14d
 
 controls:
   framework: nist-800-53r5
