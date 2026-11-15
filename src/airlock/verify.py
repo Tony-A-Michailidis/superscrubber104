@@ -20,6 +20,7 @@ from airlock.analysis import finish
 from airlock.analyzer import TOOL, Analyzer
 from airlock.approvals import count_approvals
 from airlock.checks.inventory import check_paths, check_request
+from airlock.checks.mirrors import check_rollback, mirror_snapshots
 from airlock.checks.transfer import check_policy, check_transfer
 from airlock.checks.units import check_request_units
 from airlock.core import chainlog
@@ -436,6 +437,8 @@ class _Verifier:
         if self.provenance is not None:
             base = self.manifest.base if self.manifest else None
             check_transfer(self.provenance, base, ledger, self.ctx)
+        if self.analysis is not None:
+            check_rollback(self.analysis.units, ledger, self.ctx)
 
 
 def verify(
@@ -506,6 +509,7 @@ def verify(
             stream=provenance.stream,
             request_id=provenance.request_id,
             verifier_key_id=receipt_signer.key_id if receipt_signer else None,
+            snapshots=mirror_snapshots(verifier.analysis.units) if verifier.analysis else {},
         )
         if ledger is not None:
             ledger.append(receipt, now=now, signer=receipt_signer)

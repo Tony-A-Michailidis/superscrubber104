@@ -83,6 +83,9 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "package.signature.invalid",
         "upstream.checksum-mismatch",
         "upstream.signature.invalid",
+        "repo.metadata.digest-mismatch",
+        "repo.content.digest-mismatch",
+        "repo.metadata.signature.invalid",
     }
     assert all(r.rationale for r in registry)
 

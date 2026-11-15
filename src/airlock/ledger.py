@@ -106,6 +106,11 @@ class Ledger:
         ]
         return max(times, default=None)
 
+    def newest_snapshot(self, identity: str) -> str | None:
+        """The newest accepted metadata time for one repository (ISO 8601, UTC)."""
+        times = [r.snapshots[identity] for r in self.accepted if identity in r.snapshots]
+        return max(times, default=None)
+
     def append(self, receipt: Receipt, *, now: datetime, signer: Signer | None) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = to_data(receipt)

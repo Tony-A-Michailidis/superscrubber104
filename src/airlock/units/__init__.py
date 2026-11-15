@@ -7,6 +7,7 @@ from airlock.units.knowledge_base import KnowledgeBaseAssembler
 from airlock.units.model_package import ModelPackageAssembler
 from airlock.units.node_env import NodeEnvironmentAssembler
 from airlock.units.python_env import PythonEnvironmentAssembler
+from airlock.units.repo_mirror import RepoMirrorAssembler
 from airlock.units.runtime_profile import RuntimeProfileAssembler
 
 
@@ -19,4 +20,5 @@ def default_assemblers() -> tuple[UnitAssembler, ...]:
         DatasetAssembler(),
         KnowledgeBaseAssembler(),
         RuntimeProfileAssembler(),
+        RepoMirrorAssembler(),
     )

@@ -330,4 +330,107 @@ UPSTREAM = (
     ),
 )
 
-SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM)
+MIRRORS = (
+    _rule(
+        "repo.metadata.digest-mismatch",
+        "Repository index differs from its metadata",
+        C,
+        ("SI-7", "SR-11"),
+        "repomd.xml or Release lists a different hash for this index: it is not the index the "
+        "repository published.",
+        final=True,
+    ),
+    _rule(
+        "repo.content.digest-mismatch",
+        "Package differs from the repository index",
+        C,
+        ("SI-7", "SR-11"),
+        "The repository index lists a different hash for this package.",
+        final=True,
+    ),
+    _rule(
+        "repo.metadata.signature.invalid",
+        "Repository metadata signature does not verify",
+        C,
+        ("SI-7", "SR-4", "SR-11"),
+        "The metadata is signed by a pinned key but the signature does not hold.",
+        final=True,
+    ),
+    _rule(
+        "repo.metadata.signature.untrusted",
+        "Repository metadata is signed by a key the policy does not pin",
+        M,
+        ("SR-4", "SR-11"),
+        "Pin the repository key under trust.upstream with scope repo.dnf or repo.apt.",
+    ),
+    _rule(
+        "repo.metadata.unsigned",
+        "Repository metadata is not signed",
+        M,
+        ("SR-4", "SR-11"),
+        "Vendor repositories sign repomd.xml or Release; an unsigned copy cannot be traced to "
+        "the vendor.",
+    ),
+    _rule(
+        "repo.metadata.unlisted",
+        "Repository index is not vouched for by the repository's metadata",
+        M,
+        ("SI-7", "SR-11"),
+        "No metadata in the mirror lists this index with this hash, so what it says about "
+        "packages is unverified.",
+    ),
+    _rule(
+        "repo.metadata.malformed",
+        "Repository metadata could not be read",
+        M,
+        ("SI-7",),
+        "The file looks like repository metadata but does not parse.",
+    ),
+    _rule(
+        "repo.metadata.expired",
+        "Repository metadata is past its Valid-Until date",
+        H,
+        ("SI-2", "SR-11"),
+        "apt refuses expired metadata unless told not to check; it is also a sign of a frozen "
+        "or replayed mirror.",
+    ),
+    _rule(
+        "repo.metadata.stale",
+        "Repository metadata is older than the policy allows",
+        M,
+        ("SI-2", "RA-5"),
+        "Set the allowed age with freshness.mirrors in the policy.",
+    ),
+    _rule(
+        "repo.metadata.rollback",
+        "Repository metadata is older than a snapshot already accepted",
+        H,
+        ("SI-2", "SI-7", "SR-11"),
+        "A replayed or older mirror would undo security updates already imported.",
+    ),
+    _rule(
+        "repo.content.missing",
+        "Packages listed by the repository index are not in the delivery",
+        L,
+        ("CM-8", "SR-11"),
+        "Installs that need them will fail on the high side. Normal for a curated subset; the "
+        "count and a sample are recorded.",
+    ),
+    _rule(
+        "repo.content.unlisted",
+        "Mirror holds packages that no index lists",
+        M,
+        ("CM-7", "SR-11"),
+        "Package managers will not see them, so they are either dead weight or were added "
+        "after the metadata was made.",
+    ),
+    _rule(
+        "repo.content.external",
+        "Repository index points at the network",
+        M,
+        ("SC-7", "CM-7"),
+        "An index entry with an absolute URL cannot be served offline.",
+    ),
+)
+
+SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS)

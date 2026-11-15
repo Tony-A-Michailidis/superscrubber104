@@ -11,6 +11,7 @@ from airlock.handlers.evals import EvalHandler
 from airlock.handlers.executables import ExecutableHandler
 from airlock.handlers.generic import GenericHandler
 from airlock.handlers.knowledge import KnowledgeBaseHandler
+from airlock.handlers.mirrors import MirrorHandler
 from airlock.handlers.notebooks import NotebookHandler
 from airlock.handlers.offline import OfflineHandler
 from airlock.handlers.packages.linux import LinuxPackageHandler
@@ -31,6 +32,7 @@ def default_handlers() -> tuple[Handler, ...]:
         AgentHandler(),
         ContainerImageHandler(),
         LinuxPackageHandler(),
+        MirrorHandler(),
         OSPackageHandler(),
         PythonPackageHandler(),
         NodePackageHandler(),

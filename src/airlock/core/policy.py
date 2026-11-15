@@ -350,6 +350,7 @@ class Policy:
     runtimes: Mapping[str, PluginPolicy] = field(default_factory=dict)  # for airlock eval
     compatibility: tuple[CompatibilityRule, ...] = ()
     feed_max_age: Mapping[str, timedelta] = field(default_factory=dict)
+    mirror_max_age: Mapping[str, timedelta] = field(default_factory=dict)  # by mirror format
     control_framework: str = DEFAULT_FRAMEWORK
     control_catalog: PinnedFile | None = None
     control_overrides: tuple[ControlOverride, ...] = ()
@@ -512,7 +513,7 @@ class _Parser:
             plugins=self._plugins(doc),
             runtimes=self._plugins(doc, "runtimes"),
             compatibility=self._compatibility(doc.opt_section("runtime")),
-            feed_max_age=self._freshness(doc.opt_section("freshness")),
+            **self._freshness(doc.opt_section("freshness")),
             control_framework=framework,
             control_catalog=catalog,
             control_overrides=overrides,
@@ -780,16 +781,19 @@ class _Parser:
             section.done()
         return plugins
 
-    def _freshness(self, section: Reader | None) -> dict[str, timedelta]:
+    def _freshness(self, section: Reader | None) -> dict[str, dict[str, timedelta]]:
+        out: dict[str, dict[str, timedelta]] = {"feed_max_age": {}, "mirror_max_age": {}}
         if section is None:
-            return {}
-        feeds = {}
-        if f := section.opt_section("feeds"):
-            for name in f.names():
-                feeds[name] = f.opt_duration(name)
-            f.done()
+            return out
+        for key, target in (("feeds", "feed_max_age"), ("mirrors", "mirror_max_age")):
+            if f := section.opt_section(key):
+                for name in f.names():
+                    age = f.opt_duration(name)
+                    if age is not None:
+                        out[target][name] = age
+                f.done()
         section.done()
-        return {name: age for name, age in feeds.items() if age is not None}
+        return out
 
     def _controls(
         self, section: Reader | None

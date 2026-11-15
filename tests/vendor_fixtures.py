@@ -252,3 +252,70 @@ def deb_bytes(
         members["control.tar.gz"] = _tar_gz(files)
     members["data.tar.gz"] = _tar_gz({"usr/bin/hello": b"\x7fELF"})
     return _ar(members)
+
+
+# --- repository metadata ------------------------------------------------------------------------
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def primary_xml(packages: Mapping[str, tuple[str, bytes]]) -> bytes:
+    """``primary.xml`` listing ``{href: (name, content)}``; content is what the hash is taken of."""
+    body = "".join(
+        f'<package type="rpm"><name>{name}</name><arch>x86_64</arch>'
+        f'<version epoch="0" ver="1.0" rel="1.el9"/>'
+        f'<checksum type="sha256" pkgid="YES">{sha256_hex(data)}</checksum>'
+        f'<size package="{len(data)}"/><location href="{href}"/></package>'
+        for href, (name, data) in packages.items()
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<metadata xmlns="http://linux.duke.edu/metadata/common" '
+        f'xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="{len(packages)}">'
+        f"{body}</metadata>"
+    ).encode()
+
+
+def repomd_xml(data: Mapping[str, tuple[str, bytes]], timestamp: int = CREATED) -> bytes:
+    """``repomd.xml`` listing ``{type: (href, content)}``."""
+    body = "".join(
+        f'<data type="{kind}"><checksum type="sha256">{sha256_hex(content)}</checksum>'
+        f'<location href="{href}"/><timestamp>{timestamp}</timestamp>'
+        f"<size>{len(content)}</size></data>"
+        for kind, (href, content) in data.items()
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<repomd xmlns="http://linux.duke.edu/metadata/repo">'
+        f"<revision>{timestamp}</revision>{body}</repomd>"
+    ).encode()
+
+
+def packages_index(debs: Mapping[str, tuple[str, str, bytes]]) -> str:
+    """apt ``Packages`` for ``{Filename: (package, version, content)}``."""
+    return "\n".join(
+        f"Package: {name}\nVersion: {version}\nArchitecture: amd64\nFilename: {filename}\n"
+        f"Size: {len(data)}\nSHA256: {sha256_hex(data)}\nDescription: test\n"
+        for filename, (name, version, data) in debs.items()
+    )
+
+
+def release_text(
+    files: Mapping[str, bytes], *, date: str, valid_until: str | None = None, suite: str = "stable"
+) -> str:
+    """An apt ``Release`` listing ``{path below dists/<suite>/: content}``."""
+    lines = [
+        "Origin: Example",
+        "Label: Example",
+        f"Suite: {suite}",
+        f"Codename: {suite}",
+        f"Date: {date}",
+        *([f"Valid-Until: {valid_until}"] if valid_until else []),
+        "Architectures: amd64",
+        "Components: main",
+        "SHA256:",
+        *(f" {sha256_hex(data)} {len(data):>8} {path}" for path, data in files.items()),
+    ]
+    return "\n".join(lines) + "\n"

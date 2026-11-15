@@ -273,6 +273,7 @@ runtime:                          # compatibility rules for runtime profiles (do
 
 freshness:
   feeds: { default: 7d, kev: 2d }
+  mirrors: { default: 30d, apt: 14d }   # repository metadata age (doc 28)
 
 controls:
   framework: nist-800-53r5

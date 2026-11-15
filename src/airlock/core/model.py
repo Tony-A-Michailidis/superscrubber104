@@ -800,6 +800,8 @@ class Receipt:
     request_id: str | None = None
     verifier_key_id: str | None = None
     evidence: Mapping[str, str] = field(default_factory=dict)  # stage/eval result digests
+    # Repository snapshots in the bundle (identity -> metadata time), for rollback checks.
+    snapshots: Mapping[str, str] = field(default_factory=dict)
     api_version: str = API_VERSION
     kind: str = "Receipt"
 

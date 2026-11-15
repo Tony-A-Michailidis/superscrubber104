@@ -26,6 +26,7 @@ A key is used only within its `scope` and its validity dates (`airlock/trust.py`
 |---|---|
 | `package.rpm` | the header signature inside each `.rpm` |
 | `repo.dnf`, `repo.apt` | repository metadata signatures ([28](28-package-mirrors.md)) |
+| `chart.helm` | Helm chart provenance files (`.tgz.prov`) |
 | `file.checksums` | the signature over a checksum list (`SHA256SUMS.gpg`, clear-signed `CHECKSUM`) |
 | `file.signed` | a detached signature over any file (`tool.tar.gz.asc`) |
 
