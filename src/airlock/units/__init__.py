@@ -27,4 +27,5 @@ def default_assemblers() -> tuple[UnitAssembler, ...]:
         LockedEnvironmentAssembler(UnitKind.GO_ENVIRONMENT, "go"),
         LockedEnvironmentAssembler(UnitKind.RUST_ENVIRONMENT, "cargo"),
         LockedEnvironmentAssembler(UnitKind.DOTNET_ENVIRONMENT, "nuget"),
+        LockedEnvironmentAssembler(UnitKind.TERRAFORM_ENVIRONMENT, "terraform"),
     )

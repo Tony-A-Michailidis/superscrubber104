@@ -63,9 +63,68 @@ class _UntrustedLoader(yaml.SafeLoader):
         return super().compose_node(parent, index)
 
 
-def load_untrusted_yaml(text: str) -> object:
-    """Parse YAML from a delivery. Raises yaml.YAMLError on anything unusual."""
-    return yaml.load(text, Loader=_UntrustedLoader)  # noqa: S506 - SafeLoader subclass
+_MAX_EXPANDED_NODES = 200_000
+
+
+def _expanded_size(root: yaml.Node) -> int:
+    """Nodes in the document with every alias expanded, counted without expanding anything."""
+    memo: dict[int, int] = {}
+
+    def size(node: yaml.Node) -> int:
+        key = id(node)
+        if key in memo:
+            return memo[key]
+        memo[key] = 1  # a recursive anchor counts once
+        total = 1
+        if isinstance(node, yaml.SequenceNode):
+            total += sum(size(child) for child in node.value)
+        elif isinstance(node, yaml.MappingNode):
+            total += sum(size(k) + size(v) for k, v in node.value)
+        memo[key] = total
+        return total
+
+    return size(root)
+
+
+class _AliasLoader(yaml.SafeLoader):
+    """For deliveries' Compose files and manifests, where anchors and merge keys are common.
+    Aliases are allowed while the document, fully expanded, stays under a node budget: the same
+    protection against alias bombs, without refusing ordinary files."""
+
+    def compose_document(self) -> Any:
+        node = super().compose_document()
+        try:
+            expanded = _expanded_size(node) if node is not None else 0
+        except RecursionError as exc:
+            raise yaml.composer.ComposerError(None, None, "document nests too deeply") from exc
+        if expanded > _MAX_EXPANDED_NODES:
+            raise yaml.composer.ComposerError(
+                None, None, f"aliases expand to more than {_MAX_EXPANDED_NODES} nodes"
+            )
+        return node
+
+
+def _plain_value(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
+    return loader.construct_scalar(node)  # type: ignore[arg-type]
+
+
+# A bare "=" resolves to YAML 1.1's "value" type, which SafeLoader cannot construct; real files
+# (Kubernetes CRDs listing operators) contain it. It is just the string "=".
+for _loader in (_UntrustedLoader, _AliasLoader):
+    _loader.add_constructor("tag:yaml.org,2002:value", _plain_value)
+
+
+def load_untrusted_yaml(text: str, *, aliases: bool = False) -> object:
+    """Parse YAML from a delivery. Raises yaml.YAMLError on anything unusual. With ``aliases``,
+    anchors are allowed within an expansion budget."""
+    loader = _AliasLoader if aliases else _UntrustedLoader
+    return yaml.load(text, Loader=loader)  # noqa: S506 - SafeLoader subclass
+
+
+def load_untrusted_yaml_all(text: str, *, aliases: bool = False) -> list[object]:
+    """Every document of a multi-document stream (Kubernetes manifests)."""
+    loader = _AliasLoader if aliases else _UntrustedLoader
+    return list(yaml.load_all(text, Loader=loader))
 
 
 def load_yaml_file(path: Path) -> tuple[object, bytes]:

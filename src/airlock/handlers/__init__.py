@@ -10,6 +10,7 @@ from airlock.handlers.documents import DocumentHandler
 from airlock.handlers.evals import EvalHandler
 from airlock.handlers.executables import ExecutableHandler
 from airlock.handlers.generic import GenericHandler
+from airlock.handlers.iac import IacHandler
 from airlock.handlers.knowledge import KnowledgeBaseHandler
 from airlock.handlers.mirrors import MirrorHandler
 from airlock.handlers.notebooks import NotebookHandler
@@ -40,6 +41,7 @@ def default_handlers() -> tuple[Handler, ...]:
         GoHandler(),
         CargoHandler(),
         NuGetHandler(),
+        IacHandler(),
         MirrorHandler(),
         OSPackageHandler(),
         PythonPackageHandler(),

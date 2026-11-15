@@ -346,7 +346,13 @@ _SUMMARY: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ("unresolvable", ("unresolvable",)),
             ("hash checked", ("hashChecked",)),
         )
-        for kind in ("jvm-environment", "go-environment", "rust-environment", "dotnet-environment")
+        for kind in (
+            "jvm-environment",
+            "go-environment",
+            "rust-environment",
+            "dotnet-environment",
+            "terraform-environment",
+        )
     },
     "repo-mirror": (
         ("format", ("format",)),

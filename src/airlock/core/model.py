@@ -132,6 +132,7 @@ class UnitKind(StrEnum):
     GO_ENVIRONMENT = "go-environment"
     RUST_ENVIRONMENT = "rust-environment"
     DOTNET_ENVIRONMENT = "dotnet-environment"
+    TERRAFORM_ENVIRONMENT = "terraform-environment"
     REPO_MIRROR = "repo-mirror"
     CONTAINER_IMAGE = "container-image"
     VM_IMAGE = "vm-image"

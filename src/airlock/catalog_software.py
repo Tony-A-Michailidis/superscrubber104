@@ -469,4 +469,44 @@ LOCKED = (
     ),
 )
 
-SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED)
+IAC = (
+    _rule(
+        "iac.workload.privileged",
+        "Workload runs privileged or can take over its host",
+        H,
+        ("AC-6", "CM-6", "CM-7"),
+        "Privileged containers, the host PID namespace, container-runtime sockets and broad "
+        "capabilities give the workload the node. Justify each or remove it.",
+    ),
+    _rule(
+        "iac.workload.host-access",
+        "Workload shares the host's network, IPC, devices or paths",
+        M,
+        ("AC-6", "CM-7", "SC-7"),
+        "Host networking, host paths and host ports bypass the platform's isolation.",
+    ),
+    _rule(
+        "iac.workload.root",
+        "Workload is set to run as root",
+        L,
+        ("AC-6",),
+        "Explicitly running as user 0 makes any container escape worse.",
+    ),
+    _rule(
+        "iac.image.unpinned",
+        "Image is referred to by tag, not digest",
+        L,
+        ("CM-2", "SI-7"),
+        "A tag can be repointed after review; a digest names exactly the image that was checked.",
+    ),
+    _rule(
+        "iac.dependency.unresolvable",
+        "Infrastructure code fetches dependencies that are not in the delivery",
+        M,
+        ("CM-8", "SC-7"),
+        "Helm chart dependencies, Terraform modules, Ansible collections and roles must be "
+        "vendored to deploy offline.",
+    ),
+)
+
+SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED, *IAC)
