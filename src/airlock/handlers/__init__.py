@@ -28,6 +28,7 @@ from airlock.handlers.runtime import RuntimeHandler
 from airlock.handlers.secrets import SecretsHandler
 from airlock.handlers.source import SourceHandler
 from airlock.handlers.upstream import UpstreamHandler
+from airlock.handlers.vm import VmHandler
 
 
 def default_handlers() -> tuple[Handler, ...]:
@@ -44,6 +45,7 @@ def default_handlers() -> tuple[Handler, ...]:
         NuGetHandler(),
         IacHandler(),
         IdeExtensionHandler(),
+        VmHandler(),
         MirrorHandler(),
         OSPackageHandler(),
         PythonPackageHandler(),

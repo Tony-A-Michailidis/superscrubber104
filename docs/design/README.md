@@ -35,3 +35,4 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [29-more-ecosystems.md](29-more-ecosystems.md) | new | Java (Maven, Gradle), Go, Rust and .NET: lockfiles resolved against the delivery, lockfile and sidecar hashes, build hooks (implemented) |
 | [30-infrastructure-code.md](30-infrastructure-code.md) | new | Kubernetes and Compose posture, unpinned images, Helm/Terraform/Ansible dependencies, Terraform provider hashes, YAML alias budget (implemented) |
 | [31-ide-extensions.md](31-ide-extensions.md) | new | VS Code and JetBrains extensions: identity, approved lists, start-up activation, telemetry, proposed APIs, dependencies (implemented) |
+| [32-vm-images.md](32-vm-images.md) | new | qcow2, VMDK, VHD, VHDX, raw and ISO headers; incomplete, encrypted, unclean and confused images; OVA/OVF manifests; Glance hashes and signatures; the qemu-img plugin (implemented) |

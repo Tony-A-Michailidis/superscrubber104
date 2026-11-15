@@ -11,6 +11,7 @@ from airlock.units.node_env import NodeEnvironmentAssembler
 from airlock.units.python_env import PythonEnvironmentAssembler
 from airlock.units.repo_mirror import RepoMirrorAssembler
 from airlock.units.runtime_profile import RuntimeProfileAssembler
+from airlock.units.vm_image import VmImageAssembler
 
 
 def default_assemblers() -> tuple[UnitAssembler, ...]:
@@ -23,6 +24,7 @@ def default_assemblers() -> tuple[UnitAssembler, ...]:
         KnowledgeBaseAssembler(),
         RuntimeProfileAssembler(),
         RepoMirrorAssembler(),
+        VmImageAssembler(),
         LockedEnvironmentAssembler(UnitKind.JVM_ENVIRONMENT, "maven"),
         LockedEnvironmentAssembler(UnitKind.GO_ENVIRONMENT, "go"),
         LockedEnvironmentAssembler(UnitKind.RUST_ENVIRONMENT, "cargo"),

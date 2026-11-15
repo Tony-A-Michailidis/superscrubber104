@@ -22,6 +22,7 @@ controls:
   SA-11: Developer Testing and Evaluation
   SA-22: Unsupported System Components
   SC-7: Boundary Protection
+  SC-28: Protection of Information at Rest
   SI-2: Flaw Remediation
   SI-3: Malicious Code Protection
   SI-7: Software, Firmware, and Information Integrity

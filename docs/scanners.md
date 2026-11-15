@@ -1,4 +1,4 @@
-# Scanners: ClamAV, Trivy, Semgrep, Bandit and the CISA KEV feed
+# Scanners: ClamAV, Trivy, Semgrep, Bandit, qemu-img and the CISA KEV feed
 
 airlock works without any external scanner. Its own checks cover integrity, model formats, packages, agents, secrets and active content. Two questions need a scanner and a database that changes every day:
 
@@ -206,6 +206,24 @@ rules:
   - rule: sast.finding
     disposition: require-approval
 ```
+
+## qemu-img (VM disk images)
+
+airlock reads disk headers itself (doc 32). `qemu-img` adds an independent reading and a consistency check. It is optional: without it, `vm.image.check` is recorded as not assessed whenever the delivery holds a disk image.
+
+Install the distribution package on the connected side (`qemu-utils` on Ubuntu, `qemu-img` on AlmaLinux) or use a static build. Pin the binary:
+
+```yaml
+plugins:
+  qemu-img:
+    path: tools/qemu/qemu-img
+    binarySha256: "…"
+    minVersion: "7.0"
+```
+
+For every top-level disk image airlock runs `qemu-img info --output=json -U -f <format> <file>` and, for formats qemu can check (qcow2, VHDX), `qemu-img check --output=json -U -f <format> <file>`. The format is always passed explicitly, so qemu never probes it, which is the format-confusion attack doc 32 guards against. `-U` takes no locks. Neither command writes to the image. Any difference from airlock's reading (virtual size, backing file, dirty or corrupt flags, encryption) or any corruption or leak is `vm.image.check`.
+
+`qemu-img` parses untrusted input, like any scanner. Keep it current and pinned.
 
 ## Carrying the scanners across
 

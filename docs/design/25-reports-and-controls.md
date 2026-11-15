@@ -69,7 +69,7 @@ controls:
     "offline.*": [SC-7, AC-4, CM-6]
 ```
 
-The built-in catalogue (`core/data/nist-800-53r5.yaml`) holds the 25 controls airlock evidences: AC-4, AC-6, AU-10, CM-2, CM-3, CM-4, CM-6, CM-7, CM-8, CM-10, CM-11, IA-5, MP-5, RA-5, SA-11, SA-22, SC-7, SI-2, SI-3, SI-7, SI-10, SR-3, SR-4, SR-10, SR-11. Titles are from the public NIST catalogue. **Review every mapping before publishing evidence for an assessment** (the starter mapping is the brief's, and a site's accreditor may read controls differently).
+The built-in catalogue (`core/data/nist-800-53r5.yaml`) holds the 26 controls airlock evidences: AC-4, AC-6, AU-10, CM-2, CM-3, CM-4, CM-6, CM-7, CM-8, CM-10, CM-11, IA-5, MP-5, RA-5, SA-11, SA-22, SC-7, SC-28, SI-2, SI-3, SI-7, SI-10, SR-3, SR-4, SR-10, SR-11. Titles are from the public NIST catalogue. **Review every mapping before publishing evidence for an assessment** (the starter mapping is the brief's, and a site's accreditor may read controls differently).
 
 ## 25.6 Known limits
 

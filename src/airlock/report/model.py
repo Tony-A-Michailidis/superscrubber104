@@ -354,6 +354,12 @@ _SUMMARY: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             "terraform-environment",
         )
     },
+    "vm-image": (
+        ("format", ("format",)),
+        ("virtual size", ("virtualSize",)),
+        ("depends on", ("dependsOn",)),
+        ("os", ("glance", "os_distro")),
+    ),
     "repo-mirror": (
         ("format", ("format",)),
         ("packages", ("packages",)),

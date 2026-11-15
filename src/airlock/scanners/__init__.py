@@ -22,6 +22,7 @@ from airlock.scanners.base import (
 )
 from airlock.scanners.clamav import ClamAV
 from airlock.scanners.kev import KevFeed
+from airlock.scanners.qemu_img import QemuImg, has_disk_images
 from airlock.scanners.sast import Bandit, Semgrep, has_source
 from airlock.scanners.trivy import Trivy
 from airlock.walker import FileView
@@ -45,6 +46,11 @@ CAPABILITIES: dict[str, tuple[tuple[str, ...], Callable[[Analysis], bool], str]]
         has_source,
         "no static analysis scanner is configured (plugins.semgrep or plugins.bandit)",
     ),
+    "vm-images": (
+        ("vm.image.check",),
+        has_disk_images,
+        "qemu-img is not configured (plugins.qemu-img); disk headers were read by airlock only",
+    ),
 }
 
 
@@ -56,7 +62,7 @@ def targets(files: Iterable[FileView]) -> list[Target]:
 def default_scanners() -> tuple[Scanner, ...]:
     """In run order: the KEV feed first, so vulnerability findings can be marked."""
     kev = KevFeed()
-    return (kev, ClamAV(), Trivy(kev), Semgrep(), Bandit())
+    return (kev, ClamAV(), Trivy(kev), Semgrep(), Bandit(), QemuImg())
 
 
 def run_scanners(

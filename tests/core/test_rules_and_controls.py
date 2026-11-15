@@ -13,7 +13,7 @@ def test_builtin_catalogue(catalog: ControlCatalog) -> None:
     assert catalog.framework == "nist-800-53r5"
     assert "SI-7" in catalog
     assert catalog.get("SR-11").family == "SR"
-    assert len(list(catalog)) == 25
+    assert len(list(catalog)) == 26
 
 
 @pytest.mark.parametrize(

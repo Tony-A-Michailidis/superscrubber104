@@ -6,6 +6,7 @@ only ever used within its scope and its validity dates, so an Ubuntu archive key
 an RPM, and an expired key vouches for nothing.
 """
 
+import re
 from collections.abc import Iterable
 from fnmatch import fnmatchcase
 from functools import lru_cache
@@ -56,6 +57,30 @@ def verify_gpg(
     keys = [key for _, group in pinned for key in group]
     result = openpgp.verify(signature, chunks, keys, at=ctx.now)
     return result, owner.get(result.key.fingerprint) if result.valid and result.key else None
+
+
+def x509_keys(ctx: Context, scope: str) -> list[tuple[str, object]]:
+    """(anchor name, public key) for every certificate or public key pinned for ``scope``."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+    today = ctx.now.date()
+    found: list[tuple[str, object]] = []
+    for key in ctx.policy.upstream:
+        if key.type is not UpstreamKeyType.X509 or key.validity.problem(today) is not None:
+            continue
+        if not any(fnmatchcase(scope, pattern) for pattern in key.scope):
+            continue
+        data = key.file.path.read_bytes()
+        for block in re.findall(rb"-----BEGIN [A-Z ]+-----.+?-----END [A-Z ]+-----", data, re.S):
+            try:
+                if b"CERTIFICATE" in block[:40]:
+                    found.append((key.name, x509.load_pem_x509_certificate(block).public_key()))
+                else:
+                    found.append((key.name, load_pem_public_key(block)))
+            except ValueError:
+                continue
+    return found
 
 
 def signature_verification(result: openpgp.Result, anchor: str | None) -> Verification:

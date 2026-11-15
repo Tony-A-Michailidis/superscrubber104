@@ -533,4 +533,69 @@ IDE = (
     ),
 )
 
-SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED, *IAC, *IDE)
+VM = (
+    _rule(
+        "vm.format.mismatch",
+        "Disk image is not the format its name or metadata declares",
+        H,
+        ("CM-6", "SI-7"),
+        "Format confusion: an image declared raw that is really qcow2 makes the hypervisor follow "
+        "its backing file. The format is always taken from the bytes.",
+    ),
+    _rule(
+        "vm.image.incomplete",
+        "Disk image depends on files outside itself",
+        H,
+        ("CM-8", "SI-7"),
+        "Backing files, parent disks, external data files and missing extents: it will not boot as "
+        "delivered, and the references can name paths on the source host. Flatten it "
+        "(qemu-img convert) before packing.",
+    ),
+    _rule(
+        "vm.image.encrypted",
+        "Disk image is encrypted",
+        M,
+        ("SC-28",),
+        "Nothing inside it can be inspected; the key must cross separately.",
+    ),
+    _rule(
+        "vm.image.unclean",
+        "Disk image was not closed cleanly or is marked corrupt",
+        M,
+        ("SI-7",),
+        "Dirty or corrupt flags, an unreplayed log or a bad footer: run qemu-img check (and "
+        "repair) on the source.",
+    ),
+    _rule(
+        "vm.image.snapshots",
+        "Disk image holds internal snapshots",
+        L,
+        ("CM-2",),
+        "Snapshots keep earlier states of the disk, including data deleted since.",
+    ),
+    _rule(
+        "vm.image.contents",
+        "Guest filesystem contents inspected",
+        I,
+        ("SI-3", "CM-8"),
+        "Images are never mounted; their contents are assessed only by a deep-inspection plugin.",
+    ),
+    _rule(
+        "vm.metadata.mismatch",
+        "Disk image differs from the metadata that describes it",
+        C,
+        ("SI-7", "SR-11"),
+        "Glance os_hash_value, checksum or size, or an OVF file size, does not match.",
+        final=True,
+    ),
+    _rule(
+        "vm.image.check",
+        "qemu-img found the image inconsistent",
+        M,
+        ("SI-7",),
+        "qemu-img info disagrees with airlock's reading, or qemu-img check reports corruption or "
+        "leaks.",
+    ),
+)
+
+SOFTWARE_RULES = (*AGENTS, *CONTAINERS, *PACKAGES, *UPSTREAM, *MIRRORS, *LOCKED, *IAC, *IDE, *VM)
