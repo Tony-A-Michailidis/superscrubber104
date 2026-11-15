@@ -391,8 +391,8 @@ Status: **done** (implemented and tested), **shaped** (the model or schema has t
 | 4 | Units had no relationships, digest or archive roots | done (model) | `Requirement`, `Unit.digest`, `Unit.root: ArtifactRef`; assemblers use them from task 5 |
 | 5 | Hostile names could not be recorded | done | `ArtifactRef.unsafe`, `escape_name`, `check_member_name` |
 | 6 | Floats banned with no convention | done | Decimal strings; `jsonable()` at the handler boundary |
-| 7 | No chunk hashes or volume index | done / shaped | Chunk hashes done and verified; volume index and resumable verify are 1b |
-| 8 | Deltas | shaped | `Manifest.base`, `Entry.carried`, `delta.base.unknown`; packing and resolving deltas is 1c |
+| 7 | No chunk hashes or volume index | done | Chunk hashes verified; signed volume index and multi-volume verify (doc 26); resumable verify not yet |
+| 8 | Deltas | done | `pack --delta-from`, `verify --base`, carried files re-hashed from accepted bases (doc 26) |
 | 9 | Scale | done / deferred | Passes are counts; nested members live in the analysis, not the manifest. Streaming JSON Lines for very large analyses is deferred |
 | 10 | Version skew | done | Receiver parses only statement, manifest and request; `extensions` maps; packer analysis never parsed |
 | 11 | Integrity checks could be waived | done | `RuleSpec.final`: integrity, authenticity and replay rules cannot be waived, lowered or overridden; waivers restricted to one rule and an exact or content-pinned subject |

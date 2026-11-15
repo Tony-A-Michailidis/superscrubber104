@@ -32,8 +32,10 @@ REQUEST = "request.yaml"
 CUSTODY = "custody.jsonl"
 PAYLOAD = "payload"
 
-SIGNED_FILES = (MANIFEST, ANALYSIS, ASSESSMENT, REQUEST)
-BUNDLE_FILES = frozenset({DESCRIPTOR, STATEMENT, CUSTODY, PAYLOAD, *SIGNED_FILES})
+VOLUMES = "volumes.json"  # the volume index of a multi-volume bundle
+VOLUME_DIR = "volumes"
+SIGNED_FILES = (MANIFEST, ANALYSIS, ASSESSMENT, REQUEST, VOLUMES)
+BUNDLE_FILES = frozenset({DESCRIPTOR, STATEMENT, CUSTODY, PAYLOAD, VOLUME_DIR, *SIGNED_FILES})
 
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
 PREDICATE_TYPE = "urn:airlock:bundle:v1alpha1"

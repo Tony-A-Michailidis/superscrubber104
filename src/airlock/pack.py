@@ -1,5 +1,7 @@
 """``airlock pack``: inventory, inspect and sign a delivery into a bundle."""
 
+import json
+import os
 import tempfile
 import uuid
 from collections.abc import Sequence
@@ -8,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from airlock import bundle as layout
+from airlock import volumes
 from airlock.analysis import finish
 from airlock.analyzer import TOOL, Analyzer
 from airlock.checks.inventory import check_paths, check_request
@@ -31,13 +34,15 @@ from airlock.core.model import (
 )
 from airlock.core.policy import Policy
 from airlock.core.request import TransferRequest, load_request
+from airlock.core.serde import from_data
 from airlock.core.signing import Signer, sign_envelope
 from airlock.handlers import default_handlers
-from airlock.hashing import CHUNK_SIZE, hash_stream
+from airlock.hashing import CHUNK_SIZE, FileDigest, hash_stream
 from airlock.scanners import run_scanners, targets
 from airlock.session import Session, utc_now
 from airlock.units import default_assemblers
-from airlock.walker import FileView, plan_inputs, scan
+from airlock.volumes import VolumeWriter
+from airlock.walker import FileView, Source, plan_inputs, scan
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +51,50 @@ class PackResult:
     assessment: Assessment
     manifest_digest: str
     signed: bool  # False when blocking findings stopped the bundle from being signed
+
+
+def _load_base(path: Path) -> tuple[str, dict[str, Entry]]:
+    """The base snapshot of a delta: its manifest digest and its files by path."""
+    manifest_path = path / layout.MANIFEST if path.is_dir() else path
+    try:
+        data = manifest_path.read_bytes()
+        base = from_data(Manifest, json.loads(data))
+    except (OSError, ValueError, TypeError) as exc:
+        raise ConfigError(f"cannot read the base manifest {manifest_path}: {exc}") from exc
+    files = {e.path: e for e in base.entries if e.entry_type is EntryType.FILE}
+    return sha256_digest(data), files
+
+
+def _store(
+    source: Source,
+    target: Path,
+    writer: VolumeWriter | None,
+    base: dict[str, Entry],
+    chunk_size: int,
+    link: bool,
+) -> tuple[FileDigest, Path, bool]:
+    """Put one file in the payload. Returns its digest, where analysis reads it, and whether
+    it is carried from the base snapshot (and so not stored at all)."""
+    previous = base.get(source.path)
+    if previous is not None and previous.size == source.location.stat().st_size:
+        with source.location.open("rb") as stream:
+            content = hash_stream(stream, chunk_size=chunk_size)
+        if content.sha256 == previous.sha256:
+            return content, source.location, True
+    if writer is not None:
+        with source.location.open("rb") as stream:
+            size = source.location.stat().st_size
+            return writer.write(source.path, stream, size, chunk_size), source.location, False
+    if link:
+        try:
+            os.link(source.location, target)
+        except OSError:
+            pass  # another filesystem, or links not allowed: copy instead
+        else:
+            with target.open("rb") as stream:
+                return hash_stream(stream, chunk_size=chunk_size), target, False
+    with source.location.open("rb") as stream, target.open("xb") as sink:
+        return hash_stream(stream, sink=sink, chunk_size=chunk_size), target, False
 
 
 def _prepare_output(output: Path, inputs: Sequence[Path]) -> None:
@@ -70,6 +119,9 @@ def pack(
     now: datetime | None = None,
     bundle_id: str | None = None,
     chunk_size: int = CHUNK_SIZE,
+    volume_size: int | None = None,
+    delta_from: Path | None = None,
+    link: bool = False,
 ) -> PackResult:
     """Build a bundle from ``inputs`` in ``output``.
 
@@ -77,6 +129,11 @@ def pack(
     as a file name that cannot be stored). Everything is still written then, so the findings
     can be reviewed, but there is no statement and nothing to transfer. A bundle with policy
     blockers is signed: whether to override them is for approvers and the receiving side.
+
+    ``volume_size`` splits the payload across volumes for removable media (``airlock.volumes``).
+    ``delta_from`` names an earlier bundle (or its manifest): files unchanged since then are
+    recorded as carried and not copied. ``link`` hard-links files into the payload instead of
+    copying them, when the filesystem allows.
     """
     now = now or utc_now()
     request: TransferRequest | None = load_request(request_path) if request_path else None
@@ -85,8 +142,11 @@ def pack(
     session = Session.start(policy, now, request.corpora if request else ())
     ctx, recorder = session.ctx, session.ctx.recorder
 
+    base_digest, base_entries = _load_base(delta_from) if delta_from else (None, {})
+    writer = VolumeWriter(output, volume_size) if volume_size else None
     payload = output / layout.PAYLOAD
-    payload.mkdir()
+    if writer is None:
+        payload.mkdir()
     entries: list[Entry] = []
     files: dict[str, FileView] = {}
 
@@ -104,8 +164,9 @@ def pack(
                 ref = ArtifactRef(source.path)
                 target = payload / source.path
                 if source.entry_type is EntryType.FILE:
-                    with source.location.open("rb") as stream, target.open("xb") as sink:
-                        content = hash_stream(stream, sink=sink, chunk_size=chunk_size)
+                    content, location, carried = _store(
+                        source, target, writer, base_entries, chunk_size, link
+                    )
                     entries.append(
                         Entry(
                             path=source.path,
@@ -113,14 +174,18 @@ def pack(
                             size=content.size,
                             hashes={"sha256": content.sha256},
                             chunks=content.chunks,
+                            carried=carried,
                         )
                     )
                     files[source.path] = FileView(
-                        ref, target, content.size, content.sha256, files.get
+                        ref, location, content.size, content.sha256, files.get
                     )
                     continue
                 if source.entry_type is EntryType.DIRECTORY:
-                    target.mkdir()
+                    if writer is None:
+                        target.mkdir()
+                    else:
+                        writer.directory(source.path)
                 entries.append(
                     Entry(source.path, source.entry_type, link_target=source.link_target)
                 )
@@ -136,8 +201,10 @@ def pack(
     check_request_units(request, analysis.units, ctx)
     check_policy(ctx)
 
-    manifest = Manifest.create(entries, chunk_size=chunk_size)
+    manifest = Manifest.create(entries, chunk_size=chunk_size, base=base_digest)
     subjects = {layout.MANIFEST: layout.write(output / layout.MANIFEST, manifest)}
+    if writer is not None:
+        subjects[volumes.INDEX] = volumes.write_index(output, writer.finish())
     manifest_digest = sha256_digest(subjects[layout.MANIFEST])
 
     subjects[layout.ANALYSIS] = layout.write(output / layout.ANALYSIS, analysis)

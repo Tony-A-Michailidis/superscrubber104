@@ -242,6 +242,14 @@ class Reader:
             raise self.error(f"unknown key(s): {', '.join(unknown)}")
 
 
+def parse_size(value: str) -> int:
+    """``"25GB"``, ``"700MiB"`` or a plain byte count, for command-line options."""
+    match = _SIZE.match(value.strip())
+    if not match:
+        raise ValueError("expected a size such as 1048576, '25GB' or '700MiB'")
+    return int(match.group(1)) * _SIZE_FACTORS[match.group(2)]
+
+
 def parse_duration(value: object, error: Callable[[str], ConfigError]) -> timedelta:
     match = _DURATION.match(value) if isinstance(value, str) else None
     if not match:

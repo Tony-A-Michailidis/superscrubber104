@@ -81,7 +81,11 @@ def bundle(site: Site, delivery: Path, tmp_path: Path) -> Path:
 
 
 def test_pack_then_verify_is_accepted(site: Site, bundle: Path, tmp_path: Path) -> None:
-    assert {p.name for p in bundle.iterdir()} == layout.BUNDLE_FILES
+    # a single-volume bundle: everything but the volume index and volumes
+    assert {p.name for p in bundle.iterdir()} == layout.BUNDLE_FILES - {
+        layout.VOLUMES,
+        layout.VOLUME_DIR,
+    }
     assert (bundle / "payload/models/tiny/weights.bin").read_bytes() == bytes(range(256)) * 4
     assert (bundle / "payload/empty").is_dir()
 

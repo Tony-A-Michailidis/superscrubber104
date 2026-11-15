@@ -17,7 +17,7 @@ bundle/
   payload/                content, stored as-is at its bundle paths
 ```
 
-The payload is stored as plain files so reviewers can inspect it with ordinary tools. Multi-volume packing (1b) adds a signed volume index without changing the manifest.
+The payload is stored as plain files so reviewers can inspect it with ordinary tools. Multi-volume bundles keep the payload in `volumes/NNNN/` with a signed volume index instead, without changing the manifest ([26](26-volumes-and-deltas.md)).
 
 ## 18.2 The signed statement
 
@@ -160,7 +160,7 @@ Archives are **inspected, never extracted**.
 - **Truncating the custody log or ledger tail is not detectable** from the log alone. Nothing relies on the absence of a later event; anchoring the ledger head externally (for example, a counter-signed periodic checkpoint) is future work.
 - **The policy file is not signed**, and so neither are the waivers in it. Its digest is in every assessment and receipt, and changes are logged, so tampering is evident afterwards but not prevented. Whoever can edit the receiving side's policy can change what is blocked; protect it with the host's own configuration management. Final rules are out of the policy's reach either way.
 - **The local clock is trusted** for age and expiry checks. A clock behind the ledger, or behind a bundle's creation time, is detected ([§18.6](#186-clock-drift-and-recovery)); a clock that is wrong in a way neither reveals is not.
-- **Pack copies the payload**, so a delivery needs its own size again in free space. Hard-linking and multi-volume output are 1b.
+- **Pack copies the payload**, so a delivery needs its own size again in free space. `--link` hard-links instead, and `--volume-size` writes media-sized volumes ([26](26-volumes-and-deltas.md)).
 - **zip archives hidden behind a prefix** (self-extracting executables, llamafile-style polyglots) are not opened yet, because detection reads leading bytes. That arrives with the executable handlers.
 - **Nested archive members cannot `resolve()` their neighbours** yet, so a model package inside an archive is inventoried but not assembled as a unit.
 - **Approvals are appended to the bundle's custody log in place**, so the bundle must be on writable storage when someone approves on the receiving side.

@@ -25,6 +25,7 @@ from airlock.core.signing import (
     load_verify_key,
     save_key,
 )
+from airlock.core.yamlio import parse_size
 from airlock.eval_run import run_eval, write_results
 from airlock.ledger import Ledger
 from airlock.model_inspect import inspect_paths
@@ -50,6 +51,7 @@ from airlock.session import (
 )
 from airlock.summary import render
 from airlock.verify import verify as run_verify
+from airlock.volumes import check_volume
 
 P = ParamSpec("P")
 _FILE = click.Path(exists=True, dir_okay=False, path_type=Path)
@@ -133,6 +135,16 @@ def keygen(out: Path, name: str, holder: str, passphrase_env: str | None) -> Non
 @click.option("--key", required=True, type=_FILE, help="Private signing key.")
 @click.option("--policy", type=_FILE, help="Policy file (default: built-in defaults).")
 @click.option("--request", type=_FILE, help="Transfer request.")
+@click.option(
+    "--volume-size",
+    help="Split the payload into volumes of this size for removable media (e.g. 25GB, 4GiB).",
+)
+@click.option(
+    "--delta-from",
+    type=click.Path(exists=True, path_type=Path),
+    help="An earlier bundle (or its manifest.json): unchanged files are carried, not copied.",
+)
+@click.option("--link", is_flag=True, help="Hard-link files into the payload instead of copying.")
 @click.option("-v", "--verbose", is_flag=True, help="Also list allowed findings.")
 @_PASSPHRASE
 @_reports_errors
@@ -142,6 +154,9 @@ def pack(
     key: Path,
     policy: Path | None,
     request: Path | None,
+    volume_size: str | None,
+    delta_from: Path | None,
+    link: bool,
     verbose: bool,
     passphrase_env: str | None,
 ) -> None:
@@ -154,7 +169,20 @@ def pack(
     """
     signer = _key(key, passphrase_env)
     assert signer is not None  # noqa: S101
-    result = run_pack(inputs, out, signer=signer, policy=_policy(policy), request_path=request)
+    try:
+        size = parse_size(volume_size) if volume_size else None
+    except ValueError as exc:
+        raise ConfigError(f"--volume-size: {exc}") from exc
+    result = run_pack(
+        inputs,
+        out,
+        signer=signer,
+        policy=_policy(policy),
+        request_path=request,
+        volume_size=size,
+        delta_from=delta_from,
+        link=link,
+    )
     click.echo(render(result.assessment, verbose=verbose))
     click.echo(f"manifest: {result.manifest_digest}")
     if result.signed:
@@ -179,6 +207,20 @@ def pack(
     type=click.Path(file_okay=False, path_type=Path),
     help="Where to write the assessment and receipt (default: under --state).",
 )
+@click.option(
+    "--volume",
+    "volume_dirs",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="A medium holding volumes of this bundle (repeatable).",
+)
+@click.option(
+    "--base",
+    "bases",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="An accepted earlier bundle that this delta's carried files come from (repeatable).",
+)
 @click.option("-v", "--verbose", is_flag=True, help="Also list allowed findings.")
 @_PASSPHRASE
 @_reports_errors
@@ -189,6 +231,8 @@ def verify(
     state: Path | None,
     key: Path | None,
     out: Path | None,
+    volume_dirs: tuple[Path, ...],
+    bases: tuple[Path, ...],
     verbose: bool,
     passphrase_env: str | None,
 ) -> None:
@@ -210,6 +254,8 @@ def verify(
         state=state,
         receipt_signer=_key(key, passphrase_env),
         out=out,
+        volume_dirs=volume_dirs,
+        bases=bases,
     )
     click.echo(render(result.assessment, verbose=verbose))
     for path in result.outputs:
@@ -394,6 +440,28 @@ def offline_check(
     if summary.verdict is Verdict.REFUSED:
         sys.exit(EXIT_REFUSED)
     sys.exit(EXIT_OK if summary.verdict is Verdict.PASSED else EXIT_BLOCKED)
+
+
+@main.group()
+def volume() -> None:
+    """Volumes of a multi-volume bundle, one medium at a time."""
+
+
+@volume.command("check")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@_reports_errors
+def volume_check(directory: Path) -> None:
+    """Check one volume against its own volume.json, without the rest of the bundle.
+
+    For writing and hand-over of media. It is not verification: only 'airlock verify' checks
+    the volumes against the signed index and manifest. Exits 3 if anything is wrong.
+    """
+    label, problems = check_volume(directory)
+    click.echo(f"volume {label.number} of {label.count}: {len(label.pieces)} piece(s)")
+    for problem in problems:
+        click.echo(f"  {problem['problem']}: {problem['piece']}")
+    click.echo("intact" if not problems else f"{len(problems)} problem(s)")
+    sys.exit(EXIT_OK if not problems else EXIT_REFUSED)
 
 
 @main.command("report")

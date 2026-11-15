@@ -7,6 +7,7 @@ assessment are covered by the signature but are never read as input.
 """
 
 import json
+import shutil
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -14,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from airlock import bundle as layout
+from airlock import volumes
 from airlock.analysis import finish
 from airlock.analyzer import TOOL, Analyzer
 from airlock.approvals import count_approvals
@@ -30,6 +32,7 @@ from airlock.core.model import (
     ArtifactRef,
     Assessment,
     Decision,
+    Entry,
     EntryType,
     Finding,
     Manifest,
@@ -49,7 +52,8 @@ from airlock.ledger import Ledger
 from airlock.scanners import run_scanners, targets
 from airlock.session import Session, utc_now
 from airlock.units import default_assemblers
-from airlock.walker import FileView, scan
+from airlock.volumes import VolumeIndex
+from airlock.walker import FileView, Source, scan
 
 _CONTENT_RULES = (
     "integrity.hash.mismatch",
@@ -88,6 +92,11 @@ class _Verifier:
         self.custody_check: chainlog.ChainCheck | None = None
         self.plugins: tuple[PluginStatus, ...] = ()
         self.analysis: Analysis | None = None  # this side's own analysis, for reports
+        self.volume_index: VolumeIndex | None = None
+        self.volume_dirs: tuple[Path, ...] = ()
+        self.bases: tuple[Path, ...] = ()  # accepted earlier bundles a delta draws on
+        self._base_sources: list[dict[str, Source]] | None = None
+        self.scratch = Path(tempfile.mkdtemp(prefix="airlock-verify-"))
 
     # --- trust ----------------------------------------------------------------------------------
 
@@ -206,6 +215,11 @@ class _Verifier:
                 self._malformed(layout.MANIFEST, exc)
         elif self.subjects and layout.MANIFEST not in self.subjects:
             self._malformed(layout.MANIFEST, "the statement does not cover a manifest")
+        if layout.VOLUMES in contents:
+            try:
+                self.volume_index = volumes.load_index(contents[layout.VOLUMES])
+            except (ValueError, TypeError) as exc:
+                self._malformed(layout.VOLUMES, exc)
         if layout.REQUEST in contents:
             try:
                 self.request = parse_request(contents[layout.REQUEST], layout.REQUEST)
@@ -222,29 +236,34 @@ class _Verifier:
             )
             return
         recorder, root = self.recorder, self.bundle / layout.PAYLOAD
-        found = {s.path: s for s in scan("", root)} if root.is_dir() else {}
+        resolved: volumes.Resolved | None = None
+        if self.volume_index is not None:
+            resolved = volumes.resolve(
+                self.bundle, self.volume_index, self.volume_dirs, self.scratch
+            )
+            found: dict[str, Source] = dict(resolved.sources)
+        else:
+            found = {s.path: s for s in scan("", root)} if root.is_dir() else {}
         matched = 0
 
         for entry in self.manifest.entries:
             subject = Subject.of_path(entry.path)
             if entry.carried:
-                recorder.not_assessed(
-                    ("integrity.hash.mismatch",),
-                    subject,
-                    tool=TOOL,
-                    reason="carried from the base snapshot; delta resolution arrives in phase 1c",
-                )
+                source = self._from_base(entry)
+                if source is None:
+                    continue
+            elif entry.entry_type is EntryType.DIRECTORY and resolved is not None:
+                matched += 1  # volumes hold files; directories are implied by them
                 continue
-            if entry.entry_type not in (EntryType.FILE, EntryType.DIRECTORY):
+            elif entry.entry_type not in (EntryType.FILE, EntryType.DIRECTORY):
                 continue  # links and special files are recorded but never stored
-            source = found.pop(entry.path, None)
+            else:
+                source = found.pop(entry.path, None)
             if source is None or source.entry_type is not entry.entry_type:
-                recorder.fail(
-                    "integrity.entry.missing",
-                    subject,
-                    tool=TOOL,
-                    detail={"expected": entry.entry_type.value},
-                )
+                detail: dict[str, object] = {"expected": entry.entry_type.value}
+                if resolved is not None and resolved.missing_volumes:
+                    detail["missingVolumes"] = resolved.missing_volumes
+                recorder.fail("integrity.entry.missing", subject, tool=TOOL, detail=detail)
                 continue
             recorder.passed("integrity.entry.missing")
             matched += 1
@@ -274,10 +293,17 @@ class _Verifier:
                     "actualSize": actual.size,
                     "damagedChunks": [*damaged],
                     "chunkSize": self.manifest.chunk_size,
+                    **(
+                        {"damagedPieces": resolved.damaged[entry.path]}
+                        if resolved is not None and entry.path in resolved.damaged
+                        else {}
+                    ),
                 },
             )
 
-        for path, source in sorted(found.items()):
+        leftovers = resolved.unexpected if resolved is not None else []
+        # Left over: on disk (or in the volume index) but not in the manifest.
+        for path, source in [*sorted(found.items()), *((s.path, s) for s in leftovers)]:
             ref = ArtifactRef(path, unsafe=not source.safe)
             recorder.fail(
                 "integrity.entry.unexpected",
@@ -292,6 +318,31 @@ class _Verifier:
                     ref, source.location, actual.size, actual.sha256, self.files.get
                 )
         recorder.passed("integrity.entry.unexpected", matched)
+
+    def _from_base(self, entry: Entry) -> Source | None:
+        """A carried entry's content, from the accepted base bundles given with ``--base``."""
+        subject = Subject.of_path(entry.path)
+        if not self.bases:
+            self.recorder.not_assessed(
+                ("integrity.hash.mismatch",),
+                subject,
+                tool=TOOL,
+                reason="carried from the base snapshot; give the accepted base bundle with --base",
+            )
+            return None
+        if self._base_sources is None:
+            self._base_sources = [self._sources_of(base) for base in self.bases]
+        for sources in self._base_sources:
+            if entry.path in sources:
+                return sources[entry.path]
+        return None  # reported as missing: no base holds it
+
+    def _sources_of(self, bundle: Path) -> dict[str, Source]:
+        if (bundle / layout.VOLUMES).is_file():
+            index = volumes.load_index((bundle / layout.VOLUMES).read_bytes())
+            return volumes.resolve(bundle, index, (), self.scratch).sources
+        root = bundle / layout.PAYLOAD
+        return {s.path: s for s in scan("", root)} if root.is_dir() else {}
 
     def inspect(self, handlers: Sequence[Handler]) -> None:
         """Re-run inspection on everything present, with this side's handlers and limits."""
@@ -397,8 +448,14 @@ def verify(
     out: Path | None = None,
     handlers: Sequence[Handler] | None = None,
     now: datetime | None = None,
+    volume_dirs: Sequence[Path] = (),
+    bases: Sequence[Path] = (),
 ) -> VerifyResult:
     """Verify ``bundle`` against ``policy``.
+
+    ``volume_dirs`` are media holding the volumes of a multi-volume bundle (by default they are
+    looked for under the bundle). ``bases`` are accepted earlier bundles that a delta bundle's
+    carried files come from; each carried file is re-hashed there against this manifest.
 
     ``state`` is this side's state directory; with it, the import is checked against, and then
     recorded in, the ledger. ``out`` receives the assessment and receipt (default: under ``state``).
@@ -412,12 +469,16 @@ def verify(
     ledger = Ledger(state) if state is not None else None
 
     verifier = _Verifier(bundle, policy, pubkey, session.ctx)
-    verifier.statement()
-    verifier.control_files()
-    verifier.payload()
-    verifier.inspect(handlers or default_handlers())
-    verifier.custody()
-    verifier.history(ledger)
+    verifier.volume_dirs, verifier.bases = tuple(volume_dirs), tuple(bases)
+    try:
+        verifier.statement()
+        verifier.control_files()
+        verifier.payload()
+        verifier.inspect(handlers or default_handlers())
+        verifier.custody()
+        verifier.history(ledger)
+    finally:
+        shutil.rmtree(verifier.scratch, ignore_errors=True)
 
     assessment = session.finish(
         Stage.VERIFY,
