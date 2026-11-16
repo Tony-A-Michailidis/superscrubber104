@@ -181,6 +181,24 @@ See [patching and feeds](docs/design/33-patching-and-feeds.md). `airlock stage` 
 
 `airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 
+## How airlock relates to Zarf and Hauler
+
+[Zarf](https://docs.zarf.dev/) and [Hauler](https://docs.hauler.dev/) move Kubernetes content across an air gap and deploy or serve it on the other side. Both check what they carry:
+* Zarf signs each package (keylessly with Sigstore, or with a key), verifies a sha256 checksum chain offline, and generates SBOMs.
+* Hauler verifies cosign signatures before saving and after loading, and keeps upstream SBOMs and attestations.
+
+Neither inspects what is inside the artifacts, applies a site's policy, or records control-mapped evidence. airlock does not move or deploy anything; it decides whether a delivery should cross and records why. The two are used together: build and carry the package with Zarf or Hauler, and pass it through `airlock pack` and `airlock verify` on the way.
+
+| | Zarf / Hauler | airlock |
+|---|---|---|
+| Package, transfer, deploy or serve | yes | carries any files; `stage` writes local repositories, never deploys |
+| Signatures and checksums of what they carry | yes | verified again, plus its own bundle signature and replay ledger |
+| SBOM | Zarf generates (Syft); Hauler carries upstream SBOMs | generates (CycloneDX, ML-BOM) from what it inspected |
+| Inspection of content: models, pickles, prompts, secrets, offline readiness | not documented | yes |
+| Policy decision, approvals, evidence mapped to NIST 800-53 / ITSG-33 | not documented | yes |
+
+airlock does not yet open Zarf packages or Hauler hauls: today their contents are only inventoried and hashed. Reading them is proposed in [doc 35](docs/design/35-zarf-and-hauler.md), which also records, with sources, what each tool does as of Zarf 1.0 and Hauler 2.1.
+
 ## Roadmap
 
 | Phase | Module | Purpose | Status |
