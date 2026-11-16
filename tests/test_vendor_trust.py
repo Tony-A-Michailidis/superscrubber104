@@ -402,3 +402,25 @@ def test_lists_inside_archives_are_not_assessed(tmp_path: Path) -> None:
     result = inspect(write(tmp_path / "d", {"drop.tar": out.getvalue()}))
     reasons = _not_assessed(result, "upstream.checksum-mismatch")
     assert "inside an archive" in reasons["drop.tar!/SHA256SUMS"]
+
+
+def test_older_version_of_a_package_in_the_same_delivery(tmp_path: Path) -> None:
+    files: dict[str, bytes | str] = {
+        "p/tool-1.0.rpm": rpm_bytes(RPMSpec(name="tool", version="1.0", release="1.el9")),
+        "p/tool-1.10.rpm": rpm_bytes(RPMSpec(name="tool", version="1.10", release="1.el9")),
+        "p/tool-1.9.rpm": rpm_bytes(RPMSpec(name="tool", version="1.9", release="1.el9")),
+        "p/tool-arm.rpm": rpm_bytes(
+            RPMSpec(name="tool", version="1.0", release="1.el9", arch="aarch64")
+        ),
+        "p/hello_2.10-3_amd64.deb": deb_bytes("hello", "2.10-3"),
+        "p/hello_2.9-1_amd64.deb": deb_bytes("hello", "2.9-1"),
+    }
+    result = inspect(write(tmp_path / "d", files))
+    superseded = {
+        f.subject.display: f.detail["newer"] for f in findings_of(result)["package.superseded"]
+    }
+    assert superseded == {
+        "p/tool-1.0.rpm": "1.10-1.el9",  # 1.10 is newer than 1.9: versions, not strings
+        "p/tool-1.9.rpm": "1.10-1.el9",
+        "p/hello_2.9-1_amd64.deb": "2.10-3",
+    }  # the aarch64 build is another package, not an older one

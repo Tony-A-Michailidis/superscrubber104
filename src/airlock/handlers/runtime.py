@@ -62,8 +62,16 @@ _PBTXT_FIELD = re.compile(
 def _profile(view: ArtifactView, ctx: Context) -> Inspection:
     try:
         data = load_untrusted_yaml(read_text(view, 1 << 20))
-    except yaml.YAMLError as exc:
-        raise ValueError(f"runtime profile is not valid YAML: {exc}") from exc
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        # A profile that cannot be read declares nothing: what it would have been checked for is
+        # said to be not assessed, and the delivery is then treated as having no profile.
+        ctx.recorder.not_assessed(
+            ("runtime.component.missing", "runtime.component.mismatch", "runtime.model.missing"),
+            Subject.of_artifact(view.ref),
+            tool=TOOL,
+            reason=f"the runtime profile is not valid YAML: {str(exc)[:200]}",
+        )
+        return Inspection(kind="runtime.profile", metadata={"runtimeProfile": {"error": True}})
     doc = mapping(data)
     spec = mapping(doc.get("spec"))
     name = str(mapping(doc.get("metadata")).get("name") or name_of(view.ref))

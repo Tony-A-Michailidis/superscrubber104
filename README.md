@@ -60,11 +60,13 @@ BLOCK    model.pickle.dangerous-import  [d5085f50ae1334e7]
 APPROVE  model.format.code-capable  [04c6860cbcbadba6]
          models/tiny-chat/training_args.bin: Model or data file can run code when loaded
          approvals: 0 of 1
+WARN     kb.embedding-model.unrecorded  [e63d460f69e659dc]
+         knowledge-base:rag/docs: Knowledge base does not record which embedding model built it
 WARN     malware.detected (not assessed)  [f6490e189d646738]
          bundle: Malware scanner reports a detection
          reason: no malware scanner is configured (plugins.clamav)
 ...
-81 of 204 rules exercised, 315 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+81 of 205 rules exercised, 315 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
 verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
 ```
 

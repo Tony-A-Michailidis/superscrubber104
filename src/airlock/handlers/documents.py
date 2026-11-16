@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterator
 from typing import ClassVar
 
 from airlock import __version__
+from airlock.archive import ARCHIVE_ERRORS
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import Severity, Subject, ToolRef
 from airlock.handlers.common import name_of
@@ -204,7 +205,7 @@ class DocumentHandler:
         assert fmt is not None  # noqa: S101 - only called after detect()
         try:
             found = self._READERS[fmt](artifact)
-        except (zipfile.BadZipFile, OSError, KeyError, ValueError) as exc:
+        except (*ARCHIVE_ERRORS, KeyError) as exc:
             ctx.recorder.not_assessed(
                 ("document.active-content",),
                 Subject.of_artifact(artifact.ref),

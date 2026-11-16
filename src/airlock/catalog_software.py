@@ -306,6 +306,15 @@ UPSTREAM = (
         "Normal for OS packages and recorded for review: these scripts run as root on install.",
     ),
     _rule(
+        "package.superseded",
+        "Delivery also holds a newer version of this OS package",
+        I,
+        ("SI-2", "CM-2"),
+        "Two versions of one package for the same architecture: the older one is superseded. "
+        "Usual in a mirror that keeps history; in a patch bundle it is dead weight or a way "
+        "back to the unpatched version.",
+    ),
+    _rule(
         "upstream.checksum-mismatch",
         "File differs from its publisher's checksum list",
         C,

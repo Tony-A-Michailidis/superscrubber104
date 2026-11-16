@@ -58,6 +58,7 @@ Validated against real AlmaLinux 9 `repomd.xml.asc` and RPMs (RSA 4096) and the 
 | | `package.signature.untrusted` (no pinned key in scope) | policy |
 | The package is signed at all | `package.signature.missing` | policy |
 | Install scriptlets (`%pre`, `%post`, triggers, ...) | `package.maintainer-scripts` (info) | policy |
+| The delivery also holds a newer version of the same package and architecture (RPM or Debian, by `rpm` or `dpkg` version ordering) | `package.superseded` (info) | policy |
 
 **What a signature covers.** A header signature covers the header, and the header records the payload digest, so the two checks together cover the whole package. That only holds when the header records a payload digest and it was checked. Packages built before rpm 4.14 record none: for those, a header signature says nothing about the payload. airlock then verifies the older signature over header and payload if the package has one. If it has none, the file earns **no** verification, and `package.digest-mismatch` is recorded as not assessed with that reason. A verified, fully covered package gets a `signature`-level verification naming the anchor, which the upstream trust check and the reports use like any other.
 

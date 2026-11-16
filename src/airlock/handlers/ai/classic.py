@@ -95,8 +95,14 @@ def _simple(kind: str, fmt: str) -> Reader:
 def _mlflow(view: ArtifactView, ctx: Context) -> Inspection:
     try:
         data = mapping(load_untrusted_yaml(read_text(view, 1 << 20)))
-    except yaml.YAMLError as exc:
-        raise ValueError(f"MLmodel is not valid YAML: {exc}") from exc
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        ctx.recorder.not_assessed(
+            ("model.mlflow.custom-code",),
+            Subject.of_artifact(view.ref),
+            tool=TOOL,
+            reason=f"MLmodel is not valid YAML: {str(exc)[:200]}",
+        )
+        return Inspection(kind="model.mlflow", metadata={"classicModel": {"error": True}})
     flavors = mapping(data.get("flavors"))
     pyfunc = mapping(flavors.get("python_function"))
     reasons: list[str] = []

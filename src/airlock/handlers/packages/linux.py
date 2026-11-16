@@ -14,11 +14,13 @@
 import itertools
 import re
 import sqlite3
+from collections.abc import Sequence
 from urllib.parse import quote
 
 from airlock import __version__
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import (
+    Artifact,
     ArtifactRef,
     Component,
     ComponentType,
@@ -28,8 +30,15 @@ from airlock.core.model import (
     Verification,
 )
 from airlock.formats import openpgp
-from airlock.formats.deb import DebError, read_deb
-from airlock.formats.rpm import Package, RPMError, identity, read_header_blob, read_package
+from airlock.formats.deb import DebError, deb_vercmp, read_deb
+from airlock.formats.rpm import (
+    Package,
+    RPMError,
+    compare_evr,
+    identity,
+    read_header_blob,
+    read_package,
+)
 from airlock.handlers.common import TooLarge, full_path, name_of, read_bytes
 from airlock.trust import signature_verification, verify_gpg
 
@@ -343,3 +352,34 @@ class LinuxPackageHandler:
         if kind == "package.deb":
             return _deb(artifact, ctx)
         return _rpmdb(artifact, ctx)
+
+
+def check_superseded(artifacts: Sequence[Artifact], ctx: Context) -> None:
+    """Older versions of an OS package the delivery also holds a newer version of."""
+    versions: dict[tuple[str, str, str], list[tuple[str, Artifact]]] = {}
+    for artifact in artifacts:
+        for family, key in (("rpm", "evr"), ("deb", "version")):
+            meta = artifact.metadata.get(family)
+            if isinstance(meta, dict) and meta.get("name") and meta.get(key):
+                group = (family, str(meta["name"]), str(meta.get("arch") or ""))
+                versions.setdefault(group, []).append((str(meta[key]), artifact))
+    if not versions:
+        return
+    superseded = 0
+    for (family, name, _arch), held in sorted(versions.items()):
+        compare = compare_evr if family == "rpm" else deb_vercmp
+        newest = held[0][0]
+        for version, _ in held[1:]:
+            if compare(version, newest) > 0:
+                newest = version
+        for version, artifact in held:
+            if compare(version, newest) < 0:
+                superseded += 1
+                ctx.recorder.fail(
+                    "package.superseded",
+                    Subject.of_artifact(artifact.ref),
+                    tool=TOOL,
+                    detail={"package": name, "version": version, "newer": newest},
+                )
+    if not superseded:
+        ctx.recorder.passed("package.superseded")

@@ -119,4 +119,4 @@ A synthetic AlmaLinux 9.4 host against the real errata produced 128 gaps, 13 of 
 * The `osslsigncode` and `qemu-img` plugins are tested with stand-ins for the binaries, as every scanner is. Their handling of each tool's real output has **not** been run against the real tools here: check `airlock plugins check` and one known-good and one altered file on your own build before relying on them.
 * Feeds are read as given. `patch plan` does not verify where a feed came from: check its publisher's checksum or signature as for any download, or take `updateinfo.xml` from a mirror whose chain `airlock verify` has checked ([28](28-package-mirrors.md)).
 * GPU driver, CUDA and firmware versions are in the inventory, but no advisory feed is matched against them yet.
-* Two versions of the same package in one bundle are both staged; the older one is not flagged as superseded.
+* Two versions of the same OS package (same name and architecture) in one delivery: the older ones are recorded as `package.superseded` (info), and both are still staged. A policy can raise that for patch bundles.
