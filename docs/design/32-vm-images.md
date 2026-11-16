@@ -32,7 +32,13 @@ Each image is a `vm-image` unit with its format, size, dependencies, encryption 
 
 ## 32.3 Appliances: OVA and OVF
 
-* **OVA** (a tar): one streaming pass hashes every member with SHA-1, SHA-256 and SHA-512 and keeps the descriptor and manifest. Then every `.mf` line (`SHA256(file)= …`) is compared, and a difference is `upstream.checksum-mismatch` (final). Every file the `.ovf` references must be in the archive with its declared size: missing files are `vm.image.incomplete`, a wrong size is `vm.metadata.mismatch` (final). The disks inside are then read as nested artifacts like any other image. A `.cert` (signed manifest) is recorded, not verified (see limits).
+* **OVA** (a tar): one streaming pass hashes every member and keeps the descriptor, manifest and certificate. Once the manifest has been read (it comes before the disks), only the algorithms it uses are computed. Then:
+  * every `.mf` line (`SHA256(file)= …`) is compared, and a difference is `upstream.checksum-mismatch` (final);
+  * every file the `.ovf` references must be in the archive with its declared size: missing files are `vm.image.incomplete`, a wrong size is `vm.metadata.mismatch` (final);
+  * files the manifest does not list are recorded on the unit (`unlisted`);
+  * a descriptor that does not parse is recorded as not assessed;
+  * the disks inside are then read as nested artifacts like any other image.
+* **Signed OVAs.** A `.cert` file holds `SHA256(x.mf)= <signature>` and the signer's certificate; the signature is RSA over the manifest. The certificate inside the file proves nothing by itself: the signature counts only when it verifies with a certificate pinned in `trust.upstream` with scope `vm.ova`. Then every file the manifest vouches for gets an `ovf-certificate` verification at signature level. No pinned certificate that verifies it is `upstream.signature.untrusted`. If the pinned signer's own certificate is the one in the file and its signature fails, the manifest was rewritten after signing: `upstream.signature.invalid` (final).
 * **Unpacked OVF** directories: the same checks against files beside the descriptor, with `.mf` lines verified through the delivery.
 
 ## 32.4 OpenStack Glance metadata
@@ -56,13 +62,15 @@ Checked against a real CirrOS 0.6.2 qcow2 (v3, 112 MiB virtual, Glance md5 and s
 * each finding;
 * format confusion;
 * an OVA with a bad manifest line and a missing disk, and a clean unpacked export;
+* a signed OVA: verified with a pinned certificate, rewritten after signing, and with no certificate pinned;
 * Glance hashes, format and an RSA-PSS signature against a pinned certificate;
 * the qemu-img plugin, configured and not.
 
 Not done:
 
 * deep inspection of guest filesystems (libguestfs in an appliance: guest OS, packages into the SBOM, users, keys, cloud-init, models). This needs a sandboxed plugin and is the natural next step;
-* OVA `.cert` verification;
 * VDI, QED and Parallels formats (inventoried as unclassified);
 * compressed qcow2 clusters are not decompressed (nothing reads guest data);
 * virtual-size-based expansion limits for compressed exports.
+
+The signed-OVA check follows the `.cert` convention VMware's `ovftool` writes (a digest line, then the certificate; RSA with PKCS#1 v1.5 over the manifest). It is tested against OVAs built here to that convention, **not** against one produced by `ovftool`: confirm it on a real signed appliance before relying on it. Only a pinned signer certificate is accepted; chains to a pinned CA are not built.

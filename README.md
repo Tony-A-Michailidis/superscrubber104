@@ -95,6 +95,7 @@ $ airlock report review/ --format html -o review/report.html
 
 - `keygen` prints the snippet that pins the new key in the receiving side's policy.
 - `pack` inventories, hashes, inspects and signs.
+- `rules` lists every check airlock can record: what it means, its severity, the controls it is evidence for and whether anyone can override it. The same list is in [docs/rules.md](docs/rules.md).
 - `report` renders the evidence for reviewers and assessors: Markdown or a self-contained HTML page, JSON, a CycloneDX 1.6 SBOM/ML-BOM, or OSCAL assessment results, with a control matrix that shows, for each NIST SP 800-53 control, what airlock checked, what it found and what it could not assess. See [reports and control mapping](docs/design/25-reports-and-controls.md).
 - `verify` trusts nothing the packer said. It checks the signature against keys pinned in its own policy, re-hashes every byte, re-inspects the content with its own limits, and records the import in a hash-chained ledger so that replayed, stale or out-of-order bundles are caught.
 
@@ -172,8 +173,9 @@ $ airlock patch stage bundle/ --inventory web-01.json --policy policy.yaml \
 * Emergency plans narrow the result to `--kev` or `--cve`.
 * `patch stage` refuses downgrades unless they are justified.
 * `patch confirm` shows the gap closed.
+* Hosts whose package database cannot be read directly (AlmaLinux 8) give a package listing instead.
 
-See [patching and feeds](docs/design/33-patching-and-feeds.md). `airlock stage` places an accepted bundle into local stores (a PEP 503 index, Verdaccio storage, dnf and apt mirrors, OCI layouts, model directories, a Windows share). It re-hashes every file as it copies it and records the event in the ledger. It never pushes over the network. See [staging](docs/design/34-staging.md).
+See [patching and feeds](docs/design/33-patching-and-feeds.md). `airlock stage` places an accepted bundle into local stores (a PEP 503 index, Verdaccio storage, dnf and apt mirrors, OCI layouts, model directories, a Windows share). It re-hashes every file as it copies it, keeps a stage report, and records the event in the ledger, including a staging that failed part-way. It never pushes over the network. See [staging](docs/design/34-staging.md).
 
 `airlock approve` signs approvals and overrides; `airlock ledger adjust-clock` is the logged recovery path when a disconnected host's clock has drifted.
 

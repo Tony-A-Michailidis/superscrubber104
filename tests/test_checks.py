@@ -1,12 +1,16 @@
 """Inventory and transfer checks that cannot be provoked on every filesystem end to end."""
 
+import json
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
+from click.testing import CliRunner
+
 from airlock.catalog import ALL, builtin_registry
 from airlock.checks.inventory import check_paths
 from airlock.checks.transfer import check_transfer
+from airlock.cli import main
 from airlock.core.model import (
     Entry,
     EntryType,
@@ -19,6 +23,7 @@ from airlock.core.model import (
 )
 from airlock.core.policy import Limits, Policy
 from airlock.ledger import Ledger
+from airlock.rule_reference import _DOMAINS, rules_markdown
 from airlock.session import Session
 from tests.helpers import NOW
 
@@ -155,3 +160,16 @@ def test_delta_base_must_be_an_accepted_snapshot(tmp_path: Path) -> None:
     session = Session.start(Policy.default(), NOW)
     check_transfer(provenance, DIGEST, None, session.ctx)
     assert by_rule(session)["delta.base.unknown"][0].result is Result.NOT_ASSESSED
+
+
+def test_rule_reference_is_in_step_with_the_catalogue() -> None:
+    """docs/rules.md is generated: regenerate it with ``airlock rules -o docs/rules.md``."""
+    document = Path(__file__).parent.parent / "docs" / "rules.md"
+    assert document.read_text(encoding="utf-8") == rules_markdown()
+    assert {rule.id.split(".")[0] for rule in ALL} <= set(_DOMAINS)  # every section has a name
+    listed = CliRunner().invoke(main, ["rules", "--format", "json"])
+    assert listed.exit_code == 0
+    records = json.loads(listed.output)
+    assert len(records) == len(ALL)
+    final = {r["id"] for r in records if r["final"]}
+    assert all(r["default"] == "refuse (final)" for r in records if r["id"] in final)

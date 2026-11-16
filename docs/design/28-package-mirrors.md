@@ -19,13 +19,16 @@ The mirror handler (`airlock/handlers/mirrors.py`) checks every link where it fi
 * **Metadata.** The signature is checked against keys pinned for `repo.dnf` or `repo.apt` ([27.1](27-vendor-trust.md)). The outcome is one of verified, `repo.metadata.signature.invalid` (a pinned key that does not hold: final), `repo.metadata.signature.untrusted` (a key nobody pinned) or `repo.metadata.unsigned`. Every index it lists that is in the delivery is hashed and compared: `repo.metadata.digest-mismatch` is final. `Valid-Until` in the past is `repo.metadata.expired`.
 * **Index.** Every package it lists that is in the delivery is compared with the listed hash: `repo.content.digest-mismatch` is final. Large indexes are streamed (AlmaLinux AppStream's `primary.xml` is about 400 MB uncompressed). When `Packages` is shipped in several compressions, one is read; the others are recorded as `sameAs`. Each still has to match `Release`.
 * **Helm provenance.** A `.prov` file is a clear-signed statement of a chart's sha256, verified against keys pinned for `chart.helm`. It reuses the `upstream.*` rules ([27.5](27-vendor-trust.md)).
+* **Inside an archive** (a mirror delivered as a tarball) an index cannot reach the packages it lists. The chain is recorded as **not assessed** for that metadata, with the advice to deliver the mirror as a directory. Nothing is skipped silently.
+* **MD5-only indexes.** A listed MD5 can show that a package differs, but a match earns no verification.
+* **Limits.** Indexes are decompressed through a cap (8 GiB expanded). Metadata that does not parse is `repo.metadata.malformed`; the index beside it is then on its own and is reported as `repo.metadata.unlisted`.
 
 The repo-mirror assembler (`airlock/units/repo_mirror.py`) joins the links per root:
 
 * An index is **chained** when metadata in the same mirror lists it and the hash matched. A dnf or apt index that nothing vouches for is `repo.metadata.unlisted`.
 * A package listed by a chained index under verified metadata gets a `repo-metadata` verification at **signature** level. It names the anchor and signer, so `trust.minimumLevels` can require it, exactly as it can for a signed RPM. Any other listed package whose hash matched gets `repo-index` at **checksum** level. Chained indexes and the metadata file get the signature level too.
 * Listed packages that are absent are `repo.content.missing` (low: normal for a curated subset; count and sample recorded). Entries with absolute URLs are `repo.content.external`.
-* Packages under the root that no index lists are `repo.content.unlisted`. This is decided in `analysis.finish`, once every artifact is known. Such packages are either dead weight (`dnf` and `apt` will not see them) or were added after the metadata was made.
+* Packages under the root that no index lists are `repo.content.unlisted`. This is decided in `analysis.finish`, once every artifact is known. A mirror nested inside another keeps its own packages: they are judged by the inner mirror only. Such packages are either dead weight (`dnf` and `apt` will not see them) or were added after the metadata was made.
 
 A curated subset made by re-running `createrepo_c` or `dpkg-scanpackages` on the low side drops the vendor signature. It is then reported as unsigned, and the individual RPM signatures ([27.3](27-vendor-trust.md)) remain the proof of origin. For apt there is no per-package signature, so a re-generated apt subset can only reach checksum level unless the site re-signs it with a key the receiving policy pins for `repo.apt`.
 
@@ -61,7 +64,8 @@ Checked against the real AlmaLinux 9 repository (`repomd.xml` and its signature,
 * unsigned, untrusted and invalid metadata;
 * `Release` with `Release.gpg`;
 * expiry, staleness, missing, unlisted and external entries;
-* rollback across two imports with a ledger.
+* rollback across two imports with a ledger;
+* a mirror inside an archive, a mirror inside a mirror, and metadata that does not parse.
 
 ## 28.5 Limits
 

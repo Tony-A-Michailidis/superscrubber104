@@ -26,9 +26,10 @@ from airlock.patch.inventory import (
     sign,
 )
 from airlock.patch.plan import confirm, markdown, plan
+from airlock.scanners.authenticode import Authenticode
 from airlock.scanners.base import Completed
 from tests.helpers import NOW, make_site
-from tests.models_helpers import findings_of, inspect
+from tests.models_helpers import inspect
 from tests.software_fixtures import write
 from tests.test_scanners import FakeTools, _binary
 from tests.vendor_fixtures import RPMSpec, rpmdb_bytes
@@ -440,6 +441,8 @@ def test_authenticode_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         "good.msu": b"MSCF good",
         "tampered.msu": b"MSCF bad",
         "plain.msi": b"\xd0\xcf\x11\xe0",
+        "other-root.cab": b"MSCF signed by someone else",
+        "crashed.exe": b"MZ" + b"\x00" * 64,
     }
     result = inspect(write(tmp_path / "d", files), plugins=True)
     gaps = [f for f in result.assessment.findings if f.rule.startswith("authenticode.")]
@@ -467,6 +470,11 @@ def test_authenticode_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
                 + "Calculated message digest : AB\nMessage digest MISMATCH\nSignature verification: failed\n",
                 "",
             )
+        if path.endswith("other-root.cab"):
+            issuer = "unable to get local issuer certificate\n"
+            return Completed(1, signer + issuer + "Signature verification: failed\n", "")
+        if path.endswith("crashed.exe"):
+            return Completed(255, "", "Segmentation fault\n")
         return Completed(1, "No signature found\n", "")
 
     tools.handlers["osslsigncode"] = osslsigncode  # type: ignore[assignment]
@@ -476,15 +484,18 @@ def test_authenticode_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         f"    database: {roots.as_posix()}\n    files: {{roots.pem: {sha}}}\n"
     )
     result = inspect(write(tmp_path / "e", files), policy_yaml=policy, plugins=True)
-    failed = {
-        (f.rule, f.subject.display)
-        for f in findings_of(result).get("authenticode.signature.invalid", [])
-        + findings_of(result).get("authenticode.signature.missing", [])
-        if f.result is Result.FAIL
+    verdicts = {
+        (f.rule, f.subject.display, f.result)
+        for f in result.assessment.findings
+        if f.rule.startswith("authenticode.") and f.result is not Result.PASS
     }
-    assert failed == {
-        ("authenticode.signature.invalid", "tampered.msu"),
-        ("authenticode.signature.missing", "plain.msi"),
+    assert verdicts == {
+        ("authenticode.signature.invalid", "tampered.msu", Result.FAIL),
+        ("authenticode.signature.missing", "plain.msi", Result.FAIL),
+        # the signature holds, but not under any root this site pinned: a policy matter
+        ("authenticode.signature.untrusted", "other-root.cab", Result.FAIL),
+        # no verdict from the tool is never read as a verdict
+        *((rule, "crashed.exe", Result.NOT_ASSESSED) for rule in Authenticode.rules),
     }
     assert all("-CAfile" in c for c in tools.commands("osslsigncode")[1:])
 

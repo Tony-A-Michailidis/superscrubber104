@@ -50,6 +50,7 @@ from airlock.patch.plan import plan as make_patch_plan
 from airlock.patch.stage import downgrade_check
 from airlock.report import FORMATS, load_source
 from airlock.report import render as render_report
+from airlock.rule_reference import rules_data, rules_markdown
 from airlock.scanners import run_scanners
 from airlock.session import (
     EXIT_BLOCKED,
@@ -370,9 +371,36 @@ def adjust_clock(state: Path, reason: str, key: Path | None, passphrase_env: str
     )
 
 
+@main.command("rules")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["md", "json"]),
+    default="md",
+    show_default=True,
+    help="Markdown (what docs/rules.md holds) or JSON.",
+)
+@click.option(
+    "-o",
+    "--out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Write to a file instead of standard output.",
+)
+def rules_command(output_format: str, out: Path | None) -> None:
+    """List every rule: what it means, its severity, its controls, and whether it is final."""
+    if output_format == "json":
+        text = json.dumps(rules_data(), indent=2, sort_keys=True) + "\n"
+    else:
+        text = rules_markdown()
+    if out is not None:
+        out.write_text(text, encoding="utf-8", newline="\n")
+    else:
+        click.echo(text, nl=False)
+
+
 @main.group()
 def plugins() -> None:
-    """External scanners (ClamAV, Trivy) and feeds (CISA KEV)."""
+    """External tools airlock can use, and the feeds they need (see docs/scanners.md)."""
 
 
 @plugins.command("check")
@@ -632,7 +660,13 @@ def _load_inventory(path: Path, policy: Policy) -> Inventory:
 @click.option("--windows-build", help="Windows OS build, e.g. 10.0.20348.2700.")
 @click.option("--key", type=_FILE, help="Private key that signs the inventory (the receipt key).")
 @_PASSPHRASE
-@click.option("-o", "--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
+@click.option(
+    "-o",
+    "--out",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Where to write the inventory.",
+)
 @_reports_errors
 def patch_inventory(
     root: Path | None,
@@ -680,8 +714,19 @@ _FEED = click.option(
 @click.option("--policy", type=_FILE, help="Policy: pinned inventory keys and freshness.feeds.")
 @click.option("--cve", "cves", multiple=True, help="Emergency plan: only advisories for this CVE.")
 @click.option("--kev", "kev_only", is_flag=True, help="Emergency plan: only KEV-listed CVEs.")
-@click.option("-o", "--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
-@click.option("--markdown", "markdown_out", type=click.Path(dir_okay=False, path_type=Path))
+@click.option(
+    "-o",
+    "--out",
+    required=True,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Where to write the plan (JSON).",
+)
+@click.option(
+    "--markdown",
+    "markdown_out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Also write a summary for people: gaps, feed freshness, what to fetch.",
+)
 @_reports_errors
 def patch_plan(
     inventory_path: Path,

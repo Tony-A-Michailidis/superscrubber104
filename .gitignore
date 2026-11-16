@@ -21,6 +21,7 @@ htmlcov/
 !tests/**/fixtures/**/*.pem
 /bundle/
 /out/
+/airlock-demo/
 
 # Editors / OS
 .vscode/

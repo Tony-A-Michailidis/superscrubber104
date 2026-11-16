@@ -12,6 +12,8 @@ Infrastructure code is what will run with the most privilege on the high side. T
 | Terraform | `*.tf`, `.terraform.lock.hcl`, provider packages in a filesystem mirror | remote modules installed in `.terraform/modules`; provider hashes |
 | Ansible | `requirements.yml` | collections and roles installed alongside |
 
+**Where it looks.** Anywhere in the delivery, including inside plain archives: deployment files usually arrive zipped. It does not look inside container image layers or installed packages (`node_modules`, `site-packages`), because what is baked into an image is not applied to the cluster. Checks that need the files beside a file (vendored charts, installed modules, roles) cannot run inside an archive and are recorded there as **not assessed**.
+
 ## 30.1 Workload posture
 
 | Rule | Severity | Kubernetes | Compose |
@@ -35,7 +37,7 @@ Only explicit settings are reported. An unset `runAsNonRoot` is not, because mos
 
 ## 30.3 Terraform providers
 
-`.terraform.lock.hcl` is a lockfile for the shared assembler ([29.1](29-more-ecosystems.md)), producing unit `terraform-environment`. `zh:` hashes are the sha256 of the provider zip (as in the provider's `SHA256SUMS`). `h1:` is the same dirhash as Go's, over the zip's files. Provider packages in a **packed** filesystem mirror (`<host>/<namespace>/<type>/terraform-provider-<type>_<version>_<os>_<arch>.zip`) are hashed both ways. **Unpacked** providers (`<host>/<namespace>/<type>/<version>/<os>_<arch>/terraform-provider-…`) resolve by name and version, but their `h1:` covers the whole directory, which one file cannot see. They are counted as `hashUnverifiable`. Checked against HashiCorp's `null` 3.2.2: the zip's sha256 equals its published `SHA256SUMS` entry. Components: `pkg:terraform/<address>@<version>`.
+`.terraform.lock.hcl` is a lockfile for the shared assembler ([29.1](29-more-ecosystems.md)), producing unit `terraform-environment`. `zh:` hashes are the sha256 of the provider zip (as in the provider's `SHA256SUMS`). `h1:` is the same dirhash as Go's, over the zip's files. Provider packages in a **packed** filesystem mirror (`<host>/<namespace>/<type>/terraform-provider-<type>_<version>_<os>_<arch>.zip`) are hashed both ways. **Unpacked** providers (`<host>/<namespace>/<type>/<version>/<os>_<arch>/terraform-provider-…`) resolve by name and version, but their `h1:` covers the whole directory, which one file cannot see. They are counted as `hashUnverifiable`. A provider zip that cannot be read is still matched by its sha256 (`zh:`); only its `h1:` cannot be offered. Checked against HashiCorp's `null` 3.2.2: the zip's sha256 equals its published `SHA256SUMS` entry. Components: `pkg:terraform/<address>@<version>`.
 
 ## 30.4 Templates and YAML
 
@@ -52,7 +54,8 @@ Compose files and manifests use anchors and merge keys, so they are read with al
 * the alias budget;
 * Helm dependencies from a lock, an unpacked subchart, `file://` and a missing OCI chart;
 * Terraform packed providers (match, mismatch, absent) and modules;
-* Ansible collections (installed, packed, absent) and roles.
+* Ansible collections (installed, packed, absent) and roles;
+* manifests and a chart inside a zip, and a damaged provider package.
 
 Not covered:
 

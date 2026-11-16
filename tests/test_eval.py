@@ -9,10 +9,10 @@ import pytest
 from click.testing import CliRunner
 
 from airlock.cli import main
-from airlock.core.model import Verdict
+from airlock.core.model import Result, Verdict
 from airlock.eval_run import run_eval, write_results
 from airlock.scanners import base
-from airlock.scanners.base import Completed
+from airlock.scanners.base import Completed, ScanError
 from tests.data_fixtures import embedding_model
 from tests.helpers import NOW
 from tests.models_helpers import findings_of, inspect, make_policy
@@ -216,3 +216,36 @@ def test_eval_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert json.loads(out.read_text())["kind"] == "EvalResults"
     missing = CliRunner().invoke(main, [*args[:5], "--runtime", "nope", *args[7:]])
     assert missing.exit_code == 2 and "no runtime named 'nope'" in missing.output
+
+
+def test_failed_expectation_and_runtime_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wrong answer to an ordinary case, and a runtime that fails on one prompt."""
+    runtime = FakeRuntime(monkeypatch)
+    root, evalset, policy_yaml = _site(tmp_path)
+    policy = make_policy(tmp_path / "policy", policy_yaml)
+    answer = runtime._run
+
+    def flaky(command: Sequence[str], **options: object) -> Completed:
+        prompt = command[command.index("-p") + 1]
+        if "refund" in prompt:
+            raise ScanError("exit code 139")
+        if "capital" in prompt:
+            return Completed(0, "The capital of France is Lyon.\n", "")
+        return answer(command, **options)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(base, "run_process", flaky)
+    result = run_eval(evalset, root / "models" / "embedder", "fake-llm", policy, now=NOW)
+    [wrong] = [
+        f
+        for f in result.assessment.findings
+        if f.rule == "eval.case.failed" and f.result is Result.FAIL
+    ]
+    assert (wrong.subject.display, wrong.detail["check"]) == (
+        "smoke.yaml#case capital",
+        "contains: Paris",
+    )
+    [crashed] = [f for f in result.assessment.findings if f.rule == "eval.runtime.error"]
+    assert crashed.result is Result.ERROR and crashed.subject.display == "smoke.yaml#case summary"
+    assert result.assessment.summary.verdict is not Verdict.PASSED

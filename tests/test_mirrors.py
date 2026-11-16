@@ -369,3 +369,16 @@ def test_a_mirror_inside_a_mirror_keeps_its_own_packages(tmp_path: Path) -> None
         "repo-mirror:repo": ["Packages/extra.rpm"],
         "repo-mirror:repo/extras": ["Packages/extra.rpm"],
     }
+
+
+def test_metadata_that_does_not_parse(tmp_path: Path) -> None:
+    files = dict(_dnf(None))
+    files["repo/repodata/repomd.xml"] = b"<repomd><data type='primary'>"
+    files["apt/dists/stable/InRelease"] = "Origin: Example\nthis was never clear-signed\n"
+    result = inspect(write(tmp_path / "d", files))
+    assert _failing(result, "repo.metadata.malformed") == [
+        "apt/dists/stable/InRelease",
+        "repo/repodata/repomd.xml",
+    ]
+    # Without metadata that reads, the index is on its own, and that is said.
+    assert _failing(result, "repo.metadata.unlisted") == ["repo/repodata/1234-primary.xml.gz"]

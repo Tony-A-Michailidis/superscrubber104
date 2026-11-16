@@ -38,3 +38,5 @@ The original project brief, split by topic. Section numbers (§N) are kept from 
 | [32-vm-images.md](32-vm-images.md) | new | qcow2, VMDK, VHD, VHDX, raw and ISO headers; incomplete, encrypted, unclean and confused images; OVA/OVF manifests; Glance hashes and signatures; the qemu-img plugin (implemented) |
 | [33-patching-and-feeds.md](33-patching-and-feeds.md) | new | `airlock patch inventory/plan/confirm`, OSV, updateinfo, MSRC CVRF and KEV feeds with freshness, emergency plans, Authenticode via osslsigncode (implemented) |
 | [34-staging.md](34-staging.md) | new | `airlock stage` and `airlock patch stage`: accepted bundles only, re-hash on copy, target layouts (files, models, PyPI, npm, dnf, apt, OCI, Windows), ledger events, downgrade protection (implemented) |
+
+The rule reference, [../rules.md](../rules.md), lists every check with its severity, default outcome and controls. It is generated from the catalogue by `airlock rules`.

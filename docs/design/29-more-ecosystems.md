@@ -15,8 +15,10 @@ A requirement is resolved by a distribution with the same name and version. When
 
 Two cross-cutting rules:
 
-* **`package.checksum-mismatch`** (final): a package differs from a checksum recorded beside it, such as a Maven `.sha1`/`.sha256`/`.sha512`/`.md5`, NuGet `.nupkg.sha512`, Go `.ziphash`, a Gradle cache directory named after the sha1, or cargo's `.cargo-checksum.json`. A match gives a `checksum`-level verification where the record came from the publisher (Maven).
+* **`package.checksum-mismatch`** (final): a package differs from a checksum its own tooling recorded beside it: NuGet's `.nupkg.sha512`, Go's `.ziphash`, a Gradle cache directory named after the file's sha1, or cargo's `.cargo-checksum.json`. Sidecar checksums published with an artifact (Maven's `.sha1`/`.sha256`/`.sha512`/`.md5`) are publishers' checksum lists and are checked for any file by the upstream handler ([27.5](27-vendor-trust.md)): a mismatch there is `upstream.checksum-mismatch`, and a match gives a `checksum`-level verification.
 * **`package.build-hooks`** (info): code that runs at build or install time, recorded for review. This covers Cargo build scripts and procedural macros, MSBuild `.targets`/`.props` under `build/`, and NuGet PowerShell scripts.
+
+Lockfiles and packages inside archives are read the same way, so a source tree delivered as a zip still forms its units. Everything a handler decompresses itself is read through a cap (`archive.capped`): a module zip up to Go's own 500 MiB limit, a crate up to 512 MiB expanded, a provider package up to 4 GiB. A package that cannot be read satisfies no requirement, so its lockfile reports it as unresolvable.
 
 ## 29.2 Go
 
@@ -41,14 +43,14 @@ Checked against `itoa 1.0.11` (its `.crate` sha256 equals the crates.io index `c
 ## 29.4 .NET
 
 * **`packages.lock.json`**: each package per target framework with `resolved` and `contentHash`, the base64 sha512 of the `.nupkg`. `Project` entries are skipped. Names are case-insensitive. Versions are normalised as NuGet does (`1.0` → `1.0.0`, a zero fourth part dropped, build metadata removed).
-* **`.nupkg`**: identity, authors and licence come from the `.nuspec`. Build hooks are listed, and a `.nupkg.sha512` beside the package (the global packages folder) is checked. Whether the package carries a repository or author signature (`.signature.p7s`) is recorded, **not verified**: that needs CMS with the NuGet certificate chain and timestamping (see limits).
+* **`.nupkg`**: identity, authors and licence come from the `.nuspec` (the licence only when it is declared as an SPDX expression, not when it names a file). Build hooks are listed, and a `.nupkg.sha512` beside the package (the global packages folder) is checked. Whether the package carries a repository or author signature (`.signature.p7s`) is recorded, **not verified**: that needs CMS with the NuGet certificate chain and timestamping (see limits).
 
 Checked against `Newtonsoft.Json 13.0.3`: the computed content hash equals `packageHash` in nuget.org's catalog. Components: `pkg:nuget/<id>@<version>`.
 
 ## 29.5 Java
 
-* **Jars, wars, aars and poms**: identity comes from `META-INF/maven/**/pom.properties`, the pom (with its parent for the group and version), or the Gradle cache layout. A jar signature (`META-INF/*.SF`) is recorded, not verified. Detached `.asc` signatures from Maven Central are verified by the upstream handler ([27.5](27-vendor-trust.md)) against keys pinned for `file.signed`.
-* **Maven repository layout**: sidecar checksums are compared, using the strongest one present.
+* **Jars, wars, aars and poms**: identity comes from the jar's single `META-INF/maven/**/pom.properties`, the pom (with its parent for the group and version), the Gradle cache layout, or, for a jar without `pom.properties` in a Maven layout, the `.pom` beside it. A shaded jar carries the `pom.properties` of everything merged into it, so no identity is read from those. A jar signature (`META-INF/*.SF`) is recorded, not verified. Detached `.asc` signatures from Maven Central are verified by the upstream handler ([27.5](27-vendor-trust.md)) against keys pinned for `file.signed`.
+* **Maven repository layout**: sidecar checksums are checked by the upstream handler, like those of any other file.
 * **Gradle cache** (`files-2.1/<group>/<artifact>/<version>/<sha1>/<file>`): the directory name is the file's sha1 and is checked.
 * **`gradle.lockfile`**: versions only. **`gradle/verification-metadata.xml`**: versions and hashes per artifact file. Requirements name components (`group:artifact`) or files (`group:artifact:file`), and each jar or pom claims both.
 

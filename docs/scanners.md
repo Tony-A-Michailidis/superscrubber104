@@ -240,6 +240,8 @@ plugins:
 
 airlock runs `osslsigncode verify -in <file> -CAfile roots.pem [-TSA-CAfile tsa-roots.pem]` on every top-level `.msu`, `.cab`, `.msi`, `.exe`, `.dll`, `.sys`, `.msix`, `.appx` and PE file. A digest mismatch is `authenticode.signature.invalid` (final). A signature that does not chain to your roots is `authenticode.signature.untrusted`. No signature is `authenticode.signature.missing`.
 
+Output with no verdict (a crash, a file type it cannot read) is recorded as not assessed. This plugin and `qemu-img` have been tested here with stand-ins for the binaries only: before relying on either, run `airlock plugins check`, then verify one known-good and one deliberately altered file with your pinned build and confirm the findings.
+
 ## Carrying the scanners across
 
 Scanners and their databases are content like any other, so move them with airlock:

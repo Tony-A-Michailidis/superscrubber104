@@ -144,3 +144,11 @@ def test_cuda_installer_and_triton_python_backend(tmp_path: Path) -> None:
     assert cuda == {"component": "cuda", "version": "12.4.1", "driver": "550.54.15"}
     [python] = findings_of(result)["runtime.triton.python-backend"]
     assert python.result is Result.FAIL and python.detail["model"] == "rerank"
+
+
+def test_declared_version_that_the_delivery_does_not_hold(tmp_path: Path) -> None:
+    profile = PROFILE.replace("{name: torch, version: 2.4.0}", "{name: torch, version: 2.5.1}")
+    result = inspect(write(tmp_path / "d", _files(**{"runtime/chat.runtime.yaml": profile})))
+    [mismatch] = findings_of(result)["runtime.component.mismatch"]
+    assert mismatch.detail["component"] == "torch"
+    assert (mismatch.detail["declared"], mismatch.detail["delivered"]) == ("2.5.1", ["2.4.0+cu121"])
