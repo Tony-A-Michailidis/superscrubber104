@@ -8,6 +8,7 @@ payload digest proves the whole package. Nothing is installed, extracted or run.
 ``rpm_vercmp`` and ``compare_evr`` order versions exactly as rpm does.
 """
 
+import base64
 import hashlib
 import re
 import struct
@@ -26,7 +27,11 @@ REQUIRENAME, REQUIREVERSION, PROVIDENAME, PROVIDEVERSION = 1049, 1050, 1047, 111
 SCRIPTLETS = {1023: "prein", 1024: "postin", 1025: "preun", 1026: "postun",
               1151: "pretrans", 1152: "posttrans", 1065: "triggerscripts"}  # fmt: skip
 # Signature header tags
-SIG_SIZE, SIG_RSAHEADER, SIG_SHA1HEADER, SIG_SHA256HEADER, SIG_PGP = 1000, 268, 269, 273, 1002
+# Header-only signatures: RSA (268), and DSA/ECDSA/EdDSA (267); rpm 6 keeps any number of them
+# base64-encoded under 278. Signatures over header plus payload (rpm 4.x and older): 1002, 1005.
+SIG_DSAHEADER, SIG_RSAHEADER, SIG_OPENPGP = 267, 268, 278
+SIG_PGP, SIG_GPG = 1002, 1005
+SIG_SHA1HEADER, SIG_SHA256HEADER = 269, 273
 _DIGEST_ALGOS = {8: "sha256", 9: "sha384", 10: "sha512", 2: "sha1"}
 
 
@@ -54,11 +59,19 @@ class Package:
     scriptlets: list[str]
     requires: list[str]
     provides: list[str]
-    signature: bytes | None  # the OpenPGP signature packet over the main header
+    header_signatures: list[bytes]  # OpenPGP signature packets over the main header
+    package_signatures: list[bytes]  # over the main header and the payload together
     header: bytes
     header_sha256: str | None  # as recorded in the signature header
     payload_digest: tuple[str, str] | None  # (algorithm, hex) recorded in the main header
+    payload_offset: int = 0  # where the payload starts in the file
+    payload_checked: bool = False  # the payload was hashed and compared with payload_digest
     problems: list[str] = field(default_factory=list)
+
+    @property
+    def signature(self) -> bytes | None:
+        """The first header signature, if any."""
+        return self.header_signatures[0] if self.header_signatures else None
 
     @property
     def evr(self) -> str:
@@ -67,6 +80,13 @@ class Package:
 
 
 def _header(stream: "BinaryIO | _Bytes", pad: bool) -> Header:
+    try:
+        return _read_header(stream, pad)
+    except (struct.error, IndexError, OverflowError, MemoryError) as exc:
+        raise RPMError(f"damaged RPM header: {exc}") from exc
+
+
+def _read_header(stream: "BinaryIO | _Bytes", pad: bool) -> Header:
     intro = stream.read(16)
     if len(intro) < 16 or intro[:4] != _HEADER_MAGIC:
         raise RPMError("no RPM header where one should be")
@@ -83,16 +103,21 @@ def _header(stream: "BinaryIO | _Bytes", pad: bool) -> Header:
     tags: dict[int, object] = {}
     for i in range(count):
         tag, kind, offset, n = struct.unpack(">iiii", body[i * 16 : i * 16 + 16])
-        if not 0 <= offset <= len(store):
+        if not 0 <= offset <= len(store) or not 0 <= n <= len(store):
             continue
         if kind == 4:  # INT32
             tags[tag] = list(struct.unpack(f">{n}i", store[offset : offset + 4 * n]))
         elif kind in (6, 9):  # STRING, I18NSTRING (first)
-            tags[tag] = store[offset : store.index(b"\x00", offset)].decode("utf-8", "replace")
+            end = store.find(b"\x00", offset)
+            if end < 0:
+                raise RPMError("unterminated string in an RPM header")
+            tags[tag] = store[offset:end].decode("utf-8", "replace")
         elif kind == 8:  # STRING_ARRAY
             values, pos = [], offset
             for _ in range(n):
-                end = store.index(b"\x00", pos)
+                end = store.find(b"\x00", pos)
+                if end < 0:
+                    raise RPMError("unterminated string array in an RPM header")
                 values.append(store[pos:end].decode("utf-8", "replace"))
                 pos = end + 1
             tags[tag] = values
@@ -165,10 +190,14 @@ def read_package(stream: BinaryIO, *, check_payload: bool = True) -> Package:
         scriptlets=sorted(name for tag, name in SCRIPTLETS.items() if tags.get(tag)),
         requires=_strings(tags.get(REQUIRENAME)),
         provides=_strings(tags.get(PROVIDENAME)),
-        signature=_bin(signature.tags.get(SIG_RSAHEADER)),
+        header_signatures=_header_signatures(signature.tags),
+        package_signatures=[
+            blob for tag in (SIG_PGP, SIG_GPG) if (blob := _bin(signature.tags.get(tag)))
+        ],
         header=main.raw,
         header_sha256=_str(signature.tags, SIG_SHA256HEADER),
         payload_digest=payload_digest,
+        payload_offset=LEAD + len(signature.raw) + (-len(signature.raw) % 8) + len(main.raw),
     )
     if package.header_sha256 and hashlib.sha256(main.raw).hexdigest() != package.header_sha256:
         package.problems.append("the header does not match its SHA-256 digest")
@@ -176,9 +205,20 @@ def read_package(stream: BinaryIO, *, check_payload: bool = True) -> Package:
         digest = hashlib.new(payload_digest[0])
         while block := stream.read(1 << 20):
             digest.update(block)
-        if digest.hexdigest() != payload_digest[1]:
+        package.payload_checked = True
+        if digest.hexdigest() != payload_digest[1].lower():
             package.problems.append("the payload does not match the digest in the header")
     return package
+
+
+def _header_signatures(tags: dict[int, object]) -> list[bytes]:
+    found = [blob for tag in (SIG_RSAHEADER, SIG_DSAHEADER) if (blob := _bin(tags.get(tag)))]
+    for encoded in _strings(tags.get(SIG_OPENPGP)):
+        try:
+            found.append(base64.b64decode(encoded, validate=True))
+        except ValueError:
+            continue
+    return found
 
 
 def _bin(value: object) -> bytes | None:

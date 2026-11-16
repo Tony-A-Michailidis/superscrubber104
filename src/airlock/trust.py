@@ -12,6 +12,9 @@ from fnmatch import fnmatchcase
 from functools import lru_cache
 from pathlib import Path
 
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
 from airlock.core.interfaces import Context
 from airlock.core.model import Result, TrustLevel, Verification
 from airlock.core.policy import UpstreamKey, UpstreamKeyType
@@ -61,9 +64,6 @@ def verify_gpg(
 
 def x509_keys(ctx: Context, scope: str) -> list[tuple[str, object]]:
     """(anchor name, public key) for every certificate or public key pinned for ``scope``."""
-    from cryptography import x509
-    from cryptography.hazmat.primitives.serialization import load_pem_public_key
-
     today = ctx.now.date()
     found: list[tuple[str, object]] = []
     for key in ctx.policy.upstream:

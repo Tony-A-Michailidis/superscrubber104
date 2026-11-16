@@ -1,9 +1,10 @@
 """``airlock patch inventory``: what is installed on a high-side host, signed, to cross outbound.
 
 Read statically from a root filesystem (the host's ``/``, a mounted image, a container export):
-``etc/os-release``, the RPM database (``rpmdb.sqlite``) or dpkg's ``status``. Windows hosts are
-inventoried from what PowerShell reports (``Get-HotFix`` and the OS build, see doc 33), since
-airlock runs on Linux.
+``etc/os-release``, the RPM database (``rpmdb.sqlite``) or dpkg's ``status``. Hosts whose
+database cannot be read that way (AlmaLinux 8 and older keep it in Berkeley DB) give a package
+listing from ``rpm -qa`` or ``dpkg-query`` instead. Windows hosts are inventoried from what
+PowerShell reports (``Get-HotFix`` and the OS build, see doc 33), since airlock runs on Linux.
 
 The inventory holds package names, versions, architectures and source packages, the OS identity,
 and GPU driver and CUDA versions if present. Nothing else: no host name (the operator gives a
@@ -19,9 +20,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from airlock import bundle as layout
 from airlock.core.errors import ConfigError
 from airlock.core.model import API_VERSION
-from airlock.core.serde import from_data, to_data
+from airlock.core.serde import from_data
 from airlock.core.signing import Envelope, Signer, VerifyKey, sign_envelope
 from airlock.formats.deb import parse_fields
 from airlock.formats.rpm import RPMError, identity, read_header_blob
@@ -78,12 +80,17 @@ def _os_release(root: Path) -> dict[str, str]:
 
 
 def _rpm_packages(path: Path) -> list[InstalledPackage]:
-    con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+    # Path.as_uri() escapes "?", "#" and spaces; the database is opened read-only and immutable,
+    # so nothing is written beside it (no journal, no lock file).
     try:
-        con.execute("PRAGMA trusted_schema = OFF")
-        rows = con.execute("SELECT blob FROM Packages").fetchall()
-    finally:
-        con.close()
+        con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+        try:
+            con.execute("PRAGMA trusted_schema = OFF")
+            rows = con.execute("SELECT blob FROM Packages").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error as exc:
+        raise ConfigError(f"the RPM database at {path} could not be read: {exc}") from exc
     packages = []
     for (blob,) in rows:
         try:
@@ -134,19 +141,60 @@ def _components(root: Path) -> dict[str, str]:
     return out
 
 
-def collect(root: Path, label: str, now: datetime) -> Inventory:
-    """Inventory a Linux root filesystem without running anything from it."""
+_DEB_FAMILY = frozenset({"debian", "ubuntu"})
+RPM_LISTING = "rpm -qa --qf '%{NAME} %{EPOCHNUM}:%{VERSION}-%{RELEASE} %{ARCH}\\n'"
+DEB_LISTING = "dpkg-query -W -f='${Package} ${Version} ${Architecture} ${source:Package}\\n'"
+
+
+def _listed_packages(path: Path, family: str) -> list[InstalledPackage]:
+    """Packages from a listing made on the host: ``name version arch [source]`` per line."""
+    packages = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        fields = line.split()
+        if not fields or fields[0].startswith("#"):
+            continue
+        if len(fields) < 3:
+            raise ConfigError(f"{path.name} line {number}: expected 'name version arch [source]'")
+        name, version, arch = fields[:3]
+        if family == "rpm":
+            version = version.removeprefix("0:").removeprefix("(none):")
+            if name == "gpg-pubkey":
+                continue
+        source = fields[3] if len(fields) > 3 and fields[3] != name else None
+        packages.append(InstalledPackage(name, version, arch, source if family == "deb" else None))
+    return packages
+
+
+def collect(root: Path, label: str, now: datetime, package_list: Path | None = None) -> Inventory:
+    """Inventory a Linux root filesystem without running anything from it.
+
+    ``package_list`` replaces reading the package database: the output of ``RPM_LISTING`` or
+    ``DEB_LISTING`` run on the host.
+    """
     if not _LABEL.match(label):
         raise ConfigError("the label must be 1-64 letters, digits, dots, dashes or underscores")
     release = _os_release(root)
+    like = {release.get("ID", "").lower(), *release.get("ID_LIKE", "").lower().split()}
     rpmdb = next((root / p for p in _RPMDBS if (root / p).is_file()), None)
     dpkg = root / "var/lib/dpkg/status"
-    if rpmdb is not None:
-        family, packages = "rpm", _rpm_packages(rpmdb)
-    elif dpkg.is_file():
-        family, packages = "deb", _deb_packages(dpkg)
-    else:
-        raise ConfigError(f"no RPM database or dpkg status under {root}")
+    try:
+        if package_list is not None:
+            family = "deb" if like & _DEB_FAMILY else "rpm"
+            packages = _listed_packages(package_list, family)
+        elif rpmdb is not None:
+            family, packages = "rpm", _rpm_packages(rpmdb)
+        elif dpkg.is_file():
+            family, packages = "deb", _deb_packages(dpkg)
+        elif (root / "var/lib/rpm/Packages").is_file():
+            raise ConfigError(
+                "this host keeps its RPM database in the older Berkeley DB format, which airlock "
+                f"does not read: run {RPM_LISTING} > packages.txt on it and pass "
+                "--package-list packages.txt"
+            )
+        else:
+            raise ConfigError(f"no RPM database or dpkg status under {root}")
+    except OSError as exc:
+        raise ConfigError(f"could not read the package data: {exc}") from exc
     os = OsIdentity(
         family, release.get("ID", ""), release.get("VERSION_ID", ""), release.get("PRETTY_NAME", "")
     )
@@ -158,7 +206,10 @@ def from_windows(hotfixes: Path, product: str, build: str, label: str, now: date
     """A Windows host from ``Get-HotFix | Select-Object HotFixID | ConvertTo-Json``."""
     if not _LABEL.match(label):
         raise ConfigError("the label must be 1-64 letters, digits, dots, dashes or underscores")
-    data: Any = json.loads(hotfixes.read_text(encoding="utf-8-sig"))
+    try:
+        data: Any = json.loads(hotfixes.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise ConfigError(f"{hotfixes.name} is not the JSON Get-HotFix produces: {exc}") from exc
     entries = data if isinstance(data, list) else [data]
     kbs = sorted(
         {
@@ -172,8 +223,6 @@ def from_windows(hotfixes: Path, product: str, build: str, label: str, now: date
 
 
 def sign(inventory: Inventory, signer: Signer) -> bytes:
-    from airlock import bundle as layout
-
     envelope = sign_envelope(PAYLOAD_TYPE, layout.encode(inventory), signer)
     return layout.encode(envelope.to_data())
 
@@ -192,7 +241,3 @@ def load(path: Path, keys: list[VerifyKey] | None = None) -> tuple[Inventory, li
             raise ConfigError(f"{path.name}: the inventory signature does not verify")
         document = json.loads(envelope.payload)
     return from_data(Inventory, document), signers
-
-
-def encode(inventory: Inventory) -> object:
-    return to_data(inventory)

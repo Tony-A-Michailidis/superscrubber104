@@ -153,6 +153,7 @@ class RPMSpec:
     epoch: int | None = None
     postin: str | None = "/sbin/ldconfig"
     payload: bytes = b"compressed payload stands in here"
+    payload_digest: bool = True  # False: as packages built before rpm 4.14 were
 
     def main(self) -> dict[int, tuple[int, object]]:
         entries: dict[int, tuple[int, object]] = {
@@ -166,9 +167,10 @@ class RPMSpec:
             1044: (_STRING, f"{self.name}-{self.version}-{self.release}.src.rpm"),
             1047: (_STRING_ARRAY, [self.name]),
             1049: (_STRING_ARRAY, ["libc.so.6()(64bit)"]),
-            5092: (_STRING_ARRAY, [hashlib.sha256(self.payload).hexdigest()]),
-            5093: (_INT32, [8]),
         }
+        if self.payload_digest:
+            entries[5092] = (_STRING_ARRAY, [hashlib.sha256(self.payload).hexdigest()])
+            entries[5093] = (_INT32, [8])
         if self.epoch is not None:
             entries[1003] = (_INT32, [self.epoch])
         if self.postin:
@@ -177,14 +179,26 @@ class RPMSpec:
 
 
 def rpm_bytes(
-    spec: RPMSpec | None = None, key: PGPKey | None = None, *, payload: bytes | None = None
+    spec: RPMSpec | None = None,
+    key: PGPKey | None = None,
+    *,
+    payload: bytes | None = None,
+    header_tag: int | None = 268,
+    package_signature: bool = False,
 ) -> bytes:
-    """A complete .rpm. ``payload`` replaces the payload after the header is written (tampering)."""
+    """A complete .rpm. ``payload`` replaces the payload after the header is written (tampering).
+
+    ``header_tag`` is where the header signature goes: 268 (RSA), 267 (DSA, ECDSA, EdDSA) or
+    None for no header signature. ``package_signature`` adds the older signature over header and
+    payload together (tag 1002).
+    """
     spec = spec or RPMSpec()
     main = rpm_header(spec.main())
     signature: dict[int, tuple[int, object]] = {273: (_STRING, hashlib.sha256(main).hexdigest())}
-    if key is not None:
-        signature[268] = (_BIN, key.sign(main))
+    if key is not None and header_tag is not None:
+        signature[header_tag] = (_BIN, key.sign(main))
+    if key is not None and package_signature:
+        signature[1002] = (_BIN, key.sign(main + spec.payload))
     sig_header = rpm_header(signature)
     sig_header += b"\x00" * (-len(sig_header) % 8)
     lead = b"\xed\xab\xee\xdb\x03\x00\x00\x00" + b"\x00" * 88

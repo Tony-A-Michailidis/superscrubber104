@@ -303,3 +303,98 @@ def test_qemu_img_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config
         f"virtual size: airlock read {64 * MIB}, qemu-img {32 * MIB}",
         "leaks: 3",
     ]
+
+
+def _signer(tmp_path: Path, scope: str) -> tuple[rsa.RSAPrivateKey, bytes, str]:
+    """A signing key, its self-signed certificate (PEM) and a policy that pins it for ``scope``."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "appliance signer")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(2)
+        .not_valid_before(NOW - timedelta(days=1))
+        .not_valid_after(NOW + timedelta(days=365))
+        .sign(key, hashes.SHA256())
+    )
+    pem = cert.public_bytes(serialization.Encoding.PEM)
+    path = tmp_path / "keys" / "signer.pem"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(pem)
+    policy = (
+        "trust:\n  upstream:\n    - name: appliance-vendor\n      type: x509\n"
+        f'      file: {path.as_posix()}\n      sha256: "{hashlib.sha256(pem).hexdigest()}"\n'
+        f"      scope: [{scope}]\n"
+    )
+    return key, pem, policy
+
+
+def _signed_ova(key: rsa.RSAPrivateKey, pem: bytes, *, tamper: bool = False) -> bytes:
+    disk = vmdk_sparse(name="a-disk1.vmdk")
+    descriptor = ovf({"a-disk1.vmdk": len(disk)})
+    manifest = (
+        f"SHA256(a.ovf)= {hashlib.sha256(descriptor).hexdigest()}\n"
+        f"SHA256(a-disk1.vmdk)= {hashlib.sha256(disk).hexdigest()}\n"
+    ).encode()
+    signature = key.sign(manifest, padding.PKCS1v15(), hashes.SHA256()).hex()
+    certificate = f"SHA256(a.mf)= {signature}\n".encode() + pem
+    if tamper:  # a manifest rewritten after signing, consistent with a swapped descriptor
+        descriptor = descriptor.replace(b"Ubuntu", b"Debian")
+        manifest = manifest.replace(
+            manifest.split(b"\n")[0],
+            f"SHA256(a.ovf)= {hashlib.sha256(descriptor).hexdigest()}".encode(),
+        )
+    return tar(
+        {"./a.ovf": descriptor, "a.mf": manifest, "a.cert": certificate, "a-disk1.vmdk": disk}
+    )
+
+
+def test_signed_ova(tmp_path: Path) -> None:
+    key, pem, policy = _signer(tmp_path, "vm.ova")
+    files: dict[str, bytes | str] = {
+        "good.ova": _signed_ova(key, pem),
+        "rewritten.ova": _signed_ova(key, pem, tamper=True),
+    }
+    result = inspect(write(tmp_path / "d", files), policy_yaml=policy)
+    [check] = artifact(result, "good.ova!/a-disk1.vmdk").verifications
+    assert (check.type, check.level, check.anchor) == (
+        "ovf-certificate",
+        TrustLevel.SIGNATURE,
+        "appliance-vendor",
+    )
+    # member names with a leading "./" are the same files the manifest lists
+    assert artifact(result, "good.ova!/a.ovf").verifications[0].level is TrustLevel.SIGNATURE
+    meta = artifact(result, "good.ova").metadata["vmAppliance"]
+    assert (meta["signatureVerified"], meta["unlisted"]) == (True, [])
+    # The signer's own certificate is pinned and its signature no longer holds: final.
+    assert list(_failing(result, "upstream.signature.invalid")) == ["rewritten.ova#certificate"]
+    assert (
+        artifact(result, "rewritten.ova!/a-disk1.vmdk").verifications[0].level
+        is TrustLevel.CHECKSUM
+    )
+    # Nobody pinned the signer: the certificate inside the file proves nothing by itself.
+    unpinned = inspect(write(tmp_path / "e", {"good.ova": files["good.ova"]}))
+    assert list(_failing(unpinned, "upstream.signature.untrusted")) == ["good.ova#certificate"]
+    assert (
+        artifact(unpinned, "good.ova!/a-disk1.vmdk").verifications[0].level is TrustLevel.CHECKSUM
+    )
+
+
+def test_ova_descriptor_problems(tmp_path: Path) -> None:
+    disk = vmdk_sparse(name="d.vmdk")
+    files: dict[str, bytes | str] = {
+        "broken.ova": tar({"a.ovf": b"<Envelope><References>", "d.vmdk": disk}),
+        "plain.ova": tar({"a.ovf": ovf({"d.vmdk": len(disk)}), "d.vmdk": disk}),
+    }
+    result = inspect(write(tmp_path / "d", files))
+    gaps = {
+        f.subject.display: f.not_assessed_reason or ""
+        for f in result.assessment.findings
+        if f.rule == "vm.image.incomplete" and f.result is Result.NOT_ASSESSED
+    }
+    assert "does not parse" in gaps["broken.ova"]
+    # One unit for the appliance and one for its disk: the descriptor inside is not a third.
+    roots = sorted(u.root.display for u in result.analysis.units if u.kind.value == "vm-image")
+    assert roots == ["broken.ova", "broken.ova!/d.vmdk", "plain.ova", "plain.ova!/d.vmdk"]

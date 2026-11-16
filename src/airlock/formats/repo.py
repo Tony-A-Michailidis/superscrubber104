@@ -19,6 +19,7 @@ from html.parser import HTMLParser
 from typing import IO, Any, BinaryIO
 from urllib.parse import unquote, urlsplit
 
+from airlock.archive import capped
 from airlock.formats.deb import parse_fields
 
 _REPO_NS = "{http://linux.duke.edu/metadata/repo}"
@@ -48,8 +49,17 @@ def _algorithm(name: str | None) -> str | None:
     return _ALGORITHMS.get((name or "").lower().replace("-", ""))
 
 
-def open_compressed(name: str, stream: BinaryIO) -> IO[bytes]:
-    """A decompressing stream chosen by file name: gz, xz, bz2, zst (Python 3.14+) or plain."""
+# AlmaLinux AppStream's primary.xml is about 400 MiB expanded; nothing legitimate is near this.
+INDEX_LIMIT = 8 << 30
+
+
+def open_compressed(name: str, stream: BinaryIO, limit: int = INDEX_LIMIT) -> IO[bytes]:
+    """A decompressing stream chosen by file name (gz, xz, bz2, zst on Python 3.14+, or plain),
+    refusing to expand beyond ``limit`` bytes."""
+    return capped(_decompressing(name, stream), limit)
+
+
+def _decompressing(name: str, stream: BinaryIO) -> IO[bytes]:
     if name.endswith(".gz"):
         return gzip.GzipFile(fileobj=stream)  # type: ignore[return-value]
     if name.endswith(".xz"):

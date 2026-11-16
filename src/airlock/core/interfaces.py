@@ -1,8 +1,12 @@
-"""Extension interfaces: handlers, unit assemblers, bundle checks, plugins and stagers.
+"""Extension interfaces: handlers and unit assemblers.
 
 Handlers see artifacts only through ``ArtifactView``: read-only bytes, no filesystem paths, so a
 handler cannot wander outside the artifact it was given, and archive members look the same as
 files on disk.
+
+The other extension points live with what they extend: external scanners implement
+``airlock.scanners.base.Scanner``; checks that need the whole delivery are functions called from
+``airlock.analysis.finish``; staging targets are functions in ``airlock.stage``.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -10,15 +14,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import BinaryIO, Protocol, runtime_checkable
 
-from airlock.core.canonical import JSON
 from airlock.core.model import (
-    Analysis,
-    Artifact,
     ArtifactRef,
     Component,
     Finding,
-    Manifest,
-    PluginStatus,
     Unit,
     UnitClaim,
     UnitKind,
@@ -47,12 +46,6 @@ class ArtifactView(Protocol):
         ...
 
 
-class Lookup(Protocol):
-    """Read access to any artifact of the delivery, for unit assemblers and bundle checks."""
-
-    def __call__(self, ref: ArtifactRef) -> ArtifactView | None: ...
-
-
 @dataclass(frozen=True, slots=True)
 class Detection:
     kind: str  # e.g. "model.safetensors"
@@ -77,12 +70,11 @@ class Inspection:
 
 @dataclass(frozen=True, slots=True)
 class Context:
-    """What checks may use: policy, the evidence recorder, plugins and the current time."""
+    """What checks may use: policy, the evidence recorder and the current time."""
 
     policy: Policy
     recorder: Recorder
     now: datetime
-    plugins: Mapping[str, "Plugin"] = field(default_factory=dict)
     # Path globs whose documents will be fed to a model (knowledge-base corpora): from the
     # transfer request's ``unit: knowledge-base`` entries, or given on the command line.
     corpora: tuple[str, ...] = ()
@@ -133,60 +125,3 @@ class Assembly:
     unit: Unit
     components: tuple[Component, ...] = ()
     verifications: Mapping[ArtifactRef, tuple[Verification, ...]] = field(default_factory=dict)
-
-
-@runtime_checkable
-class BundleCheck(Protocol):
-    """A check that needs the whole picture: cross-unit requirements (an adapter's base model,
-    a knowledge base's embedding model), images referenced by manifests, transfer conformance."""
-
-    name: str
-
-    def check(
-        self, manifest: Manifest, analysis: Analysis, lookup: Lookup, ctx: Context
-    ) -> None: ...
-
-
-@runtime_checkable
-class Plugin(Protocol):
-    """Wrapper around an optional external tool (ClamAV, Syft, qemu-img, ...).
-
-    Concrete capabilities (malware scanning, SBOM generation, image inspection) are separate
-    protocols that a plugin also implements.
-    """
-
-    name: str
-
-    def status(self, ctx: Context) -> PluginStatus:
-        """Presence, version, binary hash and data age. Must not run the tool on content."""
-        ...
-
-
-class BundleView(Protocol):
-    """A bundle that has passed verification, as seen by stagers."""
-
-    manifest: Manifest
-    analysis: Analysis
-
-    def open(self, ref: ArtifactRef) -> BinaryIO: ...
-
-
-@dataclass(frozen=True, slots=True)
-class StageResult:
-    stager: str
-    staged: tuple[ArtifactRef, ...]
-    findings: tuple[Finding, ...] = ()
-    detail: Mapping[str, JSON] = field(default_factory=dict)
-
-
-@runtime_checkable
-class Stager(Protocol):
-    name: str
-
-    def accepts(self, item: Unit | Artifact) -> bool: ...
-
-    def stage(
-        self, bundle: BundleView, item: Unit | Artifact, target: Mapping[str, JSON]
-    ) -> StageResult:
-        """Place a verified unit or loose artifact into a receiving-side target."""
-        ...

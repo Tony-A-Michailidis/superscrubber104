@@ -29,8 +29,9 @@ from airlock import __version__
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import Subject, ToolRef, UnitClaim, UnitKind
 from airlock.core.yamlio import load_untrusted_yaml, load_untrusted_yaml_all
-from airlock.formats.golang import zip_hash
+from airlock.formats.golang import ZipHashError, zip_hash
 from airlock.handlers.common import TooLarge, full_path, mapping, name_of, read_json, read_text
+from airlock.handlers.offline import deployable
 from airlock.handlers.packages.locked import (
     component,
     distribution_claim,
@@ -40,6 +41,7 @@ from airlock.handlers.packages.locked import (
 
 TOOL = ToolRef("airlock.iac", __version__)
 _LIMIT = 16 << 20
+_PROVIDER_LIMIT = 4 << 30  # the largest providers expand to several hundred megabytes
 _K8S_API = re.compile(r"^apiVersion:\s*['\"]?(?P<api>[a-z0-9.-]+/)?v\d[a-z0-9]*['\"]?\s*$", re.M)
 _K8S_KIND = re.compile(r"^kind:\s*['\"]?[A-Z][A-Za-z0-9]+['\"]?\s*$", re.M)
 _COMPOSE = re.compile(r"^(docker-)?compose(\.[\w-]+)?\.ya?ml$")
@@ -79,7 +81,7 @@ def _kind(view: ArtifactView) -> str | None:
         return "terraform.config"
     if _TF_ZIP.match(name) or (_TF_BINARY.match(name) and path.count("/") >= 5):
         return "terraform.provider"
-    if view.ref.nested or view.size > _LIMIT:
+    if view.size > _LIMIT or not deployable(view.ref):
         return None
     if name == "Chart.yaml":
         return "helm.chart"
@@ -270,7 +272,7 @@ class IacHandler:
             if kind == "helm.chart":
                 return self._helm(artifact, text, ctx)
             return self._ansible(artifact, text, ctx)
-        except (yaml.YAMLError, TooLarge, ValueError) as exc:
+        except (yaml.YAMLError, TooLarge, ValueError, RecursionError) as exc:
             ctx.recorder.not_assessed(
                 ("iac.workload.privileged", "iac.dependency.unresolvable"),
                 Subject.of_artifact(artifact.ref),
@@ -509,8 +511,12 @@ class IacHandler:
         if match := _TF_ZIP.match(name):  # packed mirror: <host>/<namespace>/<type>/<file>.zip
             address = "/".join(parts[-4:-1]) if len(parts) >= 4 else match["type"]
             version = match["version"]
-            with view.open() as stream:
-                hashes = [f"sha256:{view.sha256}", zip_hash(stream)]
+            hashes = [f"sha256:{view.sha256}"] if view.sha256 else []
+            try:
+                with view.open() as stream:
+                    hashes.append(zip_hash(stream, _PROVIDER_LIMIT))
+            except ZipHashError:
+                pass  # still a provider by name and sha256 (zh:); h1: cannot be offered
         else:  # unpacked: <host>/<namespace>/<type>/<version>/<os_arch>/<binary>
             match = _TF_BINARY.match(name)
             assert match is not None  # noqa: S101 - detect() matched the name
@@ -545,6 +551,17 @@ def _documents(documents: list[object]) -> Iterator[dict[str, Any]]:
 def _dependencies(
     view: ArtifactView, ctx: Context, tool: str, missing: list[Any], total: int
 ) -> None:
+    if view.ref.nested:
+        # Inside an archive the files beside this one cannot be looked up.
+        if total:
+            ctx.recorder.not_assessed(
+                ("iac.dependency.unresolvable",),
+                Subject.of_artifact(view.ref),
+                tool=TOOL,
+                reason="inside an archive: whether its dependencies are vendored cannot be "
+                "checked; deliver it unpacked",
+            )
+        return
     if missing:
         ctx.recorder.fail(
             "iac.dependency.unresolvable",

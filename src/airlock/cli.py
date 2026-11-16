@@ -16,8 +16,8 @@ from airlock.approvals import approve as run_approve
 from airlock.bundle import encode
 from airlock.core.errors import AirlockError, ConfigError
 from airlock.core.model import Analysis, Stage, Verdict
-from airlock.core.policy import Policy, load_policy
-from airlock.core.serde import to_data
+from airlock.core.policy import KeyRole, Policy, load_policy
+from airlock.core.serde import from_data, to_data
 from airlock.core.signing import (
     SigningKey,
     generate_key,
@@ -27,6 +27,7 @@ from airlock.core.signing import (
 )
 from airlock.core.yamlio import parse_size
 from airlock.eval_run import run_eval, write_results
+from airlock.feeds.readers import load_feeds
 from airlock.ledger import Ledger
 from airlock.model_inspect import inspect_paths
 from airlock.model_summary import render_packages
@@ -37,6 +38,16 @@ from airlock.offline_report import (
     render_offline,
 )
 from airlock.pack import pack as run_pack
+from airlock.patch.inventory import Inventory
+from airlock.patch.inventory import collect as collect_inventory
+from airlock.patch.inventory import from_windows as inventory_from_windows
+from airlock.patch.inventory import load as load_inventory
+from airlock.patch.inventory import sign as sign_inventory
+from airlock.patch.plan import PatchPlan
+from airlock.patch.plan import confirm as confirm_patch_plan
+from airlock.patch.plan import markdown as patch_plan_markdown
+from airlock.patch.plan import plan as make_patch_plan
+from airlock.patch.stage import downgrade_check
 from airlock.report import FORMATS, load_source
 from airlock.report import render as render_report
 from airlock.scanners import run_scanners
@@ -49,8 +60,11 @@ from airlock.session import (
     exit_code,
     utc_now,
 )
-from airlock.stage import StageReport
+from airlock.stage import TARGETS as STAGE_TARGETS
+from airlock.stage import StageError
+from airlock.stage import stage as run_stage
 from airlock.summary import render
+from airlock.verify import Verified
 from airlock.verify import verify as run_verify
 from airlock.volumes import check_volume
 
@@ -588,7 +602,16 @@ def model_inspect(
 
 @main.group()
 def patch() -> None:
-    """Patch disconnected hosts: inventory (high side), plan (low side), confirm."""
+    """Patch disconnected hosts: inventory (high side), plan (low side), stage, confirm."""
+
+
+def _load_inventory(path: Path, policy: Policy) -> Inventory:
+    """An inventory, signed by a receipt key the policy pins (when it pins any)."""
+    keys = [s.load() for s in policy.signers_with_role(KeyRole.RECEIPT)]
+    inventory, signers = load_inventory(path, keys)
+    if keys and not signers:
+        raise ConfigError("the inventory is not signed by a receipt key the policy pins")
+    return inventory
 
 
 @patch.command("inventory")
@@ -598,51 +621,50 @@ def patch() -> None:
     help="Root filesystem of the Linux host to inventory (default /).",
 )
 @click.option("--label", required=True, help="Name for this host in the plan (never the hostname).")
+@click.option(
+    "--package-list",
+    type=_FILE,
+    help="A listing made on the host ('name version arch [source]' per line) instead of "
+    "reading its package database; needed for Berkeley DB RPM databases (EL8 and older).",
+)
 @click.option("--windows-hotfixes", type=_FILE, help="Get-HotFix output as JSON (Windows hosts).")
 @click.option("--windows-product", help='Windows product name, e.g. "Windows Server 2022".')
 @click.option("--windows-build", help="Windows OS build, e.g. 10.0.20348.2700.")
 @click.option("--key", type=_FILE, help="Private key that signs the inventory (the receipt key).")
-@click.option("--key-passphrase-env", help="Environment variable holding the key's passphrase.")
+@_PASSPHRASE
 @click.option("-o", "--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
 @_reports_errors
 def patch_inventory(
     root: Path | None,
     label: str,
+    package_list: Path | None,
     windows_hotfixes: Path | None,
     windows_product: str | None,
     windows_build: str | None,
     key: Path | None,
-    key_passphrase_env: str | None,
+    passphrase_env: str | None,
     out: Path,
 ) -> None:
     """Record what is installed, to carry to the low side. Holds names and versions only."""
-    from airlock.patch.inventory import collect, from_windows, sign
-    from airlock.patch.inventory import encode as encode_inventory
-    from airlock.session import utc_now
-
     now = utc_now()
     if windows_hotfixes is not None:
         if not windows_product or not windows_build:
             raise ConfigError("--windows-product and --windows-build go with --windows-hotfixes")
-        inventory = from_windows(windows_hotfixes, windows_product, windows_build, label, now)
+        inventory = inventory_from_windows(
+            windows_hotfixes, windows_product, windows_build, label, now
+        )
     else:
-        inventory = collect(root or Path("/"), label, now)
-    signer = _key(key, key_passphrase_env)
-    data = sign(inventory, signer) if signer else encode(encode_inventory(inventory))
-    out.write_bytes(data)
+        inventory = collect_inventory(root or Path("/"), label, now, package_list)
+    signer = _key(key, passphrase_env)
+    out.write_bytes(sign_inventory(inventory, signer) if signer else encode(inventory))
+    what = "updates" if inventory.os.family == "windows" else "packages"
     click.echo(
-        f"{len(inventory.packages)} "
-        f"{'updates' if inventory.os.family == 'windows' else 'packages'} "
-        f"on {inventory.os.id} {inventory.os.version_id}"
+        f"{len(inventory.packages)} {what} on {inventory.os.id} {inventory.os.version_id}"
         f"{', signed' if signer else ', unsigned'} -> {out}"
     )
 
 
-@patch.command("plan")
-@click.option(
-    "--inventory", "inventory_path", required=True, type=_FILE, help="The host's inventory."
-)
-@click.option(
+_FEED = click.option(
     "--feed",
     "feeds",
     multiple=True,
@@ -650,10 +672,13 @@ def patch_inventory(
     type=click.Path(exists=True, path_type=Path),
     help="Feed snapshot: OSV file/dir/zip, updateinfo.xml, MSRC CVRF JSON, KEV JSON (repeatable).",
 )
+
+
+@patch.command("plan")
+@click.option("--inventory", "inventory_path", required=True, type=_FILE, help="The inventory.")
+@_FEED
 @click.option("--policy", type=_FILE, help="Policy: pinned inventory keys and freshness.feeds.")
-@click.option(
-    "--cve", "cves", multiple=True, help="Emergency plan: only advisories fixing this CVE."
-)
+@click.option("--cve", "cves", multiple=True, help="Emergency plan: only advisories for this CVE.")
 @click.option("--kev", "kev_only", is_flag=True, help="Emergency plan: only KEV-listed CVEs.")
 @click.option("-o", "--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
 @click.option("--markdown", "markdown_out", type=click.Path(dir_okay=False, path_type=Path))
@@ -667,20 +692,13 @@ def patch_plan(
     out: Path,
     markdown_out: Path | None,
 ) -> None:
-    """Match an inventory against offline feed snapshots. Exit 3 if a feed is stale."""
-    from airlock.core.policy import KeyRole
-    from airlock.feeds.readers import load_feeds
-    from airlock.patch.inventory import load as load_inventory
-    from airlock.patch.plan import markdown, plan
-    from airlock.session import utc_now
+    """Match an inventory against offline feed snapshots.
 
+    Exit 1 if a feed is stale or unreadable: the plan is written, but it may miss advisories.
+    """
     loaded = _policy(policy)
-    keys = [s.load() for s in loaded.signers_with_role(KeyRole.RECEIPT)]
-    inventory, signers = load_inventory(inventory_path, keys)
-    if keys and not signers:
-        raise ConfigError("the inventory is not signed by a receipt key the policy pins")
-    result = plan(
-        inventory,
+    result = make_patch_plan(
+        _load_inventory(inventory_path, loaded),
         load_feeds(feeds),
         utc_now(),
         max_age=loaded.feed_max_age,
@@ -689,44 +707,34 @@ def patch_plan(
     )
     out.write_bytes(encode(result))
     if markdown_out is not None:
-        markdown_out.write_text(markdown(result), encoding="utf-8")
+        markdown_out.write_text(patch_plan_markdown(result), encoding="utf-8")
     click.echo(
         f"{len(result.gaps)} advisories, {sum(g.kev for g in result.gaps)} on KEV, "
         f"{len(result.fetch)} packages to fetch -> {out}"
     )
     if result.stale_feeds:
         click.echo(f"stale or unreadable feeds: {', '.join(result.stale_feeds)}", err=True)
-        sys.exit(3)
+        sys.exit(EXIT_BLOCKED)
 
 
 @patch.command("confirm")
 @click.option("--plan", "plan_path", required=True, type=_FILE, help="The earlier plan.")
-@click.option("--inventory", "inventory_path", required=True, type=_FILE, help="A fresh inventory.")
-@click.option(
-    "--feed", "feeds", multiple=True, required=True, type=click.Path(exists=True, path_type=Path)
-)
+@click.option("--inventory", "inventory_path", required=True, type=_FILE, help="A new inventory.")
+@_FEED
 @click.option("--policy", type=_FILE, help="Policy: pinned inventory keys.")
 @_reports_errors
 def patch_confirm(
     plan_path: Path, inventory_path: Path, feeds: tuple[Path, ...], policy: Path | None
 ) -> None:
-    """Show which gaps of a plan are closed. Exit 2 while any remain open."""
-    from airlock.core.policy import KeyRole
-    from airlock.core.serde import from_data
-    from airlock.feeds.readers import load_feeds
-    from airlock.patch.inventory import load as load_inventory
-    from airlock.patch.plan import PatchPlan, confirm
-    from airlock.session import utc_now
-
-    loaded = _policy(policy)
-    keys = [s.load() for s in loaded.signers_with_role(KeyRole.RECEIPT)]
-    inventory, signers = load_inventory(inventory_path, keys)
-    if keys and not signers:
-        raise ConfigError("the inventory is not signed by a receipt key the policy pins")
-    previous = from_data(PatchPlan, json.loads(plan_path.read_bytes()))
-    outcome = confirm(previous, inventory, load_feeds(feeds), utc_now())
+    """Show which gaps of a plan are closed. Exit 1 while any remain open."""
+    inventory = _load_inventory(inventory_path, _policy(policy))
+    try:
+        previous = from_data(PatchPlan, json.loads(plan_path.read_bytes()))
+    except ValueError as exc:
+        raise ConfigError(f"{plan_path.name} is not a patch plan: {exc}") from exc
+    outcome = confirm_patch_plan(previous, inventory, load_feeds(feeds), utc_now())
     click.echo(json.dumps(outcome, indent=2))
-    sys.exit(2 if outcome["open"] else 0)
+    sys.exit(EXIT_BLOCKED if outcome["open"] else EXIT_OK)
 
 
 def _targets(values: tuple[str, ...]) -> dict[str, Path]:
@@ -752,10 +760,10 @@ _STAGE_OPTIONS = [
         "target_values",
         multiple=True,
         required=True,
-        help="KIND=DIRECTORY, KIND one of files, models, pypi, npm, dnf, apt, oci, windows.",
+        help=f"KIND=DIRECTORY (repeatable), KIND one of {', '.join(STAGE_TARGETS)}.",
     ),
     click.option("--key", type=_FILE, help="Private key that signs the ledger's stage event."),
-    click.option("--key-passphrase-env", help="Environment variable holding the key's passphrase."),
+    _PASSPHRASE,
     click.option(
         "--volume",
         "volume_dirs",
@@ -779,14 +787,43 @@ def _stage_options(function: Callable[..., None]) -> Callable[..., None]:
     return function
 
 
-def _print_stage(report: "StageReport") -> None:
-    for target in report.targets:
+def _stage(
+    bundle: Path,
+    policy: Path,
+    state: Path,
+    target_values: tuple[str, ...],
+    key: Path | None,
+    passphrase_env: str | None,
+    volume_dirs: tuple[Path, ...],
+    bases: tuple[Path, ...],
+    check: Callable[[Verified], str | None] | None = None,
+) -> None:
+    """Stage and report. A refusal to stage exits 3; bad arguments exit 2."""
+    try:
+        staged = run_stage(
+            bundle,
+            policy=load_policy(policy),
+            state=state,
+            targets=_targets(target_values),
+            now=utc_now(),
+            signer=_key(key, passphrase_env),
+            volume_dirs=volume_dirs,
+            bases=bases,
+            check=check,
+        )
+    except StageError as exc:
+        click.echo(f"refused: {exc}", err=True)
+        sys.exit(EXIT_REFUSED)
+    click.echo(f"report: {staged.path}")
+    for target in staged.report.targets:
         click.echo(
             f"{target.kind}: {target.copied} copied, {target.present} already present "
             f"-> {target.destination}"
         )
         for note in target.notes:
             click.echo(f"  next: {note}")
+    if staged.report.downgrades_allowed:
+        click.echo(f"downgrades staged: {staged.report.downgrades_allowed}")
 
 
 @main.command("stage")
@@ -799,25 +836,16 @@ def stage_command(
     state: Path,
     target_values: tuple[str, ...],
     key: Path | None,
-    key_passphrase_env: str | None,
+    passphrase_env: str | None,
     volume_dirs: tuple[Path, ...],
     bases: tuple[Path, ...],
 ) -> None:
-    """Copy an accepted bundle's content into local repositories, re-hashing each file."""
-    from airlock.session import utc_now
-    from airlock.stage import stage
+    """Copy an accepted bundle's content into local repositories, re-hashing each file.
 
-    report = stage(
-        bundle,
-        policy=load_policy(policy),
-        state=state,
-        targets=_targets(target_values),
-        now=utc_now(),
-        signer=_key(key, key_passphrase_env),
-        volume_dirs=volume_dirs,
-        bases=bases,
-    )
-    _print_stage(report)
+    Exit 3 when staging is refused (the bundle was not accepted here, no longer passes, or a
+    file changed after it was verified).
+    """
+    _stage(bundle, policy, state, target_values, key, passphrase_env, volume_dirs, bases)
 
 
 @patch.command("stage")
@@ -838,28 +866,11 @@ def patch_stage(
     state: Path,
     target_values: tuple[str, ...],
     key: Path | None,
-    key_passphrase_env: str | None,
+    passphrase_env: str | None,
     volume_dirs: tuple[Path, ...],
     bases: tuple[Path, ...],
 ) -> None:
     """Stage patches, refusing any package older than the one installed."""
-    from airlock.patch.inventory import load as load_inventory
-    from airlock.patch.stage import downgrade_check
-    from airlock.session import utc_now
-    from airlock.stage import stage
-
-    inventory, _ = load_inventory(inventory_path)
-    report = stage(
-        bundle,
-        policy=load_policy(policy),
-        state=state,
-        targets=_targets(target_values),
-        now=utc_now(),
-        signer=_key(key, key_passphrase_env),
-        volume_dirs=volume_dirs,
-        bases=bases,
-        check=downgrade_check(inventory, justification),
-    )
-    _print_stage(report)
-    if report.downgrades_allowed:
-        click.echo(f"downgrades staged: {report.downgrades_allowed}")
+    inventory = _load_inventory(inventory_path, load_policy(policy))
+    check = downgrade_check(inventory, justification)
+    _stage(bundle, policy, state, target_values, key, passphrase_env, volume_dirs, bases, check)

@@ -20,7 +20,7 @@ from airlock.core.model import (
     UnitKind,
     Verification,
 )
-from airlock.handlers.common import full_path, make_claim, name_of
+from airlock.handlers.common import full_path, make_claim
 
 _HEX = re.compile(r"^[0-9a-fA-F]+$")
 
@@ -79,7 +79,7 @@ def component(view: ArtifactView, name: str, version: str, purl: str, **extra: o
 def digest_hex(view: ArtifactView, algorithm: str) -> str:
     if algorithm == "sha256" and view.sha256:
         return view.sha256
-    digest = hashlib.new(algorithm)
+    digest = hashlib.new(algorithm, usedforsecurity=False)  # sha1 here only names a file
     with view.open() as stream:
         while block := stream.read(1 << 20):
             digest.update(block)
@@ -124,17 +124,6 @@ def check_sidecar(
         return None
     ctx.recorder.passed("package.checksum-mismatch")
     return Verification(verification_type, TrustLevel.CHECKSUM, Result.PASS, anchor=source)
-
-
-def sidecar(view: ArtifactView, suffixes: Sequence[tuple[str, str]]) -> tuple[str, str, str] | None:
-    """(algorithm, recorded text, sidecar name) for the strongest sidecar checksum present."""
-    for suffix, algorithm in suffixes:
-        other = view.resolve(name_of(view.ref) + suffix)
-        if other is not None and other.size < 4096:
-            with other.open() as stream:
-                text = stream.read(4096).decode("ascii", "replace")
-            return algorithm, text, name_of(other.ref)
-    return None
 
 
 def build_hooks(view: ArtifactView, ctx: Context, tool: ToolRef, hooks: Sequence[str]) -> None:

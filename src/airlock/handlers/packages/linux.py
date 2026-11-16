@@ -11,6 +11,7 @@
   read from memory, read-only, for the SBOM and vulnerability matching.
 """
 
+import itertools
 import re
 import sqlite3
 from urllib.parse import quote
@@ -28,7 +29,7 @@ from airlock.core.model import (
 )
 from airlock.formats import openpgp
 from airlock.formats.deb import DebError, read_deb
-from airlock.formats.rpm import RPMError, identity, read_header_blob, read_package
+from airlock.formats.rpm import Package, RPMError, identity, read_header_blob, read_package
 from airlock.handlers.common import TooLarge, full_path, name_of, read_bytes
 from airlock.trust import signature_verification, verify_gpg
 
@@ -56,56 +57,116 @@ def deb_purl(name: str, version: str, arch: str, vendor: str = "debian") -> str:
     )
 
 
+_RPM_RULES = (
+    "package.digest-mismatch",
+    "package.signature.invalid",
+    "package.signature.untrusted",
+    "package.signature.missing",
+)
+
+
+def _rpm_signature(
+    view: ArtifactView, package: Package, ctx: Context
+) -> tuple[openpgp.Result | None, str | None, bool]:
+    """(result, anchor, whether the verified signature covers the payload too).
+
+    A header signature covers the payload only through the payload digest the header records,
+    and only if that digest was checked. Signatures over header and payload together (older
+    packages) are verified over both. ``None``: the package is not signed at all.
+    """
+    if not package.header_signatures and not package.package_signatures:
+        return None, None, False
+    best: tuple[openpgp.Result, str | None, bool] = (
+        openpgp.Result(False, reason="no readable signature"),
+        None,
+        False,
+    )
+
+    def consider(result: openpgp.Result, anchor: str | None, whole: bool) -> bool:
+        nonlocal best
+        better = (result.valid, whole, result.key is not None) > (
+            best[0].valid,
+            best[2],
+            best[0].key is not None,
+        )
+        if better:
+            best = (result, anchor, whole)
+        return result.valid and whole
+
+    for blob, whole in (
+        *((b, package.payload_checked) for b in package.header_signatures),
+        *((b, True) for b in package.package_signatures),
+    ):
+        try:
+            signatures = openpgp.load_signatures(blob)
+        except openpgp.OpenPGPError as exc:
+            consider(openpgp.Result(False, reason=f"unreadable signature: {exc}"), None, False)
+            continue
+        for signature in signatures:
+            if blob in package.header_signatures:
+                result, anchor = verify_gpg(ctx, "package.rpm", signature, [package.header])
+            else:
+                with view.open() as stream:
+                    stream.seek(package.payload_offset)
+                    payload = iter(lambda s=stream: s.read(1 << 20), b"")  # type: ignore[misc]
+                    chunks = itertools.chain([package.header], payload)
+                    result, anchor = verify_gpg(ctx, "package.rpm", signature, chunks)
+            if consider(result, anchor, whole):
+                return best
+    return best
+
+
 def _rpm(view: ArtifactView, ctx: Context) -> Inspection:
     subject = Subject.of_artifact(view.ref)
     try:
         with view.open() as stream:
             package = read_package(stream)
     except (RPMError, OSError, ValueError, IndexError) as exc:
-        ctx.recorder.fail(
-            "package.digest-mismatch", subject, tool=TOOL, detail={"problem": f"unreadable: {exc}"}
+        # Unreadable is not the same as altered: nothing could be checked, and that is said.
+        ctx.recorder.not_assessed(
+            _RPM_RULES, subject, tool=TOOL, reason=f"the package could not be read: {exc}"
         )
-        return Inspection(kind="package.rpm")
+        return Inspection(kind="package.rpm", metadata={"rpm": {"error": str(exc)[:300]}})
     if package.problems:
         ctx.recorder.fail(
             "package.digest-mismatch", subject, tool=TOOL, detail={"problems": package.problems}
         )
-    else:
+    elif package.header_sha256 or package.payload_checked:
         ctx.recorder.passed("package.digest-mismatch")
     verifications: dict[ArtifactRef, tuple[Verification, ...]] = {}
-    signer = None
-    if package.signature is None:
+    result, anchor, whole = _rpm_signature(view, package, ctx)
+    signer = result.signature.issuer if result and result.signature else None
+    if result is None:
         ctx.recorder.fail("package.signature.missing", subject, tool=TOOL, detail={"format": "rpm"})
     else:
         ctx.recorder.passed("package.signature.missing")
-        try:
-            signature = openpgp.load_signatures(package.signature)[0]
-        except (openpgp.OpenPGPError, IndexError, ValueError) as exc:
-            signature = None
-            ctx.recorder.fail(
-                "package.signature.invalid", subject, tool=TOOL, detail={"reason": str(exc)}
-            )
-        if signature is not None:
-            result, anchor = verify_gpg(ctx, "package.rpm", signature, [package.header])
-            signer = signature.issuer
-            if result.valid:
+        if result.valid:
+            ctx.recorder.passed("package.signature.invalid")
+            ctx.recorder.passed("package.signature.untrusted")
+            if whole and not package.problems:
                 verifications[view.ref] = (signature_verification(result, anchor),)
-                ctx.recorder.passed("package.signature.invalid")
-                ctx.recorder.passed("package.signature.untrusted")
-            elif result.key is not None:
-                ctx.recorder.fail(
-                    "package.signature.invalid",
+            elif not whole:
+                ctx.recorder.not_assessed(
+                    ("package.digest-mismatch",),
                     subject,
                     tool=TOOL,
-                    detail={"reason": result.reason, "key": result.key.fingerprint},
+                    reason="the header is signed, but it records no payload digest that could be "
+                    "checked: the signature does not cover the payload",
                 )
-            else:
-                ctx.recorder.fail(
-                    "package.signature.untrusted",
-                    subject,
-                    tool=TOOL,
-                    detail={"reason": result.reason, "issuer": signature.issuer},
-                )
+        elif result.key is not None:
+            ctx.recorder.fail(
+                "package.signature.invalid",
+                subject,
+                tool=TOOL,
+                detail={"reason": result.reason, "key": result.key.fingerprint},
+            )
+        else:
+            ctx.recorder.fail(
+                "package.signature.untrusted",
+                subject,
+                tool=TOOL,
+                detail={"reason": result.reason, "issuer": signer},
+            )
     if package.scriptlets:
         ctx.recorder.fail(
             "package.maintainer-scripts", subject, tool=TOOL, detail={"scripts": package.scriptlets}
@@ -130,6 +191,7 @@ def _rpm(view: ArtifactView, ctx: Context) -> Inspection:
         "sourceRpm": package.source_rpm,
         "scriptlets": package.scriptlets,
         "signedBy": signer,
+        "signatureCoversPayload": whole if result is not None else None,
     }
     return Inspection(
         kind="package.rpm",
@@ -214,14 +276,19 @@ def _rpmdb(view: ArtifactView, ctx: Context) -> Inspection:
             con.close()
     except (TooLarge, sqlite3.DatabaseError, OSError) as exc:
         ctx.recorder.not_assessed(
-            ("package.digest-mismatch",), subject, tool=TOOL, reason=f"RPM database not read: {exc}"
+            ("inventory.artifact.unclassified",),
+            subject,
+            tool=TOOL,
+            reason=f"the RPM database could not be read; its packages are not in the SBOM: {exc}",
         )
         return Inspection(kind="os.rpmdb", metadata={"osPackages": {"parsed": False}})
     components = []
+    unreadable = 0
     for (blob,) in rows:
         try:
             tags = read_header_blob(bytes(blob))
         except (RPMError, ValueError, IndexError):
+            unreadable += 1
             continue
         name, vr, arch, epoch = identity(tags)
         if not name or name == "gpg-pubkey":
@@ -241,7 +308,7 @@ def _rpmdb(view: ArtifactView, ctx: Context) -> Inspection:
         )
     return Inspection(
         kind="os.rpmdb",
-        metadata={"osPackages": {"packages": len(components)}},
+        metadata={"osPackages": {"packages": len(components), "unreadable": unreadable}},
         components=tuple(components),
     )
 

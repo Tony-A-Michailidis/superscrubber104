@@ -400,7 +400,7 @@ def test_patch_cli(tmp_path: Path) -> None:
             str(policy_path),
         ],
     )
-    assert done.exit_code == 2 and '"open"' in done.output
+    assert done.exit_code == 1 and '"open"' in done.output  # gaps remain: not accepted
     unsigned = tmp_path / "unsigned.json"
     runner.invoke(
         main,
@@ -487,3 +487,101 @@ def test_authenticode_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         ("authenticode.signature.missing", "plain.msi"),
     }
     assert all("-CAfile" in c for c in tools.commands("osslsigncode")[1:])
+
+
+def test_inventory_from_a_package_listing(tmp_path: Path) -> None:
+    """AlmaLinux 8 and older keep the RPM database in Berkeley DB: the host lists its packages."""
+    root = write(
+        tmp_path / "el8",
+        {
+            "etc/os-release": 'ID="almalinux"\nID_LIKE="rhel centos fedora"\nVERSION_ID="8.10"\n',
+            "var/lib/rpm/Packages": b"\x00\x05\x31\x62 berkeley db",
+        },
+    )
+    with pytest.raises(ConfigError, match="rpm -qa --qf") as refused:
+        collect(root, "old-01", NOW)
+    assert "--package-list" in str(refused.value)
+    listing = tmp_path / "packages.txt"
+    listing.write_text(
+        "bash 0:4.4.20-5.el8 x86_64\nopenssl 1:1.1.1k-12.el8_9 x86_64\n"
+        "gpg-pubkey 0:c21ad6ea-5d7f8d5a (none)\n# a comment\n",
+        encoding="utf-8",
+    )
+    inventory = collect(root, "old-01", NOW, listing)
+    assert inventory.os.family == "rpm"
+    assert [(p.name, p.version) for p in inventory.packages] == [
+        ("bash", "4.4.20-5.el8"),
+        ("openssl", "1:1.1.1k-12.el8_9"),
+    ]
+    debian = write(tmp_path / "deb", {"etc/os-release": 'ID=ubuntu\nVERSION_ID="22.04"\n'})
+    listing.write_text(
+        "libssl3 3.0.2-0ubuntu1.15 amd64 openssl\nnano 6.2-1 amd64 nano\n", encoding="utf-8"
+    )
+    listed = collect(debian, "dev-03", NOW, listing)
+    assert [(p.name, p.source) for p in listed.packages] == [("libssl3", "openssl"), ("nano", None)]
+    listing.write_text("only-a-name\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="line 1"):
+        collect(debian, "dev-03", NOW, listing)
+
+
+def _osv(tmp_path: Path, name: str, affected: list[dict[str, object]]) -> Path:
+    record = {"id": name, "summary": "x", "modified": "2026-11-05T00:00:00Z", "affected": affected}
+    path = tmp_path / f"{name}.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    return path
+
+
+def _affected(ecosystem: str, package: str, fixed: str) -> dict[str, object]:
+    return {
+        "package": {"name": package, "ecosystem": ecosystem},
+        "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": fixed}]}],
+    }
+
+
+def test_plan_matches_rocky_and_prefers_the_standard_archive(tmp_path: Path) -> None:
+    rocky = Inventory(
+        "r-01",
+        NOW,
+        OsIdentity("rpm", "rocky", "9.4"),
+        (InstalledPackage("bash", "5.1.8-6.el9", "x86_64"),),
+    )
+    feed = load_feed(
+        _osv(tmp_path, "RLSA-2026:1", [_affected("Rocky Linux:9", "bash", "5.1.8-9.el9")])
+    )
+    assert [g.advisory for g in plan(rocky, [feed], NOW).gaps] == ["RLSA-2026:1"]
+    other = load_feed(_osv(tmp_path, "RLSA-2026:2", [_affected("Rocky Linux:8", "bash", "9-9")]))
+    assert plan(rocky, [other], NOW).gaps == ()
+
+    ubuntu = Inventory(
+        "u-01",
+        NOW,
+        OsIdentity("deb", "ubuntu", "22.04"),
+        (InstalledPackage("nano", "6.2-1", "amd64"), InstalledPackage("vim", "2:8.2-1", "amd64")),
+    )
+    usn = load_feed(
+        _osv(
+            tmp_path,
+            "USN-9100-1",
+            [
+                _affected("Ubuntu:Pro:22.04:LTS", "nano", "6.2-1ubuntu0.1+esm1"),
+                _affected("Ubuntu:22.04:LTS", "nano", "6.2-1ubuntu0.1"),
+                _affected("Ubuntu:Pro:22.04:LTS", "vim", "2:8.2-1ubuntu0.1+esm2"),
+            ],
+        )
+    )
+    [gap] = plan(ubuntu, [usn], NOW).gaps
+    by_name = {p.name: p for p in gap.packages}
+    assert (by_name["nano"].fixed, by_name["nano"].channel) == ("6.2-1ubuntu0.1", "")
+    assert by_name["vim"].channel == "ubuntu-pro"  # only published to Pro subscribers
+    assert "(Ubuntu Pro)" in markdown(plan(ubuntu, [usn], NOW))
+
+
+def test_unreadable_feed_is_stale_not_fatal(tmp_path: Path) -> None:
+    from airlock.feeds.readers import load_feeds
+
+    bad = tmp_path / "broken.xml.gz"
+    bad.write_bytes(b"\x1f\x8b not gzip at all")
+    paths = _feeds(tmp_path)
+    result = plan(_alma_inventory(), load_feeds([paths["updateinfo"], bad]), NOW)
+    assert result.stale_feeds == ["broken.xml.gz"]
+    assert len(result.gaps) == 2

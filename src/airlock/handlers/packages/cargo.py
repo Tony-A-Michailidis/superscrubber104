@@ -10,16 +10,24 @@
   (``package.checksum-mismatch``, final).
 """
 
+import gzip
 import re
 import tarfile
 import tomllib
-from typing import Any
+from typing import IO, Any, cast
 from urllib.parse import quote
 
 from airlock import __version__
+from airlock.archive import ARCHIVE_ERRORS, capped
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import Component, LicenseRef, Subject, ToolRef, UnitClaim, UnitKind
-from airlock.handlers.common import TooLarge, mapping, name_of, read_json, read_text
+from airlock.handlers.common import (
+    TooLarge,
+    mapping,
+    name_of,
+    read_json,
+    read_text,
+)
 from airlock.handlers.packages.locked import (
     build_hooks,
     component,
@@ -33,6 +41,7 @@ KIND = UnitKind.RUST_ENVIRONMENT
 _CRATE = re.compile(r"^(?P<name>[A-Za-z0-9_-]+)-(?P<version>\d+\.\d+\.\d+[0-9A-Za-z.+-]*)\.crate$")
 _V1_CHECKSUM = re.compile(r"^checksum (?P<name>\S+) (?P<version>\S+) \((?P<source>[^)]+)\)$")
 _MANIFEST_LIMIT = 4 << 20
+_CRATE_LIMIT = 512 << 20
 
 
 def cargo_purl(name: str, version: str) -> str:
@@ -119,7 +128,10 @@ class CargoHandler:
         manifest: dict[str, Any] = {}
         has_build_rs = False
         try:
-            with view.open() as raw, tarfile.open(fileobj=raw, mode="r|gz") as archive:
+            with view.open() as raw, gzip.GzipFile(fileobj=raw) as expanded:
+                # crates.io caps a crate at 10 MiB compressed; 512 MiB expanded is generous.
+                bounded = capped(cast(IO[bytes], expanded), _CRATE_LIMIT)
+                archive = tarfile.open(fileobj=bounded, mode="r|")  # noqa: SIM115 - closes with raw
                 for member in archive:
                     parts = member.name.split("/")
                     if len(parts) == 2 and parts[1] == "build.rs":
@@ -128,10 +140,14 @@ class CargoHandler:
                         handle = archive.extractfile(member)
                         if handle is not None and member.size <= _MANIFEST_LIMIT:
                             manifest = tomllib.loads(handle.read().decode("utf-8", "replace"))
-        except (tarfile.TarError, OSError, EOFError, tomllib.TOMLDecodeError) as exc:
-            return Inspection(
-                kind="cargo.crate", metadata={"crate": {"name": name, "error": str(exc)[:300]}}
+        except (*ARCHIVE_ERRORS, tomllib.TOMLDecodeError) as exc:
+            ctx.recorder.not_assessed(
+                ("package.build-hooks",),
+                Subject.of_artifact(view.ref),
+                tool=TOOL,
+                reason=f"the crate could not be read: {str(exc)[:200]}",
             )
+            manifest, has_build_rs = {}, False
         hooks = _hooks(manifest, has_build_rs)
         build_hooks(view, ctx, TOOL, hooks)
         package = mapping(manifest.get("package"))

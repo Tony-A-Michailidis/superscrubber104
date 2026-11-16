@@ -11,12 +11,12 @@
   global packages folder) is compared.
 """
 
-import re
 import xml.etree.ElementTree as ET
 import zipfile
 from urllib.parse import quote
 
 from airlock import __version__
+from airlock.archive import ARCHIVE_ERRORS
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import ArtifactRef, LicenseRef, ToolRef, UnitKind, Verification
 from airlock.handlers.common import TooLarge, mapping, name_of, read_json
@@ -40,7 +40,9 @@ _NUSPEC_LIMIT = 1 << 20
 def normalize_version(version: str) -> str:
     """NuGet's normalised form: no build metadata, no leading zeros, at least three parts, and a
     fourth part only when it is not zero."""
-    core, dash, prerelease = version.split("+", 1)[0].partition("-")
+    if not version.strip():
+        return ""
+    core, dash, prerelease = version.strip().split("+", 1)[0].partition("-")
     parts = [str(int(p)) if p.isdigit() else p for p in core.split(".")]
     while len(parts) < 3:
         parts.append("0")
@@ -56,6 +58,14 @@ def nuget_purl(name: str, version: str) -> str:
 def _text(root: ET.Element, tag: str) -> str | None:
     for element in root.iter():
         if element.tag.rsplit("}", 1)[-1] == tag:
+            return (element.text or "").strip() or None
+    return None
+
+
+def _licence(root: ET.Element) -> str | None:
+    """The SPDX expression, when the package declares one (``type="file"`` names a file)."""
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] == "license" and element.get("type") == "expression":
             return (element.text or "").strip() or None
     return None
 
@@ -121,7 +131,7 @@ class NuGetHandler:
                 root = None
                 if nuspec is not None and archive.getinfo(nuspec).file_size <= _NUSPEC_LIMIT:
                     root = ET.fromstring(archive.read(nuspec))  # noqa: S314 - see the import
-        except (zipfile.BadZipFile, OSError, ET.ParseError) as exc:
+        except (*ARCHIVE_ERRORS, ET.ParseError, KeyError) as exc:
             return Inspection(kind="nuget.package", metadata={"nupkg": {"error": str(exc)[:300]}})
         if root is None:
             return Inspection(kind="nuget.package", metadata={"nupkg": {"error": "no .nuspec"}})
@@ -145,16 +155,14 @@ class NuGetHandler:
             )
             if check is not None:
                 verifications[view.ref] = (check,)
-        licence = _text(root, "license")
+        licence = _licence(root)
         purl = nuget_purl(package_id, version)
         part = component(
             view,
             package_id,
             version,
             purl,
-            licenses=(LicenseRef(expression=licence),)
-            if licence and re.fullmatch(r"[\w.+ ()-]+", licence)
-            else (),
+            licenses=(LicenseRef(expression=licence),) if licence else (),
             supplier=_text(root, "authors"),
         )
         claim = distribution_claim(

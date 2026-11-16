@@ -88,9 +88,17 @@ class Authenticode:
             )
 
     def _record(self, target: Target, output: str, code: int, ready: Ready, ctx: Context) -> None:
+        """Classify osslsigncode's verdict.
+
+        Only a digest mismatch is final: there the tool says the content is not what was signed.
+        Any other failure (an unknown issuer, an expired certificate without a timestamp, a
+        revoked one) is a matter of whom the policy trusts. Output with no verdict at all is not
+        guessed at.
+        """
         subject = Subject.of_artifact(target.ref)
         text = output.lower()
         signer = match["subject"].strip() if (match := _SIGNER.search(output)) else None
+        detail = {"signer": signer, "output": _excerpt(output)}
         if "no signature found" in text or "failed to extract the signature" in text:
             ctx.recorder.fail(
                 "authenticode.signature.missing",
@@ -98,28 +106,27 @@ class Authenticode:
                 tool=ready.tool,
                 detail={"file": Path(target.ref.path).name},
             )
-            return
-        ctx.recorder.passed("authenticode.signature.missing")
-        if "mismatch" in text or (
-            "signature verification: failed" in text and "certificate" not in text
-        ):
+        elif "mismatch" in text:
+            ctx.recorder.passed("authenticode.signature.missing")
             ctx.recorder.fail(
-                "authenticode.signature.invalid",
-                subject,
-                tool=ready.tool,
-                detail={"signer": signer, "output": _excerpt(output)},
+                "authenticode.signature.invalid", subject, tool=ready.tool, detail=detail
             )
-            return
-        ctx.recorder.passed("authenticode.signature.invalid")
-        if code != 0 or "signature verification: ok" not in text:
+        elif code == 0 and "signature verification: ok" in text:
+            for rule in self.rules:
+                ctx.recorder.passed(rule)
+        elif "signature verification: failed" in text:
+            ctx.recorder.passed("authenticode.signature.missing")
             ctx.recorder.fail(
-                "authenticode.signature.untrusted",
-                subject,
-                tool=ready.tool,
-                detail={"signer": signer, "output": _excerpt(output)},
+                "authenticode.signature.untrusted", subject, tool=ready.tool, detail=detail
             )
         else:
-            ctx.recorder.passed("authenticode.signature.untrusted")
+            ctx.recorder.not_assessed(
+                self.rules,
+                subject,
+                tool=ready.tool,
+                reason=f"osslsigncode gave no verdict (exit {code}): "
+                + ("; ".join(_excerpt(output)[:3]) or "no output"),
+            )
 
 
 def _excerpt(output: str) -> list[str]:

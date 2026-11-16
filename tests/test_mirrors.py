@@ -334,3 +334,38 @@ def test_rollback_to_an_older_snapshot_is_caught(tmp_path: Path, site: Site) -> 
     assert rollback.detail["accepted"] == "2026-11-08T00:00:00Z"
     assert second.assessment.summary.verdict is not Verdict.PASSED
     assert [u for u in second.analysis.units if u.kind is UnitKind.REPO_MIRROR]
+
+
+def test_mirror_inside_an_archive_is_not_assessed(tmp_path: Path) -> None:
+    import io
+    import tarfile
+
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w") as archive:
+        for name, data in _dnf(None).items():
+            raw = data if isinstance(data, bytes) else data.encode()
+            info = tarfile.TarInfo(name)
+            info.size = len(raw)
+            archive.addfile(info, io.BytesIO(raw))
+    result = inspect(write(tmp_path / "d", {"mirror.tar": out.getvalue()}))
+    gaps = {
+        f.subject.display: f.not_assessed_reason or ""
+        for f in result.assessment.findings
+        if f.rule == "repo.metadata.digest-mismatch" and f.result is Result.NOT_ASSESSED
+    }
+    assert "deliver the mirror as a directory" in gaps["mirror.tar!/repo/repodata/repomd.xml"]
+    assert not [u for u in result.analysis.units if u.kind is UnitKind.REPO_MIRROR]
+
+
+def test_a_mirror_inside_a_mirror_keeps_its_own_packages(tmp_path: Path) -> None:
+    """Packages of an inner repository are not the outer repository's unlisted content."""
+    files = dict(_dnf(None))
+    files |= {f"repo/extras/{k[5:]}": v for k, v in _dnf(None).items()}
+    result = inspect(write(tmp_path / "d", files))
+    unlisted = {
+        f.subject.display: f.detail["files"] for f in findings_of(result)["repo.content.unlisted"]
+    }
+    assert unlisted == {
+        "repo-mirror:repo": ["Packages/extra.rpm"],
+        "repo-mirror:repo/extras": ["Packages/extra.rpm"],
+    }

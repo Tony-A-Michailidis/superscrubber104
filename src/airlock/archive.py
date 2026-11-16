@@ -7,6 +7,7 @@ path, so path traversal, link tricks and device nodes can be reported but cannot
 import bz2
 import functools
 import gzip
+import io
 import lzma
 import stat
 import tarfile
@@ -14,7 +15,7 @@ import zipfile
 import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import IO, cast
+from typing import IO, Any, cast
 
 from airlock.core.model import EntryType
 
@@ -67,6 +68,36 @@ class Member:
     link_target: str | None = None
     encrypted: bool = False
     open: Callable[[], IO[bytes]] | None = None  # None when there is no readable content
+
+
+class ExpansionLimit(ValueError):
+    """A decompressed stream is larger than its reader allows."""
+
+
+class _Capped(io.RawIOBase):
+    def __init__(self, stream: IO[bytes], limit: int) -> None:
+        self._stream, self._left = stream, limit
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        data = self._stream.read(len(buffer))
+        self._left -= len(data)
+        if self._left < 0:
+            raise ExpansionLimit("expands beyond the size airlock will read")
+        buffer[: len(data)] = data
+        return len(data)
+
+
+def capped(stream: IO[bytes], limit: int) -> IO[bytes]:
+    """``stream``, refusing to hand out more than ``limit`` bytes.
+
+    Compressed input is untrusted: a few kilobytes can claim to expand to terabytes. The analyzer's
+    own archive walk has a budget; a handler that decompresses something itself reads it through
+    this instead.
+    """
+    return cast(IO[bytes], io.BufferedReader(_Capped(stream, limit)))
 
 
 def decompress(fmt: str, stream: IO[bytes]) -> IO[bytes]:

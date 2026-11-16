@@ -267,3 +267,52 @@ roles:
         {"collection": "example.absent", "version": ""},
         {"role": "hardening"},
     ]
+
+
+def _archive(files: dict[str, bytes]) -> bytes:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        for name, data in files.items():
+            archive.writestr(zipfile.ZipInfo(name, (2020, 1, 1, 0, 0, 0)), data)
+    return out.getvalue()
+
+
+def test_manifests_inside_archives_are_checked(tmp_path: Path) -> None:
+    """Deployment files usually arrive zipped. Their posture is checked there too; what needs the
+    files beside them (vendored dependencies) is said to be not assessed."""
+    chart = b"apiVersion: v2\nname: a\nversion: 1.0.0\ndependencies:\n  - {name: r, version: 1.0.0, repository: 'https://x'}\n"
+    files: dict[str, bytes | str] = {
+        "deploy.zip": _archive({"k8s/app.yaml": DEPLOYMENT.encode(), "chart/Chart.yaml": chart}),
+        # what is baked into an image layer or installed as a dependency is not applied
+        "site/node_modules/pkg/deploy.yaml": DEPLOYMENT,
+    }
+    result = inspect(write(tmp_path / "d", files))
+    privileged = _failing(result, "iac.workload.privileged")
+    assert list(privileged) == ["deploy.zip!/k8s/app.yaml#Deployment/web"]
+    gaps = [
+        f.subject.display
+        for f in result.assessment.findings
+        if f.rule == "iac.dependency.unresolvable" and f.result is Result.NOT_ASSESSED
+    ]
+    assert gaps == ["deploy.zip!/chart/Chart.yaml"]
+    assert "iac.dependency.unresolvable" not in _failing_rules(result)
+
+
+def _failing_rules(result) -> set[str]:  # type: ignore[no-untyped-def]
+    return {f.rule for f in result.assessment.findings if f.result is Result.FAIL}
+
+
+def test_damaged_provider_package_is_still_matched_by_its_sha256(tmp_path: Path) -> None:
+    damaged = b"PK\x03\x04 this is not really a zip"
+    lock = (
+        'provider "registry.terraform.io/example/thing" {\n  version = "1.0.0"\n'
+        f'  hashes = ["zh:{hashlib.sha256(damaged).hexdigest()}"]\n}}\n'
+    )
+    files: dict[str, bytes | str] = {
+        "infra/.terraform.lock.hcl": lock,
+        "mirror/registry.terraform.io/example/thing/terraform-provider-thing_1.0.0_linux_amd64.zip": damaged,
+    }
+    result = inspect(write(tmp_path / "d", files))
+    [unit] = [u for u in result.analysis.units if u.kind.value == "terraform-environment"]
+    assert (unit.attributes["resolved"], unit.attributes["hashChecked"]) == (1, 1)
+    assert "inventory.handler.error" not in findings_of(result)

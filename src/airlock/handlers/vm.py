@@ -10,7 +10,8 @@
 * Guest filesystems are never mounted. Their contents are recorded as not assessed
   (``vm.image.contents``) unless a deep-inspection plugin examines them.
 * **OVA/OVF**: every file the descriptor references must be present with its declared size; the
-  ``.mf`` manifest's hashes are checked (``upstream.checksum-mismatch``, final).
+  ``.mf`` manifest's hashes are checked (``upstream.checksum-mismatch``, final), and a signed
+  manifest (``.cert``) is verified against certificates pinned for ``vm.ova``.
 * **Glance metadata** (``openstack image show -f json`` saved beside the image): ``os_hash_value``
   and the legacy md5 ``checksum`` are checked against the image (``vm.metadata.mismatch``,
   final), ``disk_format`` against the bytes, and ``img_signature`` against certificates pinned for
@@ -26,8 +27,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from cryptography import x509
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, padding, rsa, utils
 
 from airlock import __version__
@@ -43,6 +45,7 @@ from airlock.core.model import (
     UnitKind,
     Verification,
 )
+from airlock.core.paths import check_member_name
 from airlock.formats.disk import DiskError, DiskInfo, read_disk, sniff
 from airlock.handlers.common import TooLarge, mapping, name_of, read_bytes, read_json
 from airlock.trust import x509_keys
@@ -210,63 +213,67 @@ class VmHandler:
     def _ova(self, view: ArtifactView, ctx: Context) -> Inspection:
         digests: dict[str, dict[str, str]] = {}
         sizes: dict[str, int] = {}
-        ovf: bytes | None = None
-        ovf_name = None
-        manifest: str | None = None
-        has_cert = False
+        refs: dict[str, ArtifactRef] = {}
+        kept: dict[str, bytes] = {}  # the descriptor, manifest and certificate
+        wanted = {"sha1", "sha256", "sha512"}
         try:
             with view.open() as stream, tarfile.open(fileobj=stream, mode="r|") as archive:
                 for member in archive:
-                    if not member.isfile():
-                        continue
-                    handle = archive.extractfile(member)
+                    handle = archive.extractfile(member) if member.isfile() else None
                     if handle is None:
                         continue
-                    algorithms = {
-                        "sha1": hashlib.sha1(usedforsecurity=False),
-                        "sha256": hashlib.sha256(),
-                        "sha512": hashlib.sha512(),
-                    }
-                    kept = bytearray()
-                    keep = (
-                        member.name.lower().endswith((".ovf", ".mf")) and member.size <= _OVF_LIMIT
-                    )
+                    # Named exactly as the analyzer names archive members, so that what is
+                    # verified here lands on the artifact it records.
+                    name, issue = check_member_name(member.name)
+                    if not name:
+                        continue
+                    lower = name.lower()
+                    keep = lower.endswith((".ovf", ".mf", ".cert")) and member.size <= _OVF_LIMIT
+                    hashers = {a: hashlib.new(a, usedforsecurity=False) for a in sorted(wanted)}
+                    content = bytearray()
                     while block := handle.read(1 << 20):
-                        for digest in algorithms.values():
-                            digest.update(block)
+                        for hasher in hashers.values():
+                            hasher.update(block)
                         if keep:
-                            kept += block
-                    digests[member.name] = {k: d.hexdigest() for k, d in algorithms.items()}
-                    sizes[member.name] = member.size
-                    lower = member.name.lower()
-                    if lower.endswith(".ovf") and ovf is None:
-                        ovf, ovf_name = bytes(kept), member.name
-                    elif lower.endswith(".mf"):
-                        manifest = kept.decode("ascii", "replace")
-                    elif lower.endswith(".cert"):
-                        has_cert = True
+                            content += block
+                    digests[name] = {a: h.hexdigest() for a, h in hashers.items()}
+                    sizes[name] = member.size
+                    refs[name] = view.ref.child(name, unsafe=issue is not None)
+                    if keep:
+                        kept.setdefault(lower.rsplit(".", 1)[-1], bytes(content))
+                    if lower.endswith(".mf") and keep:
+                        # The manifest comes before the disks: from here on, only the
+                        # algorithms it uses need computing.
+                        used = {a.lower() for a, _, _ in _manifest_lines(_ascii(bytes(content)))}
+                        wanted = used or wanted
         except (tarfile.TarError, OSError, EOFError) as exc:
             ctx.recorder.not_assessed(
-                ("vm.image.incomplete",),
+                ("vm.image.incomplete", "upstream.checksum-mismatch"),
                 Subject.of_artifact(view.ref),
                 tool=TOOL,
                 reason=f"unreadable OVA: {exc}",
             )
             return Inspection(kind="vm.ova", metadata={"vmAppliance": {"error": str(exc)[:300]}})
+        manifest = _ascii(kept["mf"]) if "mf" in kept else None
+        signed = None
+        if manifest is not None and "cert" in kept:
+            signed = _ova_certificate(view, kept["mf"], kept["cert"], ctx)
         verifications: dict[ArtifactRef, tuple[Verification, ...]] = {}
         manifest_ok = None
+        listed: set[str] = set()
         if manifest is not None:
             manifest_ok = True
             for algo, name, expected in _manifest_lines(manifest):
+                name = name.removeprefix("./")
+                listed.add(name)
                 actual = digests.get(name, {}).get(algo.lower())
-                target = view.ref.child(name)
                 if actual is None:
-                    continue
+                    continue  # not in the archive: the descriptor's references decide below
                 if actual != expected.lower():
                     manifest_ok = False
                     ctx.recorder.fail(
                         "upstream.checksum-mismatch",
-                        Subject.of_artifact(target),
+                        Subject.of_artifact(refs[name]),
                         tool=TOOL,
                         detail={
                             "list": "OVA manifest",
@@ -276,43 +283,58 @@ class VmHandler:
                         },
                     )
                 else:
-                    verifications[target] = (
-                        Verification(
+                    verifications[refs[name]] = (
+                        signed
+                        or Verification(
                             "ovf-manifest",
                             TrustLevel.CHECKSUM,
                             Result.PASS,
                             anchor=name_of(view.ref),
                         ),
                     )
-            if manifest_ok:
+            if manifest_ok and listed:
                 ctx.recorder.passed("upstream.checksum-mismatch")
         summary: dict[str, object] = {
             "files": len(digests),
             "manifest": manifest is not None,
             "manifestVerified": manifest_ok,
-            "signed": has_cert,
+            "certificate": "cert" in kept,
+            "signatureVerified": signed is not None,
+            # Files the manifest does not vouch for (the manifest and certificate never are).
+            "unlisted": sorted(
+                n for n in digests if n not in listed and not n.lower().endswith((".mf", ".cert"))
+            )[:50]
+            if manifest is not None
+            else [],
         }
-        claims: list[UnitClaim] = []
-        if ovf is not None:
-            descriptor = _parse_ovf(ovf)
-            missing = [f for f in descriptor.files if f["href"] not in sizes]
-            wrong_size = [
-                f
-                for f in descriptor.files
-                if f["href"] in sizes and f.get("size") not in (None, sizes[f["href"]])
-            ]
-            _appliance_findings(view.ref, ctx, missing, wrong_size)
-            summary |= {
-                "descriptor": ovf_name,
-                "os": descriptor.os,
-                "disks": descriptor.disks,
-                "virtualSystem": descriptor.system,
-            }
-        claims.append(_claim(view.ref, "appliance", view.ref, view.sha256, **summary))
+        if "ovf" in kept:
+            try:
+                descriptor = _parse_ovf(kept["ovf"])
+            except ET.ParseError as exc:
+                ctx.recorder.not_assessed(
+                    ("vm.image.incomplete",),
+                    Subject.of_artifact(view.ref),
+                    tool=TOOL,
+                    reason=f"the OVF descriptor does not parse: {exc}",
+                )
+            else:
+                missing = [f for f in descriptor.files if f["href"] not in sizes]
+                wrong_size = [
+                    f
+                    for f in descriptor.files
+                    if f["href"] in sizes and f.get("size") not in (None, sizes[f["href"]])
+                ]
+                _appliance_findings(view.ref, ctx, missing, wrong_size)
+                summary |= {
+                    "os": descriptor.os,
+                    "disks": descriptor.disks,
+                    "virtualSystem": descriptor.system,
+                }
+        claim = _claim(view.ref, "appliance", view.ref, view.sha256, **summary)
         return Inspection(
             kind="vm.ova",
             metadata={"vmAppliance": summary},
-            claims=tuple(claims),
+            claims=(claim,),
             verifications=verifications,
         )
 
@@ -337,8 +359,11 @@ class VmHandler:
             "virtualSystem": descriptor.system,
             "files": len(descriptor.files),
         }
-        claim = _claim(view.ref, "appliance", view.ref, view.sha256, **summary)
-        return Inspection(kind="vm.ovf", metadata={"vmAppliance": summary}, claims=(claim,))
+        inside_ova = view.ref.nested and view.ref.path.lower().endswith(".ova")
+        claims = (
+            () if inside_ova else (_claim(view.ref, "appliance", view.ref, view.sha256, **summary),)
+        )
+        return Inspection(kind="vm.ovf", metadata={"vmAppliance": summary}, claims=claims)
 
     def _manifest(self, view: ArtifactView, ctx: Context) -> Inspection:
         if view.ref.nested:
@@ -576,6 +601,86 @@ def _summary(info: DiskInfo) -> dict[str, object]:
         "snapshots": info.snapshots,
         **{k: v for k, v in info.details.items() if k != "extents"},
     }
+
+
+def _ascii(data: bytes) -> str:
+    return data.decode("ascii", "replace")
+
+
+def _ova_certificate(
+    view: ArtifactView, manifest: bytes, certificate: bytes, ctx: Context
+) -> Verification | None:
+    """Verify a signed OVA: the ``.cert`` file holds ``SHA256(x.mf)= <signature in hex>`` and the
+    signer's certificate; the signature is RSA (PKCS#1 v1.5) over the manifest.
+
+    The embedded certificate proves nothing by itself. The signature counts only when it verifies
+    with a key the policy pins for ``vm.ova``.
+    """
+    subject = Subject.of_artifact(view.ref, locator="certificate")
+    text = _ascii(certificate)
+    lines = _manifest_lines(text.split("-----BEGIN", 1)[0])
+    if not lines:
+        ctx.recorder.fail(
+            "upstream.signature.untrusted",
+            subject,
+            tool=TOOL,
+            detail={"reason": "the OVA certificate file holds no signature line"},
+        )
+        return None
+    algorithm, _, value = lines[0]
+    digests: dict[str, Callable[[], hashes.HashAlgorithm]] = {
+        "SHA1": hashes.SHA1,
+        "SHA256": hashes.SHA256,
+        "SHA512": hashes.SHA512,
+    }
+    digest = digests[algorithm]
+    signature = bytes.fromhex(value) if len(value) % 2 == 0 else b""
+    embedded = None
+    try:
+        block = "-----BEGIN" + text.split("-----BEGIN", 1)[1]
+        embedded = _spki(x509.load_pem_x509_certificate(block.encode()).public_key())
+    except (IndexError, ValueError):
+        embedded = None
+    pinned = x509_keys(ctx, "vm.ova")
+    for anchor, key in pinned:
+        if not isinstance(key, rsa.RSAPublicKey):
+            continue
+        try:
+            key.verify(signature, manifest, padding.PKCS1v15(), digest())
+        except (InvalidSignature, ValueError):
+            if embedded is not None and _spki(key) == embedded:
+                # The pinned signer's own certificate is in the file, and its signature fails.
+                ctx.recorder.fail(
+                    "upstream.signature.invalid",
+                    subject,
+                    tool=TOOL,
+                    detail={
+                        "reason": "the manifest does not match its signature",
+                        "anchor": anchor,
+                    },
+                )
+                return None
+            continue
+        ctx.recorder.passed("upstream.signature.invalid")
+        ctx.recorder.passed("upstream.signature.untrusted")
+        return Verification("ovf-certificate", TrustLevel.SIGNATURE, Result.PASS, anchor=anchor)
+    ctx.recorder.fail(
+        "upstream.signature.untrusted",
+        subject,
+        tool=TOOL,
+        detail={
+            "reason": "no certificate pinned for vm.ova verifies the manifest's signature"
+            if pinned
+            else "no certificate is pinned for vm.ova",
+        },
+    )
+    return None
+
+
+def _spki(key: object) -> bytes:
+    return key.public_bytes(  # type: ignore[attr-defined,no-any-return]
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
 
 
 def _manifest_lines(text: str) -> list[tuple[str, str, str]]:

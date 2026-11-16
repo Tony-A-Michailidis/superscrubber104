@@ -330,10 +330,59 @@ def test_maven_and_gradle(tmp_path: Path) -> None:
     assert _failing(result, "environment.lock.hash-mismatch") == [
         f"{gradle}/util/2.0.0/{hashlib.sha1(util).hexdigest()}/util-2.0.0.jar"  # noqa: S324
     ]
+    # The Gradle cache names each directory after the file's sha1.
     assert _failing(result, "package.checksum-mismatch") == [
-        f"{gradle}/other/3.0.0/{'0' * 40}/other-3.0.0.jar",
-        f"{m2}/lib/1.0.0/lib-1.0.0.pom",
+        f"{gradle}/other/3.0.0/{'0' * 40}/other-3.0.0.jar"
     ]
+    # Maven's sidecar checksums are publishers' checksum lists like any other (doc 27).
+    assert _failing(result, "upstream.checksum-mismatch") == [f"{m2}/lib/1.0.0/lib-1.0.0.pom"]
     [check] = artifact(result, f"{m2}/lib/1.0.0/lib-1.0.0.jar").verifications
-    assert (check.type, check.level) == ("maven-checksum", TrustLevel.CHECKSUM)
+    assert (check.type, check.level, check.anchor) == (
+        "checksum-list",
+        TrustLevel.CHECKSUM,
+        "lib-1.0.0.jar.sha1",
+    )
     assert "pkg:maven/org.example/lib@1.0.0" in {c.purl for c in result.analysis.components}
+
+
+def test_jar_without_pom_properties_is_identified_by_its_pom(tmp_path: Path) -> None:
+    bare = _zip({"META-INF/MANIFEST.MF": b"Manifest-Version: 1.0\n", "a/B.class": b"\xca\xfe"})
+    pom = (
+        b"<project><parent><groupId>org.example</groupId><version>4.2</version></parent>"
+        b"<artifactId>bare</artifactId></project>"
+    )
+    files: dict[str, bytes | str] = {
+        "repo/org/example/bare/4.2/bare-4.2.jar": bare,
+        "repo/org/example/bare/4.2/bare-4.2.pom": pom,
+        "app/gradle.lockfile": "org.example:bare:4.2=runtimeClasspath\n",
+    }
+    result = inspect(write(tmp_path / "d", files))
+    meta = artifact(result, "repo/org/example/bare/4.2/bare-4.2.jar").metadata["maven"]
+    assert (meta["group"], meta["artifact"], meta["version"]) == ("org.example", "bare", "4.2")
+    assert _unit(result, "jvm-environment").attributes["unresolvable"] == []
+
+
+def test_nuget_licence_file_is_not_an_spdx_expression(tmp_path: Path) -> None:
+    nuspec = (
+        '<?xml version="1.0"?><package><metadata><id>Filed</id><version>1.0.0</version>'
+        '<license type="file">LICENSE.txt</license></metadata></package>'
+    )
+    package = _zip({"Filed.nuspec": nuspec.encode(), "LICENSE.txt": b"terms"})
+    result = inspect(write(tmp_path / "d", {"feed/filed.1.0.0.nupkg": package}))
+    [part] = [c for c in result.analysis.components if c.name == "Filed"]
+    assert part.licenses == ()
+
+
+def test_lockfiles_inside_archives_still_form_units(tmp_path: Path) -> None:
+    module_zip, _ = _module("example.com/dep", "v1.0.0")
+    source = _zip(
+        {"app/go.sum": f"example.com/dep v1.0.0 {zip_hash(io.BytesIO(module_zip))}\n".encode()}
+    )
+    files: dict[str, bytes | str] = {
+        "source.zip": source,
+        "gopath/pkg/mod/cache/download/example.com/dep/@v/v1.0.0.zip": module_zip,
+    }
+    result = inspect(write(tmp_path / "d", files))
+    unit = _unit(result, "go-environment")
+    assert unit.root.display == "source.zip!/app/go.sum"
+    assert (unit.attributes["resolved"], unit.attributes["hashChecked"]) == (1, 1)

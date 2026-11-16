@@ -76,7 +76,7 @@ Analysis(tool, artifacts, units, components)
 - **`Unit.digest`** is computed from the kind and the sorted `(role, sha256)` of the members. It is independent of location, so it pins a unit in an allowlist or waiver, links an adapter to its base model, and compares a unit across bundles.
 - **`Component.depends_on`** carries the dependency graph (for closure checks); `evidence` lists every place a component occurs.
 
-**How units form:** a handler emits `UnitClaim(kind, root, role, artifact, sha256, facts)` while inspecting an artifact. After the walk, one `UnitAssembler` per kind groups the claims by root, builds the unit and records completeness and consistency findings. A `BundleCheck` then runs with the whole picture for cross-unit requirements.
+**How units form:** a handler emits `UnitClaim(kind, root, role, artifact, sha256, facts)` while inspecting an artifact. After the walk, one `UnitAssembler` per kind groups the claims by root, builds the unit and records completeness and consistency findings. Checks that need the whole picture (cross-unit requirements) then run in `analysis.finish`.
 
 ## 17.5 Findings and assessments
 
@@ -349,17 +349,19 @@ Edits and reordering are detectable. **Truncation of the tail is not**, so nothi
 ```python
 ArtifactView:   ref, size, sha256; head(n), open(), resolve(relative)
 Handler:        name, version, kinds; detect(view) -> Detection | None; inspect(view, ctx) -> Inspection
-UnitAssembler:  kind; assemble(claims, lookup, ctx) -> units
-BundleCheck:    name; check(manifest, analysis, lookup, ctx)
-Plugin:         name; status(ctx) -> PluginStatus
-Stager:         name; accepts(unit | artifact); stage(bundle, item, target) -> StageResult
-Context:        policy, recorder, now, plugins
+UnitAssembler:  name, version, kind; assemble(claims, ctx) -> Assembly(unit, components, verifications)
+Context:        policy, recorder, now, corpora
+Scanner:        name, capability, rules, binary_names; version(ready), data(policy), scan(ready, targets, analysis, ctx)
 ```
 
 - Handlers see content only through `ArtifactView`: read-only bytes, no filesystem paths. `resolve()` reaches other files of the same delivery by relative path (`tokenizer.json`, `onnx/model.onnx_data`) and can never leave it.
 - `detect()` is cheap (name and first bytes). `inspect()` makes one streaming pass and returns kind, metadata, components, unit claims and findings. This replaces the brief's five-method interface so that a multi-hundred-GB shard is read once.
 - A handler that raises is reported as `inventory.handler.error`; the artifact is still recorded.
-- Assemblers and bundle checks get a `Lookup` so they can read any artifact.
+- Assemblers work from the claims' facts alone, so units inside archives form like any other. They never reopen artifacts.
+- Checks that need the whole delivery (embedding-model links, offline settings, runtime compatibility, mirror content, extension dependencies) are plain functions called from `analysis.finish`, after every unit exists.
+- External tools implement `Scanner` (`airlock/scanners/base.py`) and run only after its pre-flight ([21](21-scanners-and-basics.md)).
+- Staging targets are functions in `airlock/stage.py` over the content `verify()` hands to its `use` callback ([34](34-staging.md)).
+- The first design also declared `BundleCheck`, `Plugin`, `Lookup` and `Stager` protocols. Nothing came to need them, and they were removed rather than left as unused promises.
 
 ## 17.11 Module map
 
@@ -409,7 +411,7 @@ Status: **done** (implemented and tested), **shaped** (the model or schema has t
 | 21 | Transfer request gaps | done | `entries_for` returns all matches; typed `upstream`; `stream`, `profile` |
 | 22 | Receipt gaps | done | Bundle id, enclave, source, stream, request id, evidence digests; only the receipt crosses back |
 | 23 | Components | done (model) | `SubjectKind.COMPONENT`, `depends_on`, licence expressions |
-| 24 | Handler interface | done | Multiple kinds, `resolve()`, `Lookup`, `BundleCheck`, stagers take units or artifacts |
+| 24 | Handler interface | done | Multiple kinds, `resolve()`; whole-delivery checks run in `analysis.finish`; staging works on verified content (doc 34) |
 | 25 | Mode bits | done | Recorded for archive members (`archive.member.setuid`); deliberately not for payload entries |
 | 26 | Policy could only select on rule ids and paths | done / shaped | `where` on rules and waivers; the `mcp:` section comes with the MCP handlers (task 6) |
 | 27 | Subjects were bundle-centric | done | `locator`; component, policy, host and tool-call subjects |

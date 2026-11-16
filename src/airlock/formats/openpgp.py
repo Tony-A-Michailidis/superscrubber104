@@ -200,12 +200,17 @@ def _public_key(body: bytes, subkey: bool) -> PublicKey | None:
 def load_keys(data: bytes) -> list[PublicKey]:
     """Every usable public key and subkey in a key file (armored or binary, one or more keys)."""
     keys = []
-    for _, block in dearmor(data):
-        for tag, body in packets(block):
-            if tag in (6, 14):
-                key = _public_key(body, subkey=tag == 14)
-                if key is not None:
-                    keys.append(key)
+    try:
+        for _, block in dearmor(data):
+            for tag, body in packets(block):
+                if tag in (6, 14):
+                    key = _public_key(body, subkey=tag == 14)
+                    if key is not None:
+                        keys.append(key)
+    except OpenPGPError:
+        raise
+    except (IndexError, struct.error, OverflowError, ValueError) as exc:
+        raise OpenPGPError(f"truncated or malformed key data: {exc}") from exc
     return keys
 
 
@@ -219,13 +224,22 @@ def _subpackets(data: bytes) -> Iterator[tuple[int, bytes]]:
             length, pos = ((first - 192) << 8) + data[pos + 1] + 192, pos + 2
         else:
             length, pos = struct.unpack(">I", data[pos + 1 : pos + 5])[0], pos + 5
+        if length < 1 or pos + length > len(data):
+            raise OpenPGPError("malformed signature subpacket")
         yield data[pos] & 0x7F, data[pos + 1 : pos + length]
         pos += length
 
 
 def parse_signature(body: bytes) -> Signature:
-    if body[0] != 4:
-        raise OpenPGPError(f"signature version {body[0]} is not supported")
+    try:
+        return _parse_signature(body)
+    except (IndexError, struct.error, OverflowError, OSError) as exc:
+        raise OpenPGPError(f"truncated or malformed signature packet: {exc}") from exc
+
+
+def _parse_signature(body: bytes) -> Signature:
+    if not body or body[0] != 4:
+        raise OpenPGPError(f"signature version {body[0] if body else '?'} is not supported")
     sig_type, pub_algo, hash_algo = body[1], body[2], body[3]
     hashed_len = struct.unpack(">H", body[4:6])[0]
     hashed = body[: 6 + hashed_len]
@@ -246,16 +260,20 @@ def parse_signature(body: bytes) -> Signature:
         values = (body[pos : pos + 64],)
     else:
         values = ()
+    # Creation and expiry are only believed from the hashed area, which the signature covers:
+    # the unhashed area can be rewritten by anyone, so there it may only name the issuer (a hint
+    # for choosing a key, proven or not by the verification itself).
     info: dict[str, Any] = {}
-    for kind, value in [*_subpackets(hashed[6:]), *_subpackets(unhashed)]:
-        if kind == 2:
+    for kind, value in _subpackets(hashed[6:]):
+        if kind == 2 and len(value) == 4:
             info["created"] = datetime.fromtimestamp(struct.unpack(">I", value)[0], UTC)
-        elif kind == 3:
+        elif kind == 3 and len(value) == 4:
             info["lifetime"] = struct.unpack(">I", value)[0]
-        elif kind == 16:
+    for kind, value in [*_subpackets(hashed[6:]), *_subpackets(unhashed)]:
+        if kind == 16:
             info.setdefault("issuer_key_id", value.hex().upper())
         elif kind == 33:
-            info["issuer_fingerprint"] = value[1:].hex().upper()
+            info.setdefault("issuer_fingerprint", value[1:].hex().upper())
     created = info.get("created")
     expires = None
     if created and info.get("lifetime"):
@@ -267,11 +285,23 @@ def parse_signature(body: bytes) -> Signature:
 
 
 def load_signatures(data: bytes) -> list[Signature]:
+    """Every signature in ``data`` this module can read. Signatures of other versions are skipped
+    when a readable one is present; damaged input raises ``OpenPGPError``."""
     out = []
-    for _, block in dearmor(data):
-        for tag, body in packets(block):
-            if tag == 2:
-                out.append(parse_signature(body))
+    unreadable: OpenPGPError | None = None
+    try:
+        for _, block in dearmor(data):
+            for tag, body in packets(block):
+                if tag != 2:
+                    continue
+                try:
+                    out.append(parse_signature(body))
+                except OpenPGPError as exc:
+                    unreadable = unreadable or exc
+    except (IndexError, struct.error, OverflowError) as exc:
+        raise OpenPGPError(f"truncated or malformed OpenPGP data: {exc}") from exc
+    if not out and unreadable is not None:
+        raise unreadable
     return out
 
 
@@ -398,9 +428,11 @@ def verify_clearsigned(data: bytes, keys: Iterable[PublicKey]) -> tuple[Result, 
     """A clear-signed document (``InRelease``). Returns the result and the signed text."""
     head = b"-----BEGIN PGP SIGNED MESSAGE-----"
     start = data.find(head)
-    sig_at = data.find(b"-----BEGIN PGP SIGNATURE-----")
+    # At the start of a line: the same words inside the text are dash-escaped ("- -----BEGIN").
+    sig_at = data.find(b"\n-----BEGIN PGP SIGNATURE-----", max(start, 0))
     if start < 0 or sig_at < 0:
         return Result(False, reason="not a clear-signed document"), b""
+    sig_at += 1
     lines = data[start + len(head) :].split(b"\n")[1:]
     # Armor headers ("Hash: SHA512") end at the first empty line; the text runs up to the
     # signature, and the line break just before the signature belongs to the signature.
@@ -412,7 +444,10 @@ def verify_clearsigned(data: bytes, keys: Iterable[PublicKey]) -> tuple[Result, 
         line = line.rstrip(b"\r")
         text.append(line[2:] if line.startswith(b"- ") else line)
     signed = b"\n".join(text)
-    signatures = load_signatures(data[sig_at:])
+    try:
+        signatures = load_signatures(data[sig_at:])
+    except OpenPGPError as exc:
+        return Result(False, reason=f"unreadable signature: {exc}"), signed
     keys = list(keys)
     last = Result(False, reason="no signature found")
     for signature in signatures:

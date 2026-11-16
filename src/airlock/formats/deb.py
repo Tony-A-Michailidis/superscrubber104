@@ -57,7 +57,12 @@ def ar_members(stream: BinaryIO) -> Iterator[tuple[str, bytes | None, int]]:
         if header[58:60] != b"`\n":
             raise DebError("bad ar member header")
         name = header[:16].decode("ascii", "replace").strip().rstrip("/")
-        size = int(header[48:58].decode("ascii").strip() or 0)
+        try:
+            size = int(header[48:58].decode("ascii", "replace").strip() or 0)
+        except ValueError as exc:
+            raise DebError("bad ar member size") from exc
+        if size < 0:
+            raise DebError("bad ar member size")
         if name.startswith("control.tar") and size <= _CONTROL_LIMIT:
             data = stream.read(size)
             yield name, data, size
@@ -89,19 +94,28 @@ def stanzas(text: str) -> Iterator[dict[str, str]]:
 
 
 def _decompress(name: str, data: bytes) -> bytes:
-    if name.endswith(".gz"):
-        return zlib.decompress(data, 16 + zlib.MAX_WBITS)
-    if name.endswith(".xz"):
-        return lzma.decompress(data)
-    if name.endswith(".zst"):
-        try:  # the standard library has zstd from Python 3.14
-            from compression import zstd  # type: ignore[import-not-found]
-        except ImportError as exc:
-            raise DebError(
-                "zstd-compressed control archive: readable from Python 3.14 (compression.zstd)"
-            ) from exc
-        return bytes(zstd.decompress(data, max_length=_CONTROL_LIMIT))
-    return data
+    """The control archive, expanded to at most ``_CONTROL_LIMIT`` bytes (it is untrusted input:
+    a few kilobytes can claim to expand to gigabytes)."""
+    try:
+        if name.endswith(".gz"):
+            out = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(data, _CONTROL_LIMIT + 1)
+        elif name.endswith(".xz"):
+            out = lzma.LZMADecompressor().decompress(data, _CONTROL_LIMIT + 1)
+        elif name.endswith(".zst"):
+            try:  # the standard library has zstd from Python 3.14
+                from compression import zstd  # type: ignore[import-not-found]
+            except ImportError as exc:
+                raise DebError(
+                    "zstd-compressed control archive: readable from Python 3.14 (compression.zstd)"
+                ) from exc
+            out = bytes(zstd.ZstdDecompressor().decompress(data, _CONTROL_LIMIT + 1))
+        else:
+            out = data
+    except (zlib.error, lzma.LZMAError, EOFError, OSError) as exc:
+        raise DebError(f"control archive does not decompress: {exc}") from exc
+    if len(out) > _CONTROL_LIMIT:
+        raise DebError("control archive expands beyond the size airlock will read")
+    return out
 
 
 def read_deb(stream: BinaryIO) -> DebPackage:
@@ -109,15 +123,18 @@ def read_deb(stream: BinaryIO) -> DebPackage:
         if data is None:
             continue
         raw = _decompress(name, data)
-        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
-            members = {m.name.lstrip("./"): m for m in archive.getmembers() if m.isfile()}
-            control = members.get("control")
-            if control is None:
-                raise DebError("control.tar has no control file")
-            handle = archive.extractfile(control)
-            assert handle is not None  # noqa: S101 - isfile() was checked
-            fields = parse_fields(handle.read(1 << 20).decode("utf-8", "replace"))
-            scripts = sorted(s for s in SCRIPTS if s in members)
+        try:
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+                members = {m.name.lstrip("./"): m for m in archive.getmembers() if m.isfile()}
+                control = members.get("control")
+                if control is None:
+                    raise DebError("control.tar has no control file")
+                handle = archive.extractfile(control)
+                assert handle is not None  # noqa: S101 - isfile() was checked
+                fields = parse_fields(handle.read(1 << 20).decode("utf-8", "replace"))
+                scripts = sorted(s for s in SCRIPTS if s in members)
+        except (tarfile.TarError, EOFError) as exc:
+            raise DebError(f"control archive is not a readable tar: {exc}") from exc
         return DebPackage(fields, scripts, name.rpartition(".")[2] if "." in name else None)
     raise DebError("no control archive in the package")
 

@@ -5,9 +5,9 @@ dependency verification metadata.
   the pom itself, or the repository layout (``<group path>/<artifact>/<version>/<file>`` for
   Maven, ``files-2.1/<group>/<artifact>/<version>/<sha1>/<file>`` for Gradle's cache). In a Gradle
   cache the directory name is the file's sha1, and is checked.
-* Sidecar checksums (``.sha512``/``.sha256``/``.sha1``/``.md5``) published with Maven artifacts are
-  compared (``package.checksum-mismatch``, final). Detached ``.asc`` signatures are verified by the
-  upstream handler (doc 27) against keys pinned for ``file.signed``.
+* Sidecar checksums (``.sha512``/``.sha256``/``.sha1``/``.md5``) and detached ``.asc`` signatures
+  published with Maven artifacts are checked by the upstream handler (doc 27), like those of any
+  other file.
 * ``gradle.lockfile`` (versions) and ``gradle/verification-metadata.xml`` (versions and hashes per
   file) are lockfiles: each entry must be satisfiable from the delivery, with a matching hash where
   one is recorded.
@@ -25,26 +25,23 @@ from urllib.parse import quote
 
 from airlock import __version__
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
-from airlock.core.model import ArtifactRef, Subject, ToolRef, UnitClaim, UnitKind, Verification
-from airlock.formats.deb import parse_fields
+from airlock.core.model import Subject, ToolRef, UnitClaim, UnitKind
 from airlock.handlers.common import TooLarge, full_path, name_of, read_bytes, read_text
 from airlock.handlers.packages.locked import (
-    check_sidecar,
     component,
     digest_hex,
     distribution_claim,
     lockfile_claim,
     requirement,
-    sidecar,
 )
 
 TOOL = ToolRef("airlock.jvm", __version__)
 KIND = UnitKind.JVM_ENVIRONMENT
 _ARCHIVES = (".jar", ".war", ".aar", ".ear")
-_SIDECARS = ((".sha512", "sha512"), (".sha256", "sha256"), (".sha1", "sha1"), (".md5", "md5"))
 _LOCK_LINE = re.compile(r"^(?P<group>[^:#\s]+):(?P<artifact>[^:\s]+):(?P<version>[^=\s]+)=")
 _SHA1_DIR = re.compile(r"^[0-9a-f]{40}$")
 _POM_LIMIT = 4 << 20
+_PROPERTIES_LIMIT = 64 << 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,21 +80,63 @@ def pom_coordinates(data: bytes) -> Coordinates | None:
     return None
 
 
-def _from_layout(path: str) -> tuple[Coordinates | None, str | None]:
-    """Coordinates from the directory layout, and the sha1 a Gradle cache path records."""
+def _gradle_cache(path: str) -> tuple[Coordinates, str] | None:
+    """Coordinates and the sha1 a Gradle cache path records
+    (``files-2.1/<group>/<artifact>/<version>/<sha1>/<file>``)."""
     parts = path.split("/")
     if "files-2.1" in parts:
         at = len(parts) - 1 - parts[::-1].index("files-2.1")
         rest = parts[at + 1 :]
         if len(rest) == 5 and _SHA1_DIR.match(rest[3]):
             return Coordinates(rest[0], rest[1], rest[2]), rest[3]
-    if len(parts) >= 4:
-        artifact, version, file = parts[-3], parts[-2], parts[-1]
-        if file.startswith(f"{artifact}-{version}"):
-            return Coordinates(
-                "", artifact, version
-            ), None  # group unknown: where does the root end?
-    return None, None
+    return None
+
+
+def _maven_layout_pom(path: str) -> str | None:
+    """The pom's file name when ``path`` ends ``<artifact>/<version>/<artifact>-<version>…``.
+
+    The group cannot be read from the path (where does the repository root end?); the pom has it.
+    """
+    parts = path.split("/")
+    if len(parts) >= 3 and parts[-1].startswith(f"{parts[-3]}-{parts[-2]}"):
+        return f"{parts[-3]}-{parts[-2]}.pom"
+    return None
+
+
+def _properties(text: str) -> dict[str, str]:
+    """A Java .properties file, as far as pom.properties uses the format."""
+    out = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", "!")):
+            continue
+        at = min((i for i in (line.find("="), line.find(":")) if i > 0), default=0)
+        if at:
+            out[line[:at].strip()] = line[at + 1 :].strip()
+    return out
+
+
+def _jar_identity(view: ArtifactView) -> tuple[Coordinates | None, bool, str | None]:
+    """(coordinates from the jar's own pom.properties, whether it is signed, a read error)."""
+    try:
+        with view.open() as stream, zipfile.ZipFile(stream) as archive:
+            names = archive.namelist()
+            signed = any(re.fullmatch(r"META-INF/[^/]+\.SF", n, re.IGNORECASE) for n in names)
+            poms = [
+                n
+                for n in names
+                if n.startswith("META-INF/maven/") and n.endswith("/pom.properties")
+            ]
+            # A shaded jar carries the pom.properties of everything merged into it: no single
+            # identity can be read from those.
+            if len(poms) != 1 or archive.getinfo(poms[0]).file_size > _PROPERTIES_LIMIT:
+                return None, signed, None
+            props = _properties(archive.read(poms[0]).decode("utf-8", "replace"))
+    except (zipfile.BadZipFile, OSError, KeyError, RuntimeError, NotImplementedError) as exc:
+        return None, False, str(exc)[:300]
+    if props.get("groupId") and props.get("artifactId") and props.get("version"):
+        return Coordinates(props["groupId"], props["artifactId"], props["version"]), signed, None
+    return None, signed, None
 
 
 def _kind(view: ArtifactView) -> str | None:
@@ -191,44 +230,18 @@ class JvmHandler:
     def _artifact(self, view: ArtifactView, ctx: Context, kind: str) -> Inspection:
         coordinates, signed, error = None, False, None
         if kind == "java.archive":
-            try:
-                with view.open() as stream, zipfile.ZipFile(stream) as archive:
-                    names = archive.namelist()
-                    signed = any(
-                        re.fullmatch(r"META-INF/[^/]+\.SF", n, re.IGNORECASE) for n in names
-                    )
-                    poms = [
-                        n
-                        for n in names
-                        if n.startswith("META-INF/maven/") and n.endswith("/pom.properties")
-                    ]
-                    if len(poms) == 1:
-                        props = parse_fields(
-                            archive.read(poms[0]).decode("utf-8", "replace").replace("=", ":")
-                        )
-                        if (
-                            props.get("groupId")
-                            and props.get("artifactId")
-                            and props.get("version")
-                        ):
-                            coordinates = Coordinates(
-                                props["groupId"], props["artifactId"], props["version"]
-                            )
-            except (zipfile.BadZipFile, OSError) as exc:
-                error = str(exc)[:300]
+            coordinates, signed, error = _jar_identity(view)
         else:
             try:
                 coordinates = pom_coordinates(read_bytes(view, _POM_LIMIT))
-            except TooLarge:
-                coordinates = None
-        layout, recorded_sha1 = _from_layout(full_path(view.ref))
-        if coordinates is None and layout is not None and layout.group:
-            coordinates = layout
-        verifications: dict[ArtifactRef, tuple[Verification, ...]] = {}
-        checks: list[Verification] = []
-        if recorded_sha1 is not None:  # the Gradle cache names the directory after the sha1
+            except TooLarge as exc:
+                error = str(exc)
+        path = full_path(view.ref)
+        cached = _gradle_cache(path)
+        if cached is not None:  # the Gradle cache names the directory after the file's sha1
+            coordinates = coordinates or cached[0]
             actual = digest_hex(view, "sha1")
-            if actual != recorded_sha1:
+            if actual != cached[1]:
                 ctx.recorder.fail(
                     "package.checksum-mismatch",
                     Subject.of_artifact(view.ref),
@@ -236,18 +249,16 @@ class JvmHandler:
                     detail={
                         "recordedIn": "gradle cache path",
                         "algorithm": "sha1",
-                        "recorded": recorded_sha1,
+                        "recorded": cached[1],
                         "actual": actual,
                     },
                 )
-        found = sidecar(view, _SIDECARS)
-        if found is not None:
-            algorithm, text, source = found
-            check = check_sidecar(view, ctx, TOOL, algorithm, text, source, "maven-checksum")
-            if check is not None:
-                checks.append(check)
-        if checks:
-            verifications[view.ref] = tuple(checks)
+            else:
+                ctx.recorder.passed("package.checksum-mismatch")
+        if coordinates is None and kind == "java.archive" and (pom := _maven_layout_pom(path)):
+            sibling = view.resolve(pom)  # a jar without pom.properties, beside its pom
+            if sibling is not None and sibling.size <= _POM_LIMIT:
+                coordinates = pom_coordinates(read_bytes(sibling, _POM_LIMIT))
         metadata = {
             "group": coordinates.group if coordinates else None,
             "artifact": coordinates.artifact if coordinates else None,
@@ -256,7 +267,7 @@ class JvmHandler:
             "error": error,
         }
         if coordinates is None:
-            return Inspection(kind=kind, metadata={"maven": metadata}, verifications=verifications)
+            return Inspection(kind=kind, metadata={"maven": metadata})
         purl = maven_purl(coordinates)
         components = (
             (component(view, coordinates.artifact, coordinates.version, purl),)
@@ -264,24 +275,13 @@ class JvmHandler:
             else ()
         )
         bom_ref = components[0].bom_ref if components else None
-        hashes = [f"sha256:{view.sha256}"]
+        hashes = [f"sha256:{view.sha256}"] if view.sha256 else []
         key = f"{coordinates.group}:{coordinates.artifact}"
+        file_key = f"{key}:{name_of(view.ref)}"
         claims: tuple[UnitClaim, ...] = (
             distribution_claim(view, KIND, "maven", key, coordinates.version, hashes, bom_ref),
-            distribution_claim(
-                view,
-                KIND,
-                "maven",
-                f"{key}:{name_of(view.ref)}",
-                coordinates.version,
-                hashes,
-                bom_ref,
-            ),
+            distribution_claim(view, KIND, "maven", file_key, coordinates.version, hashes, bom_ref),
         )
         return Inspection(
-            kind=kind,
-            metadata={"maven": metadata},
-            components=components,
-            claims=claims,
-            verifications=verifications,
+            kind=kind, metadata={"maven": metadata}, components=components, claims=claims
         )

@@ -24,10 +24,14 @@ import hashlib
 import io
 import posixpath
 import re
+import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
+import yaml
+
 from airlock import __version__
+from airlock.archive import ARCHIVE_ERRORS
 from airlock.core.canonical import JSON
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import (
@@ -41,6 +45,7 @@ from airlock.core.model import (
     Verification,
 )
 from airlock.core.serde import format_timestamp
+from airlock.core.yamlio import load_untrusted_yaml
 from airlock.formats import openpgp
 from airlock.formats import repo as fmt
 from airlock.handlers.common import (
@@ -116,7 +121,7 @@ def _hex(view: ArtifactView, algorithm: str) -> str | None:
         return view.sha256
     if algorithm not in hashlib.algorithms_available:
         return None
-    digest = hashlib.new(algorithm)
+    digest = hashlib.new(algorithm, usedforsecurity=False)
     with view.open() as stream:
         while block := stream.read(1 << 20):
             digest.update(block)
@@ -181,7 +186,8 @@ class _Index:
                     facts={
                         "index": self.position,
                         "path": relative_to(target.ref, self.root),
-                        "hashed": match is True,
+                        # MD5 can show a difference but proves nothing when it matches.
+                        "hashed": match is True and entry.algorithm != "md5",
                         "mismatch": match is False,
                     },
                 )
@@ -318,14 +324,23 @@ class MirrorHandler:
     )
 
     def detect(self, artifact: ArtifactView) -> Detection | None:
-        if artifact.ref.nested:
-            return None  # mirrors are directories; resolve() does not reach into archives
         kind = _kind(artifact)
         return Detection(kind, 80) if kind else None
 
     def inspect(self, artifact: ArtifactView, ctx: Context) -> Inspection:
         kind = _kind(artifact)
         assert kind is not None  # noqa: S101 - only called after detect()
+        if artifact.ref.nested:
+            # A mirror packed into an archive: the files an index lists cannot be reached from
+            # inside it, so the chain is not checked, and that is said rather than skipped.
+            ctx.recorder.not_assessed(
+                ("repo.metadata.digest-mismatch", "repo.content.digest-mismatch"),
+                Subject.of_artifact(artifact.ref),
+                tool=TOOL,
+                reason="repository metadata inside an archive: deliver the mirror as a directory "
+                "to have it checked against its packages",
+            )
+            return Inspection(kind=kind, metadata={"repoIndex": {"assessed": False}})
         root = _root_of(kind, artifact.ref)
         readers = {
             "repo.dnf.repomd": self._dnf_repomd,
@@ -339,7 +354,7 @@ class MirrorHandler:
         }
         try:
             return readers[kind](artifact, ctx, kind, root)
-        except (fmt.RepoError, ValueError, TooLarge, OSError, EOFError) as exc:
+        except (fmt.RepoError, TooLarge, ET.ParseError, yaml.YAMLError, *ARCHIVE_ERRORS) as exc:
             return _malformed(artifact, ctx, kind, exc)
 
     # --- dnf ------------------------------------------------------------------------------------
@@ -458,14 +473,8 @@ class MirrorHandler:
     def _helm_index(
         self, view: ArtifactView, ctx: Context, kind: str, root: ArtifactRef
     ) -> Inspection:
-        from airlock.core.yamlio import load_untrusted_yaml
-
-        try:
-            document = load_untrusted_yaml(
-                read_bytes(view, _METADATA_LIMIT).decode("utf-8", "replace")
-            )
-        except Exception as exc:  # yaml.YAMLError and friends
-            raise fmt.RepoError(f"index.yaml: {exc}") from exc
+        text = read_bytes(view, _METADATA_LIMIT).decode("utf-8", "replace")
+        document = load_untrusted_yaml(text, aliases=True)
         helm = fmt.parse_helm_index(document)
         index = _Index(view, ctx, "helm", root)
         index.check(helm.charts, ".", "repo.content.digest-mismatch")

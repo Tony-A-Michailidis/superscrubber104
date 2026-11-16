@@ -273,6 +273,21 @@ def _role(view: ArtifactView) -> str | None:
     return None
 
 
+_INSTALLED = re.compile(
+    r"(^|/)(site-packages|dist-packages|node_modules|\.venv|venv|\.tox|__pycache__|\.git)/"
+)
+
+
+def deployable(ref: ArtifactRef) -> bool:
+    """Configuration someone would apply: anywhere in the delivery, archives included, except
+    inside installed packages and container image layers (what is baked into an image is not
+    applied to the cluster)."""
+    parts = (ref.path, *ref.member)
+    return not any(_INSTALLED.search(f"/{p}") for p in parts) and not any(
+        _LAYER.search(p) for p in parts[:-1]
+    )
+
+
 def first_party(ref: ArtifactRef) -> bool:
     """The delivery's own files: not third-party packages, not inside packages or image layers."""
     parts = (ref.path, *ref.member)

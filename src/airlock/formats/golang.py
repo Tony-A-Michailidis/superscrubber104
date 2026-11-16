@@ -8,8 +8,10 @@ without the go toolchain.
 
 import base64
 import hashlib
+import lzma
 import re
 import zipfile
+import zlib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import BinaryIO
@@ -37,17 +39,40 @@ def hash1(files: Iterable[tuple[str, str]]) -> str:
     return "h1:" + base64.b64encode(summary.digest()).decode()
 
 
-def zip_hash(stream: BinaryIO) -> str:
-    """``h1:`` of a module zip, reading each member as a stream."""
+class ZipHashError(ValueError):
+    """The zip cannot be hashed: damaged, encrypted, or larger than a module may be."""
+
+
+# The go command refuses module zips over 500 MiB uncompressed; provider packages are held to
+# a roomier limit by their caller.
+MODULE_ZIP_LIMIT = 500 << 20
+_MAX_MEMBERS = 200_000
+
+
+def zip_hash(stream: BinaryIO, limit: int = MODULE_ZIP_LIMIT) -> str:
+    """``h1:`` of a zip, reading each member as a stream, up to ``limit`` expanded bytes."""
     files = []
-    with zipfile.ZipFile(stream) as archive:
-        for info in archive.infolist():
-            digest = hashlib.sha256()
-            with archive.open(info) as member:
-                while block := member.read(1 << 20):
-                    digest.update(block)
-            files.append((info.filename, digest.hexdigest()))
-    return hash1(files)
+    left = limit
+    try:
+        with zipfile.ZipFile(stream) as archive:
+            members = archive.infolist()
+            if len(members) > _MAX_MEMBERS or sum(m.file_size for m in members) > limit:
+                raise ZipHashError("larger than airlock will hash")
+            for info in members:
+                digest = hashlib.sha256()
+                with archive.open(info) as member:
+                    while block := member.read(1 << 20):
+                        left -= len(block)
+                        if left < 0:
+                            raise ZipHashError("expands beyond its declared size")
+                        digest.update(block)
+                files.append((info.filename, digest.hexdigest()))
+        return hash1(files)
+    except ZipHashError:
+        raise
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, lzma.LZMAError, EOFError,
+            OSError, RuntimeError, NotImplementedError, ValueError) as exc:  # fmt: skip
+        raise ZipHashError(f"unreadable zip: {exc}") from exc
 
 
 def mod_hash(data: bytes) -> str:

@@ -55,7 +55,7 @@ class QemuImg:
         return first.split("version", 1)[1].split()[0] if "version" in first else None
 
     def data(self, policy: PluginPolicy) -> DataInfo:
-        return DataInfo(version="none")  # no database
+        return DataInfo()  # qemu-img has no database
 
     def scan(
         self, ready: Ready, targets: Sequence[Target], analysis: Analysis, ctx: Context

@@ -85,7 +85,7 @@ def _stage(site: Site, bundle: Path, state: Path, targets: Mapping[str, Path], *
         now=LATER,
         signer=site.receipt_key,
         **extra,  # type: ignore[arg-type]
-    )
+    ).report
 
 
 def test_stage_lays_out_every_target(tmp_path: Path, site: Site) -> None:
@@ -214,3 +214,76 @@ def test_stage_cli(tmp_path: Path, site: Site) -> None:
     assert "pypi: 1 copied, 0 already present" in done.output
     done = CliRunner().invoke(main, [*args, "--target", "pypi", "--key", str(key)])
     assert done.exit_code != 0 and "KIND=DIRECTORY" in done.output
+
+
+def _stage_events(state: Path) -> list[dict[str, object]]:
+    return [dict(e.data) for e in chainlog.read(state / "ledger.jsonl") if e.type == "stage"]
+
+
+def test_stage_report_is_kept_and_failures_are_recorded(tmp_path: Path, site: Site) -> None:
+    bundle, state = _accepted(tmp_path, site)
+    staged = stage(
+        bundle,
+        policy=site.policy(LENIENT),
+        state=state,
+        targets={"windows": tmp_path / "ok"},
+        now=LATER,
+        signer=site.receipt_key,
+    )
+    assert json.loads(staged.path.read_bytes())["kind"] == "StageReport"
+    assert staged.path.parent.parent == state / "stages"
+    [event] = _stage_events(state)
+    assert event["outcome"] == "staged"
+
+    # Part-way failure: the npm target cannot be completed, after another target was staged.
+    blocked = tmp_path / "blocked" / "tiny"
+    blocked.parent.mkdir()
+    blocked.write_text("a file where a directory is needed", encoding="utf-8")
+    with pytest.raises(StageError, match="could not stage"):
+        _stage(site, bundle, state, {"files": tmp_path / "files", "npm": tmp_path / "blocked"})
+    failed = _stage_events(state)[-1]
+    assert failed["outcome"] == "failed"
+    assert failed["targets"]["files"]["copied"] > 0 and failed["targets"]["npm"]["copied"] == 0
+    reports = sorted((state / "stages").glob("*/stage-report.json"))
+    assert json.loads(reports[-1].read_bytes())["failed"].startswith("could not stage")
+
+
+def test_stage_judges_the_bundle_as_of_its_acceptance(tmp_path: Path, site: Site) -> None:
+    """The policy refuses bundles older than 30 days at import. Staging months after an accepted
+    import is still staging what was accepted; a leftover partial file is replaced."""
+    bundle, state = _accepted(tmp_path, site)
+    out = tmp_path / "late"
+    out.mkdir()
+    (out / "windows11.0-kb5050001-x64.msu.airlock-partial").write_bytes(b"interrupted")
+    months_later = NOW + timedelta(days=200)
+    staged = stage(
+        bundle,
+        policy=site.policy(LENIENT),
+        state=state,
+        targets={"windows": out},
+        now=months_later,
+        signer=site.receipt_key,
+    )
+    assert staged.report.staged_at == months_later
+    assert (out / "windows11.0-kb5050001-x64.msu").read_bytes() == b"MSCF pretend update"
+    assert not list(out.glob("*.airlock-partial"))
+
+
+def test_stage_cli_exit_codes(tmp_path: Path, site: Site) -> None:
+    from click.testing import CliRunner
+
+    from airlock.cli import main
+    from airlock.core.signing import save_key
+
+    bundle, state = _accepted(tmp_path, site)
+    key = tmp_path / "receipt.key"
+    save_key(site.receipt_key, key, tmp_path / "receipt.pub", None)
+    site.policy(LENIENT)
+    policy = sorted(site.root.glob("policy-*.yaml"))[-1]
+    common = ["--policy", str(policy), "--key", str(key), "--target", f"files={tmp_path / 'o'}"]
+    never = CliRunner().invoke(
+        main, ["stage", str(bundle), "--state", str(tmp_path / "s2"), *common]
+    )
+    assert never.exit_code == 3 and "refused: this bundle has not been accepted" in never.output
+    done = CliRunner().invoke(main, ["stage", str(bundle), "--state", str(state), *common])
+    assert done.exit_code == 0 and "report: " in done.output

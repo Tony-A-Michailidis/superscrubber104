@@ -129,7 +129,7 @@ def test_rpm_database_lists_installed_packages(tmp_path: Path) -> None:
     result = inspect(write(tmp_path / "d", {"rootfs/var/lib/rpm/rpmdb.sqlite": db}))
     rpmdb = artifact(result, "rootfs/var/lib/rpm/rpmdb.sqlite")
     assert rpmdb.kind == "os.rpmdb"
-    assert rpmdb.metadata["osPackages"] == {"packages": 2}
+    assert rpmdb.metadata["osPackages"] == {"packages": 2, "unreadable": 0}
     purls = sorted(c.purl or "" for c in result.analysis.components)
     assert purls == [
         "pkg:rpm/example/bash@5.1.8-9.el9?arch=x86_64",
@@ -194,7 +194,7 @@ def test_signed_checksum_list(tmp_path: Path) -> None:
     [check] = artifact(result, "media/installer.iso").verifications
     assert (check.level, check.anchor) == (TrustLevel.SIGNATURE, "publisher")
     summary = artifact(result, "media/SHA256SUMS").metadata["checksumList"]
-    assert summary == {"listed": 3, "checked": 2, "signed": True}
+    assert summary == {"listed": 3, "checked": 2, "signed": True, "signaturePresent": True}
     assert artifact(result, "media/SHA256SUMS.gpg").kind != "upstream.signature"
 
 
@@ -275,3 +275,130 @@ def test_compare_evr_epoch_wins() -> None:
 def test_deb_vercmp(a: str, b: str, expected: int) -> None:
     assert deb_vercmp(a, b) == expected
     assert deb_vercmp(b, a) == -expected
+
+
+# --- what a signature covers, and what cannot be read -------------------------------------------
+
+
+def _not_assessed(result, rule: str) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    return {
+        f.subject.display: f.not_assessed_reason or ""
+        for f in result.assessment.findings
+        if f.rule == rule and f.result is Result.NOT_ASSESSED
+    }
+
+
+def test_rpm_header_signature_alone_does_not_cover_the_payload(tmp_path: Path) -> None:
+    """Older packages record no payload digest in the header: a header signature then says
+    nothing about the payload, and must not earn the file signature-level trust."""
+    old = RPMSpec(name="old", payload_digest=False)
+    files: dict[str, bytes | str] = {
+        "header-only.rpm": rpm_bytes(old, RSA),
+        "both.rpm": rpm_bytes(old, RSA, package_signature=True),
+        "legacy.rpm": rpm_bytes(old, RSA, header_tag=None, package_signature=True),
+        "swapped.rpm": rpm_bytes(old, RSA, header_tag=None, package_signature=True, payload=b"x"),
+        "eddsa.rpm": rpm_bytes(RPMSpec(name="modern"), ED, header_tag=267),
+    }
+    policy = _policy(tmp_path / "k", ("vendor", RSA, "package.rpm"), ("other", ED, "package.rpm"))
+    result = inspect(write(tmp_path / "d", files), policy_yaml=policy)
+    assert not artifact(result, "header-only.rpm").verifications
+    assert (
+        "does not cover the payload"
+        in _not_assessed(result, "package.digest-mismatch")["header-only.rpm"]
+    )
+    assert artifact(result, "header-only.rpm").metadata["rpm"]["signatureCoversPayload"] is False
+    for name in ("both.rpm", "legacy.rpm"):  # the signature over header and payload covers it
+        [check] = artifact(result, name).verifications
+        assert (check.level, check.anchor) == (TrustLevel.SIGNATURE, "vendor")
+    [invalid] = findings_of(result)["package.signature.invalid"]
+    assert invalid.subject.display == "swapped.rpm"
+    [eddsa] = artifact(result, "eddsa.rpm").verifications  # tag 267: ECDSA and EdDSA signatures
+    assert eddsa.anchor == "other"
+    assert "package.signature.missing" not in findings_of(result)
+
+
+def test_unreadable_rpm_is_not_assessed_rather_than_refused(tmp_path: Path) -> None:
+    damaged = rpm_bytes(RPMSpec(), RSA)[:150]
+    result = inspect(write(tmp_path / "d", {"cut.rpm": damaged}))
+    assert "could not be read" in _not_assessed(result, "package.digest-mismatch")["cut.rpm"]
+    failed = [
+        f
+        for f in result.assessment.findings
+        if f.result is Result.FAIL and f.rule.startswith("package.")
+    ]
+    assert not failed
+    assert result.assessment.summary.verdict is not Verdict.REFUSED
+
+
+def test_sidecar_checksums_for_any_file(tmp_path: Path) -> None:
+    image, tool = b"an image", b"a tool"
+    files: dict[str, bytes | str] = {
+        "a/disk.img": image,
+        "a/disk.img.sha256": hashlib.sha256(image).hexdigest() + "\n",  # a hash alone
+        "a/tool.bin": tool,
+        "a/tool.bin.sha1": f"{hashlib.sha1(b'other').hexdigest()}  tool.bin\n",  # noqa: S324
+        "b/old.iso": image,
+        "b/old.iso.md5": hashlib.md5(image).hexdigest(),  # noqa: S324
+        "b/MD5SUMS": f"{hashlib.md5(b'not it').hexdigest()}  old.iso\n",  # noqa: S324
+        "c/notes.sha256": "these are just notes about sha256\n",
+    }
+    result = inspect(write(tmp_path / "d", files))
+    [check] = artifact(result, "a/disk.img").verifications
+    assert (check.type, check.level, check.anchor) == (
+        "checksum-list",
+        TrustLevel.CHECKSUM,
+        "disk.img.sha256",
+    )
+    mismatches = sorted(
+        (f.subject.display, f.detail["list"])
+        for f in findings_of(result)["upstream.checksum-mismatch"]
+    )
+    assert mismatches == [("a/tool.bin", "tool.bin.sha1"), ("b/old.iso", "MD5SUMS")]
+    # MD5 can show a difference; a match earns nothing.
+    assert not artifact(result, "b/old.iso").verifications
+    assert artifact(result, "c/notes.sha256").kind != "upstream.checksum-list"
+
+
+def test_unreadable_and_multiple_signatures(tmp_path: Path) -> None:
+    sums = f"{hashlib.sha256(b'data').hexdigest()}  data.bin\n".encode()
+    files: dict[str, bytes | str] = {
+        # two signatures, the pinned key's second: the publisher rotated keys
+        "two/data.bin": b"data",
+        "two/SHA256SUMS": sums,
+        "two/SHA256SUMS.asc": RSA.detached(sums) + ED.detached(sums),
+        # a signature file that is damaged: said, not passed over
+        "cut/data.bin": b"data",
+        "cut/SHA256SUMS": sums,
+        "cut/SHA256SUMS.gpg": ED.detached(sums, armored=False)[:20],
+        "cut/tool.sh": b"tool",
+        "cut/tool.sh.asc": ED.detached(b"tool").replace(b"END PGP", b"END XXX"),
+    }
+    policy = _policy(tmp_path / "k", ("publisher", ED, "file.*"))
+    result = inspect(write(tmp_path / "d", files), policy_yaml=policy)
+    [check] = artifact(result, "two/data.bin").verifications
+    assert (check.level, check.anchor) == (TrustLevel.SIGNATURE, "publisher")
+    untrusted = {
+        f.subject.display: f.detail["reason"]
+        for f in findings_of(result)["upstream.signature.untrusted"]
+    }
+    assert "cannot be read" in untrusted["cut/SHA256SUMS"]
+    [listed] = artifact(result, "cut/data.bin").verifications
+    assert (
+        listed.level is TrustLevel.CHECKSUM
+    )  # the list still matched; its signature did not count
+    assert "upstream.signature.invalid" not in findings_of(result)
+
+
+def test_lists_inside_archives_are_not_assessed(tmp_path: Path) -> None:
+    import io
+    import tarfile
+
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w") as archive:
+        for name, data in {"SHA256SUMS": b"00  a.bin\n", "a.bin": b"a"}.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    result = inspect(write(tmp_path / "d", {"drop.tar": out.getvalue()}))
+    reasons = _not_assessed(result, "upstream.checksum-mismatch")
+    assert "inside an archive" in reasons["drop.tar!/SHA256SUMS"]

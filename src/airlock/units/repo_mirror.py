@@ -257,6 +257,13 @@ def _int(value: object) -> int:
     return value if isinstance(value, int) else 0
 
 
+def _inside(root: ArtifactRef, outer: ArtifactRef) -> bool:
+    """Whether the directory ``root`` lies below the directory ``outer``."""
+    if root.nested or outer.nested or root == outer:
+        return False
+    return outer.path == "." or root.path.startswith(outer.path + "/")
+
+
 def check_mirror_content(
     artifacts: Sequence[Artifact], units: Sequence[Unit], ctx: Context
 ) -> None:
@@ -268,12 +275,15 @@ def check_mirror_content(
         suffixes = _CONTENT_SUFFIXES.get(str(unit.attributes.get("format")), ())
         members = {m.artifact for m in unit.members}
         unlisted: list[str] = []
+        inner = [m.root for m in mirrors if m is not unit and _inside(m.root, unit.root)]
         for artifact in artifacts:
             if artifact.ref.nested or artifact.ref in members:
                 continue
             below = relative_to(artifact.ref, unit.root)
             if below is None or below.startswith(_METADATA_DIRS):
                 continue
+            if any(relative_to(artifact.ref, root) is not None for root in inner):
+                continue  # it belongs to a mirror nested in this one, which decides for it
             if below.endswith(suffixes):
                 unlisted.append(below)
         if unlisted:

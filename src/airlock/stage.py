@@ -2,14 +2,18 @@
 
 Staging only ever copies what was just verified and accepted:
 
-1. The bundle is verified again, without touching the ledger, so the units to stage come from
-   this side's own analysis, never the packer's.
-2. The ledger must already hold an accepted receipt for exactly this manifest (``airlock verify
-   --state`` first), and the fresh verdict must still be ``passed``.
+1. The ledger must already hold an accepted receipt for exactly this manifest (``airlock verify
+   --state`` first).
+2. The bundle is verified again, without touching the ledger, so the units to stage come from
+   this side's own analysis, never the packer's. It is judged as of the moment it was accepted:
+   a bundle does not become unstageable because time has passed, but a policy that has since
+   changed its mind (a revoked key, a new rule) stops it.
 3. Every file is re-hashed while it is copied and compared with the manifest; it is moved into
    place only if it matches, so nothing changed between verification and staging can land.
    Existing files are never overwritten: identical ones are skipped, different ones are an error.
-4. A signed ``stage`` event goes into the ledger with the digest of the stage report.
+4. The stage report is written under the state directory and a signed ``stage`` event goes into
+   the ledger with its digest. A staging that fails part-way is recorded too, with what had
+   already been copied.
 
 Targets lay content out the way the receiving tools expect it. airlock writes files and indexes;
 it never pushes to a registry or calls a service (no network at runtime): the report names the
@@ -28,7 +32,9 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from airlock import bundle as layout
 from airlock.core import chainlog
+from airlock.core.canonical import sha256_digest
 from airlock.core.errors import AirlockError, ConfigError
 from airlock.core.model import API_VERSION, Artifact, ArtifactRef, UnitKind, Verdict
 from airlock.core.policy import KeyRole, Policy
@@ -63,8 +69,15 @@ class StageReport:
     staged_at: datetime
     targets: tuple[TargetReport, ...]
     downgrades_allowed: str | None = None
+    failed: str | None = None  # why staging stopped part-way, if it did
     api_version: str = API_VERSION
     kind: str = "StageReport"
+
+
+@dataclass(frozen=True, slots=True)
+class Staged:
+    report: StageReport
+    path: Path  # where the report was written
 
 
 class _Stager:
@@ -83,24 +96,31 @@ class _Stager:
         target = (self.destination / PurePosixPath(relative)).resolve()
         if not target.is_relative_to(self.destination.resolve()):
             raise StageError(f"{relative} would leave {self.destination}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            if _sha256(target) != expected:
-                raise StageError(f"{target} already exists with different content")
-            self.report.present += 1
-            return target
         partial = target.with_name(target.name + ".airlock-partial")
-        digest = hashlib.sha256()
-        with view.location.open("rb") as source, partial.open("xb") as sink:
-            while block := source.read(1 << 20):
-                digest.update(block)
-                sink.write(block)
-            sink.flush()
-            os.fsync(sink.fileno())
-        if digest.hexdigest() != expected:
-            partial.unlink()
-            raise StageError(f"{path} changed after it was verified; nothing was staged from it")
-        partial.replace(target)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                if _sha256(target) != expected:
+                    raise StageError(f"{target} already exists with different content")
+                self.report.present += 1
+                return target
+            partial.unlink(missing_ok=True)  # left by a staging that was interrupted
+            digest = hashlib.sha256()
+            with view.location.open("rb") as source, partial.open("xb") as sink:
+                while block := source.read(1 << 20):
+                    digest.update(block)
+                    sink.write(block)
+                sink.flush()
+                os.fsync(sink.fileno())
+            if digest.hexdigest() != expected:
+                partial.unlink()
+                raise StageError(
+                    f"{path} changed after it was verified; nothing was staged from it"
+                )
+            partial.replace(target)
+        except OSError as exc:
+            partial.unlink(missing_ok=True)
+            raise StageError(f"could not stage {path} to {target}: {exc}") from exc
         self.report.copied += 1
         return target
 
@@ -240,7 +260,7 @@ def _repo_stager(fmt: str, suffix: str, local: str, finish: str) -> Callable[[_S
         for unit in s.verified.analysis.units:
             if unit.kind is not UnitKind.REPO_MIRROR or unit.attributes.get("format") != fmt:
                 continue
-            name = _safe(PurePosixPath(unit.root.path).name or fmt)
+            name = unit.root.path if unit.root.path != "." else fmt
             for path, below in _under(unit.root, s.verified.files):
                 s.copy(path, f"{name}/{below}")
                 covered.add(path)
@@ -319,6 +339,20 @@ def _write(path: Path, text: str) -> None:
 # --- the command --------------------------------------------------------------------------------
 
 
+def _accepted_at(ledger: Ledger, bundle: Path) -> tuple[str, datetime]:
+    """The manifest digest of ``bundle`` and when this side accepted it."""
+    try:
+        digest = sha256_digest((bundle / layout.MANIFEST).read_bytes())
+    except OSError as exc:
+        raise StageError(f"not a readable bundle: {exc}") from exc
+    times = [r.verified_at for r in ledger.accepted if r.manifest_digest == digest]
+    if not times:
+        raise StageError(
+            "this bundle has not been accepted on this side: run airlock verify --state first"
+        )
+    return digest, max(times)
+
+
 def stage(
     bundle: Path,
     *,
@@ -331,11 +365,11 @@ def stage(
     volume_dirs: Iterable[Path] = (),
     bases: Iterable[Path] = (),
     check: Callable[[Verified], str | None] | None = None,
-) -> StageReport:
+) -> Staged:
     """Stage ``bundle`` into ``targets`` (kind -> destination directory).
 
-    ``check`` may refuse the staging after verification (returns a reason) or allow it with a
-    note recorded in the report; ``airlock patch stage`` uses it for downgrade protection.
+    ``check`` may refuse the staging after verification (by raising ``StageError``) or allow it
+    with a note kept in the report; ``airlock patch stage`` uses it for downgrade protection.
     """
     unknown = sorted(set(targets) - set(TARGETS))
     if unknown:
@@ -352,59 +386,74 @@ def stage(
     problems = ledger.load(resolve.get, require_signed=signed)
     if problems:
         raise StageError(f"the ledger does not verify: {problems[0]}")
+    accepted_digest, accepted_at = _accepted_at(ledger, bundle)
     reports: list[TargetReport] = []
-    outcome: dict[str, object] = {}
+    outcome: dict[str, str | None] = {}
 
     def use(verified: Verified) -> None:
+        if verified.manifest_digest != accepted_digest:
+            raise StageError("the manifest is not the one the signed statement covers")
         if verified.assessment.summary.verdict is not Verdict.PASSED:
             verdict = verified.assessment.summary.verdict.value
-            raise StageError(f"the bundle does not pass verification now ({verdict})")
-        if not verified.manifest_digest or not ledger.accepted_snapshot(verified.manifest_digest):
-            raise StageError(
-                "this bundle has not been accepted on this side: run airlock verify --state first"
-            )
-        if check is not None:
-            outcome["note"] = check(verified)
-        outcome["digest"] = verified.manifest_digest
+            raise StageError(f"the bundle no longer passes verification ({verdict})")
         outcome["bundle"] = verified.bundle_id
+        outcome["note"] = check(verified) if check is not None else None
         for kind, destination in sorted(targets.items()):
-            destination.mkdir(parents=True, exist_ok=True)
             stager = _Stager(verified, kind, destination)
+            reports.append(stager.report)  # kept even if this target fails part-way
+            try:
+                destination.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise StageError(f"cannot create {destination}: {exc}") from exc
             STAGERS[kind](stager)
-            reports.append(stager.report)
 
-    verify(
-        bundle,
-        policy=policy,
-        pubkey=pubkey,
-        now=now,
-        volume_dirs=tuple(volume_dirs),
-        bases=tuple(bases),
-        use=use,
-    )
-    if "digest" not in outcome:
+    failure: StageError | None = None
+    try:
+        # As of the acceptance: the passing of time alone does not undo an import.
+        verify(
+            bundle,
+            policy=policy,
+            pubkey=pubkey,
+            now=accepted_at,
+            volume_dirs=tuple(volume_dirs),
+            bases=tuple(bases),
+            use=use,
+        )
+    except StageError as exc:
+        if not reports:
+            raise  # nothing was touched: nothing to record
+        failure = exc
+    if "bundle" not in outcome:
         raise StageError("the bundle could not be verified far enough to stage anything")
     report = StageReport(
-        bundle_id=outcome.get("bundle"),  # type: ignore[arg-type]
-        manifest_digest=str(outcome["digest"]),
+        bundle_id=outcome["bundle"],
+        manifest_digest=accepted_digest,
         staged_at=now,
         targets=tuple(reports),
-        downgrades_allowed=outcome.get("note"),  # type: ignore[arg-type]
+        downgrades_allowed=outcome.get("note"),
+        failed=str(failure) if failure else None,
     )
-    from airlock import bundle as layout
-    from airlock.core.canonical import sha256_digest
-
-    ledger.path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = layout.encode(report)
+    directory = state / "stages" / f"{now:%Y%m%dT%H%M%SZ}-{(report.bundle_id or 'bundle')[:12]}"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "stage-report.json"
+        path.write_bytes(encoded)
+    except OSError as exc:
+        raise StageError(f"could not write the stage report: {exc}") from exc
     chainlog.append(
         ledger.path,
         EVENT_STAGE,
         {
             "bundleId": report.bundle_id,
             "manifestDigest": report.manifest_digest,
-            "reportDigest": sha256_digest(layout.encode(report)),
+            "reportDigest": sha256_digest(encoded),
+            "outcome": "failed" if failure else "staged",
             "targets": {t.kind: {"copied": t.copied, "present": t.present} for t in reports},
         },
         now=now,
         signer=signer,
     )
-    return report
+    if failure is not None:
+        raise failure
+    return Staged(report, path)

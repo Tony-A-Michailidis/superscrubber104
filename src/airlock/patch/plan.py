@@ -52,6 +52,7 @@ class PackageGap:
     installed: str
     fixed: str
     arch: str = ""
+    channel: str = ""  # "ubuntu-pro": the fix is only published to Ubuntu Pro (ESM) subscribers
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,12 +106,26 @@ def _applies(fix: Fix, inventory: Inventory) -> bool:
     if os.family == "windows":
         return fix.ecosystem.lower() == os.name.lower()
     parts = [p.lower() for p in fix.ecosystem.split(":") if p.lower() not in ("pro", "lts")]
-    if not parts or parts[0].replace(" ", "") != os.id.lower().replace(" ", ""):
+    distribution = _OS_IDS.get(os.id.lower(), os.id.lower())
+    if not parts or parts[0].replace(" ", "") != distribution:
         return False
     if len(parts) < 2:
         return True
     wanted = parts[1]
     return os.version_id == wanted or os.version_id.split(".")[0] == wanted
+
+
+# os-release IDs whose OSV ecosystem is spelt differently ("Rocky Linux:9", "Red Hat:...").
+_OS_IDS = {
+    "rocky": "rockylinux",
+    "rhel": "redhat",
+    "ol": "oraclelinux",
+    "opensuse-leap": "opensuse",
+}
+
+
+def _pro(fix: Fix) -> bool:
+    return ":pro:" in f":{fix.ecosystem.lower()}:"
 
 
 def _older(installed: str, fixed: str, family: str) -> bool:
@@ -125,7 +140,8 @@ def _linux_gaps(
     for package in inventory.packages:
         by_source.setdefault(package.source or package.name, []).append(package)
     seen = set()
-    for fix in advisory.fixes:
+    # A fix in the standard archive is preferred to the same fix published for Ubuntu Pro.
+    for fix in sorted(advisory.fixes, key=_pro):
         if not _applies(fix, inventory):
             continue
         candidates = by_source.get(fix.name, []) if fix.source else by_name.get(fix.name, [])
@@ -142,7 +158,10 @@ def _linux_gaps(
             key = (package.name, package.arch)
             if key not in seen and _older(package.version, fix.fixed, inventory.os.family):
                 seen.add(key)
-                gaps.append(PackageGap(package.name, package.version, fix.fixed, package.arch))
+                channel = "ubuntu-pro" if _pro(fix) else ""
+                gaps.append(
+                    PackageGap(package.name, package.version, fix.fixed, package.arch, channel)
+                )
     return gaps
 
 
@@ -315,7 +334,11 @@ def markdown(result: PatchPlan) -> str:
         "|---|---|---|---|---|---|---|",
     ]
     for gap in result.gaps:
-        packages = ", ".join(f"{p.name} {p.installed} → {p.fixed}".strip() for p in gap.packages)
+        packages = ", ".join(
+            f"{p.name} {p.installed} → {p.fixed}".strip()
+            + (" (Ubuntu Pro)" if p.channel == "ubuntu-pro" else "")
+            for p in gap.packages
+        )
         cves = ", ".join(gap.cves[:5]) + (" …" if len(gap.cves) > 5 else "")
         cells = [gap.advisory, gap.severity, gap.kev, gap.reboot, gap.age_days, cves, packages]
         lines.append("| " + " | ".join(_cell(c) for c in cells) + " |")

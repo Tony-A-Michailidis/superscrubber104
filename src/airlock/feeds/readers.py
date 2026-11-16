@@ -10,11 +10,13 @@ import zipfile
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, cast
 
+from airlock.archive import ARCHIVE_ERRORS, capped
 from airlock.feeds import Advisory, Feed, Fix, severity_from
 
 _LIMIT = 512 << 20
+_EXPANDED_LIMIT = 4 << 30
 _CVE = re.compile(r"^CVE-\d{4}-\d{4,}$")
 
 
@@ -34,12 +36,12 @@ def _time(value: object) -> datetime | None:
 def _read(path: Path) -> bytes:
     if path.stat().st_size > _LIMIT:
         raise ValueError(f"{path.name} is larger than airlock will read")
-    data = path.read_bytes()
-    if path.name.endswith(".gz"):
-        return gzip.decompress(data)
-    if path.name.endswith(".xz"):
-        return lzma.decompress(data)
-    return data
+    with path.open("rb") as raw:
+        if path.name.endswith(".gz"):
+            return capped(cast(IO[bytes], gzip.GzipFile(fileobj=raw)), _EXPANDED_LIMIT).read()
+        if path.name.endswith(".xz"):
+            return capped(cast(IO[bytes], lzma.LZMAFile(raw)), _EXPANDED_LIMIT).read()
+        return raw.read()
 
 
 # --- OSV ----------------------------------------------------------------------------------------
@@ -281,6 +283,6 @@ def load_feeds(paths: Iterable[Path]) -> list[Feed]:
     for path in paths:
         try:
             feeds.append(load_feed(path))
-        except (OSError, ValueError, ET.ParseError, zipfile.BadZipFile, KeyError, TypeError) as exc:
+        except (*ARCHIVE_ERRORS, ET.ParseError, KeyError, TypeError, AttributeError) as exc:
             feeds.append(Feed(path.name, "unknown", None, problems=[f"unreadable: {exc}"]))
     return feeds

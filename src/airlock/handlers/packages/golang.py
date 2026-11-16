@@ -15,6 +15,7 @@ from airlock import __version__
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import Subject, ToolRef, UnitKind
 from airlock.formats.golang import (
+    ZipHashError,
     cache_entry,
     mod_hash,
     parse_go_sum,
@@ -31,6 +32,7 @@ from airlock.handlers.packages.locked import (
 
 TOOL = ToolRef("airlock.go", __version__)
 KIND = UnitKind.GO_ENVIRONMENT
+_MOD_LIMIT = 16 << 20
 
 
 def go_purl(module: str, version: str) -> str:
@@ -38,8 +40,6 @@ def go_purl(module: str, version: str) -> str:
 
 
 def _kind(view: ArtifactView) -> str | None:
-    if view.ref.nested:
-        return None
     if name_of(view.ref) == "go.sum":
         return "go.sum"
     entry = cache_entry(full_path(view.ref))
@@ -65,7 +65,10 @@ class GoHandler:
             return self._go_sum(artifact)
         module, version, _ = cache_entry(full_path(artifact.ref)) or ("", "", "")
         if kind == "go.module-mod":
-            digest = mod_hash(read_bytes(artifact, 16 << 20))
+            if artifact.size > _MOD_LIMIT:
+                summary = {"module": module, "error": "go.mod is implausibly large"}
+                return Inspection(kind=kind, metadata={"goModule": summary})
+            digest = mod_hash(read_bytes(artifact, _MOD_LIMIT))
             claim = distribution_claim(artifact, KIND, "go", f"{module}/go.mod", version, [digest])
             return Inspection(
                 kind=kind,
@@ -75,12 +78,14 @@ class GoHandler:
         try:
             with artifact.open() as stream:
                 digest = zip_hash(stream)
-        except (OSError, ValueError) as exc:
+        except ZipHashError as exc:
+            # Without its hash the zip satisfies no go.sum line: the lockfile's unit reports it
+            # as unresolvable.
             return Inspection(
                 kind=kind, metadata={"goModule": {"module": module, "error": str(exc)[:300]}}
             )
         sibling = artifact.resolve(f"{name_of(artifact.ref).removesuffix('.zip')}.ziphash")
-        if sibling is not None:
+        if sibling is not None and sibling.size <= 4096:
             recorded = read_bytes(sibling, 4096).decode("ascii", "replace").strip()
             if recorded != digest:
                 ctx.recorder.fail(
