@@ -40,6 +40,13 @@ The reader follows OCI indexes (nested up to two levels, as multi-platform image
 * for legacy `docker save` archives, each `layer.tar` against the config's `diff_ids`;
 * the config: user (empty, `root`, `0`, `root:*` or `0:*` is root), environment variables with literal credentials, architecture, OS, entrypoint, labels.
 
+An OCI layout can hold more than images. Each manifest is classified from its config and layer media types, and from Hauler's `kind` annotation where there is one:
+* Helm charts, files, cosign signatures, attestations and SBOMs have their blobs checked like any other;
+* they get no image checks (user, environment, start command);
+* they are listed under `artifacts` instead of `images`.
+
+The same checks run over layouts inside other archives: the Zarf and Hauler handlers ([35](35-zarf-and-hauler.md)) fill an in-memory store from one streaming pass.
+
 The image ID (config digest) is computed from the config content, never taken from a file name. Layers are archives, so the archive walk ([18](18-bundle-and-verification.md)) inspects their contents with every other handler: a model, a wheel or an MCP config inside a layer is found and checked.
 
 **Root filesystems.** A layer, or a rootfs tarball, has absolute symlinks (`bin/sh -> /bin/busybox`) and setuid binaries as a matter of course. When an archive's top level holds at least three of `bin`, `sbin`, `etc`, `usr`, `lib`, `lib64`, `var`, `opt`, `root`, `home`, absolute links are resolved inside the image and are not reported as escapes, and setuid bits are reported at low severity with the context `root filesystem`. Anywhere else both keep their normal severity. Link targets are never followed on the host either way.

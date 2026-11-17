@@ -10,6 +10,7 @@ from airlock.handlers.documents import DocumentHandler
 from airlock.handlers.evals import EvalHandler
 from airlock.handlers.executables import ExecutableHandler
 from airlock.handlers.generic import GenericHandler
+from airlock.handlers.hauler import HaulHandler
 from airlock.handlers.iac import IacHandler
 from airlock.handlers.ide import IdeExtensionHandler
 from airlock.handlers.knowledge import KnowledgeBaseHandler
@@ -48,6 +49,7 @@ def default_handlers() -> tuple[Handler, ...]:
         IdeExtensionHandler(),
         VmHandler(),
         ZarfPackageHandler(),
+        HaulHandler(),
         MirrorHandler(),
         OSPackageHandler(),
         PythonPackageHandler(),

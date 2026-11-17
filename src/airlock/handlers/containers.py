@@ -35,6 +35,23 @@ _INDEX_TYPES = (
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.docker.distribution.manifest.list.v2+json",
 )
+_IMAGE_CONFIGS = frozenset(
+    {
+        "application/vnd.oci.image.config.v1+json",
+        "application/vnd.docker.container.image.v1+json",
+    }
+)
+# Hauler's ``kind`` annotation, on signatures, attestations and SBOMs it keeps beside images.
+_HAULER_KINDS = {
+    "dev.hauler/sigs": "signature",
+    "dev.hauler/atts": "attestation",
+    "dev.hauler/sboms": "sbom",
+    "dev.hauler/referrers": "referrer",
+}
+_DOCUMENT_LIMIT = 4 << 20  # a JSON blob a memory store keeps (index, manifest, config)
+_DOCUMENTS_TOTAL = 64 << 20
+# Hauler's default haul names; such a tar is read by the Hauler handler, not as an image archive.
+HAUL_NAME = re.compile(r"^haul[^/]*\.tar(?:\.zst|\.gz)?$", re.IGNORECASE)
 
 
 class _Store(Protocol):
@@ -59,9 +76,34 @@ class MemoryStore:
     """
 
     def __init__(
-        self, digests: dict[str, str], sizes: dict[str, int], documents: dict[str, bytes]
+        self,
+        digests: dict[str, str] | None = None,
+        sizes: dict[str, int] | None = None,
+        documents: dict[str, bytes] | None = None,
     ) -> None:
-        self.digests, self.sizes, self.documents = digests, sizes, documents
+        self.digests = digests if digests is not None else {}
+        self.sizes = sizes if sizes is not None else {}
+        self.documents = documents if documents is not None else {}
+        self._left = _DOCUMENTS_TOTAL - sum(len(d) for d in self.documents.values())
+
+    def add(self, path: str, stream: IO[bytes]) -> None:
+        """Hash a file as it streams past, keeping it if it is a small JSON document. The first
+        copy of a path wins; a later one is ignored here (the archive walk reports duplicates)."""
+        digest, size, kept = hashlib.sha256(), 0, bytearray()
+        limit = min(_DOCUMENT_LIMIT, self._left)
+        while block := stream.read(1 << 20):
+            if size == 0 and block.lstrip()[:1] != b"{":
+                limit = 0
+            digest.update(block)
+            size += len(block)
+            if size <= limit:
+                kept += block
+        if path in self.digests:
+            return
+        self.digests[path], self.sizes[path] = digest.hexdigest(), size
+        if 0 < size <= limit:
+            self.documents[path] = bytes(kept)
+            self._left -= size
 
     def exists(self, path: str) -> bool:
         return path in self.digests
@@ -159,6 +201,50 @@ class _Image:
     layers: list[tuple[str, int | None]]  # (path, size declared by the descriptor)
     config: dict[str, Any] = field(default_factory=dict)
     config_digest: str | None = None  # the image ID: sha256 of the config
+    # image, or what else an OCI layout holds: helm-chart, file, signature, attestation, sbom...
+    kind: str = "image"
+    title: str | None = None  # a file's name, from its layer's annotations
+
+
+def _artifact_kind(annotations: dict[str, Any], document: Any) -> str:
+    """What an OCI manifest holds. Only images get image checks (user, environment, start)."""
+    if not isinstance(document, dict):
+        return "artifact"
+    if annotations.get("kind") in _HAULER_KINDS:
+        return _HAULER_KINDS[annotations["kind"]]
+    config = document.get("config")
+    media = str(
+        (config.get("mediaType") if isinstance(config, dict) else None)
+        or document.get("artifactType")
+        or ""
+    )
+    layers = [
+        str(layer.get("mediaType") or "")
+        for layer in document.get("layers") or []
+        if isinstance(layer, dict)
+    ]
+    reference = str(annotations.get("org.opencontainers.image.ref.name") or "")
+    if "helm" in media or any("helm.chart" in m for m in layers):
+        return "helm-chart"
+    if any(m.startswith("application/vnd.content.hauler.file") for m in layers):
+        return "file"
+    if any("cosign.simplesigning" in m for m in layers) or reference.endswith(".sig"):
+        return "signature"
+    if any("dsse.envelope" in m or "in-toto" in m for m in layers) or reference.endswith(".att"):
+        return "attestation"
+    if any("spdx" in m or "cyclonedx" in m for m in layers) or reference.endswith(".sbom"):
+        return "sbom"
+    if not media or media in _IMAGE_CONFIGS:
+        return "image"
+    return "artifact"
+
+
+def _title(document: Any) -> str | None:
+    for layer in (document.get("layers") or []) if isinstance(document, dict) else []:
+        annotations = layer.get("annotations") if isinstance(layer, dict) else None
+        if isinstance(annotations, dict) and annotations.get("org.opencontainers.image.title"):
+            return str(annotations["org.opencontainers.image.title"])[:300]
+    return None
 
 
 def _blob(digest: str) -> str | None:
@@ -217,8 +303,9 @@ class _Reader:
                 self.verify(image.config_path)
                 config_sha = self.store.sha256(image.config_path)
                 image.config_digest = f"sha256:{config_sha}" if config_sha else None
-                config = self.store.json(image.config_path)
-                image.config = config if isinstance(config, dict) else {}
+                if image.kind == "image":  # other artifacts' configs need not be JSON
+                    config = self.store.json(image.config_path)
+                    image.config = config if isinstance(config, dict) else {}
             diff_ids = (
                 ((image.config.get("rootfs") or {}).get("diff_ids") or []) if image.config else []
             )
@@ -267,7 +354,17 @@ class _Reader:
                 if isinstance(layer, dict)
             ]
             config_path = _blob(str(config.get("digest", ""))) or "<missing config digest>"
-            images.append(_Image(name, str(descriptor.get("digest")), config_path, layers))
+            kind = _artifact_kind(annotations if isinstance(annotations, dict) else {}, document)
+            images.append(
+                _Image(
+                    name,
+                    str(descriptor.get("digest")),
+                    config_path,
+                    layers,
+                    kind=kind,
+                    title=_title(document) if kind == "file" else None,
+                )
+            )
         return images
 
     def _docker(self, manifest: Any) -> list[_Image]:
@@ -408,20 +505,29 @@ def inspect_store(
     else:
         ctx.recorder.passed("container.layer.digest-mismatch", max(len(reader.checked), 1))
     for image in images:
-        if image.config:
+        if image.config and image.kind == "image":
             _check_config(image, ctx, view)
-    summaries = [_summary(image) for image in images]
+    summaries = [_summary(image) for image in images if image.kind == "image"]
+    others = [
+        {
+            "name": image.name,
+            "kind": image.kind,
+            "manifestDigest": image.manifest_digest,
+            **({"title": image.title} if image.title else {}),
+        }
+        for image in images
+        if image.kind != "image"
+    ]
     if root is None and isinstance(store, _TarStore):
         root = view.ref
     claims = tuple(
         make_claim(view, UnitKind.CONTAINER_IMAGE, "image", {"image": s}, root=root)
         for s in summaries
     )
-    return Inspection(
-        kind=kind,
-        metadata={"container": {"images": summaries, "blobsChecked": len(reader.checked)}},
-        claims=claims,
-    )
+    metadata: dict[str, object] = {"images": summaries, "blobsChecked": len(reader.checked)}
+    if others:
+        metadata["artifacts"] = others
+    return Inspection(kind=kind, metadata={"container": metadata}, claims=claims)
 
 
 _BLOB_PATH = re.compile(r"(?:^|/)blobs/sha256/[0-9a-f]{64}$")
@@ -445,7 +551,11 @@ class ContainerImageHandler:
 
     def detect(self, artifact: ArtifactView) -> Detection | None:
         name = name_of(artifact.ref)
-        if artifact.head(512)[257:262] == b"ustar" and name.lower().endswith(".tar"):
+        if (
+            artifact.head(512)[257:262] == b"ustar"
+            and name.lower().endswith(".tar")
+            and not HAUL_NAME.match(name)
+        ):
             return Detection("container.image.archive", 60)
         if name == "index.json" and artifact.resolve("oci-layout") is not None:
             return Detection("container.image.oci-layout", 90)

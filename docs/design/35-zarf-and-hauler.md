@@ -1,6 +1,6 @@
 # 35. Zarf and Hauler
 
-> **Status: research done; Zarf packages are inspected (§35.5); Hauler hauls are a proposal (§35.6).** Facts below are from the projects' own documentation, release notes and source code, and from one real Zarf package examined offline (§35.2 and §35.5). Sources are in §35.8. Where a source was secondary or a fact could not be confirmed, that is said.
+> **Status: research done; Zarf packages are inspected (§35.5); Hauler hauls are inspected without verifying their cosign signatures (§35.6).** Facts below are from the projects' own documentation, release notes and source code, and from one real Zarf package examined offline (§35.2 and §35.5). Sources are in §35.8. Where a source was secondary or a fact could not be confirmed, that is said.
 
 Zarf and Rancher Government Hauler are open-source tools for moving content into disconnected environments. They overlap with airlock's transport side. Their job is to move content and deploy it. airlock's job is to inspect content, decide by policy whether it may cross, and record evidence of why. This document records what they do as of November 2026, so that airlock can work with them rather than duplicate them, and describes how airlock inspects their packages.
 
@@ -191,17 +191,40 @@ The real `zarf-init-amd64-v1.0.1.tar.zst` (§35.2) was inspected again, from the
 
 With an identity the policy does not accept, the signature is `untrusted` (not `invalid`), and the 36 members fall back to checksum level.
 
-## 35.6 Proposal: Hauler hauls (cheap part only)
+## 35.6 Hauler hauls (as built, cheap part only)
 
-With zstd readable, a haul is an OCI layout in a tar, and the store-based layout checks from §35.5 already read that:
+`handlers/hauler.py`, kind `hauler.haul`, unit `hauler-haul`.
 
-* image digests are checked (existing final rule `container.layer.digest-mismatch`);
-* charts (Helm chart layers, `.tgz`) and files (Hauler file layers) are walked as content;
-* the `kind` annotations identify what each entry is.
+**Recognised** by Hauler's default name (`haul*.tar`, `haul*.tar.gz`, `haul*.tar.zst`), with a tar, gzip or zstd header. It is treated as a haul only if `oci-layout` and `index.json` are at its root. A haul with another name is walked as an ordinary archive, without the layout checks. Such a tar is not also read as a `docker save` archive by the container handler.
 
-A small `hauler.haul` kind would add a unit listing images, charts, files, and which artifacts carry signatures, attestations and SBOMs.
+**One streaming pass**, decompressed through `archive.capped` within `maxExpandedBytes`, hashes every member and keeps the small JSON documents (`containers.MemoryStore`). Then:
 
-**Not cheap, so deferred:** verifying the cosign image signatures a haul carries. They are a different format from Sigstore bundles (simple-signing payloads in OCI artifacts). Hauler itself verifies them before saving and after loading, so for now airlock would record their presence, not their validity.
+* **Layout.** The container checks run over the whole layout:
+  * every blob hashes to its name, and every referenced blob is present;
+  * a blob that differs is `container.layer.digest-mismatch`, and one that is missing is `container.image.incomplete`, both existing rules; the mismatch is final;
+  * images get the usual image checks.
+* **What each entry is.** Each manifest is classified from its media types and Hauler's `kind` annotation as an image, a Helm chart, a file (named from its layer's `org.opencontainers.image.title`), a signature, an attestation or an SBOM. Only images get image checks, so a chart or a signature is never reported as "runs as root". This change is in the container handler and applies to any OCI layout (doc 20).
+* **Signatures.** When a haul carries cosign signatures or attestations, `upstream.signature.invalid` and `.untrusted` are recorded as **not assessed**. The reason says that airlock does not verify cosign signatures yet, and that Hauler verifies them when it saves and loads. The unit says `signaturesVerified: false`.
+* **Contents.** The archive walk inspects every blob:
+  * image layers, so models in images reach the model handlers;
+  * chart archives;
+  * files.
+* **Units.** `hauler-haul` lists images, charts, files, signatures, attestations, SBOMs and anything unrecognised. The images also form a `container-image` unit rooted at the haul.
+
+No new rules were needed.
+
+**Validation.** `tests/test_hauler.py` covers a synthetic haul (`tests/hauler_fixtures.py`) holding:
+* an image with a model in its layer;
+* a chart;
+* a file;
+* a cosign signature.
+
+It is checked as tar, gzip and, on 3.14, zstd; changed and missing blobs are also tested. Damaged and odd hauls are in the robustness tests. **Not validated on a real haul**: none was published to examine, and the owner chose not to build one with Hauler (§35.7, question 5). The layout follows Hauler's documentation and source constants. Check one real haul before relying on the classification of charts, files and signatures.
+
+**Not built:**
+* verifying cosign signatures, which are simple-signing payloads in OCI artifacts, a different format from Sigstore bundles;
+* chunked hauls (`haul.tar.zst.001`, …), which are walked as unrecognised files;
+* hauls under names other than Hauler's default.
 
 ## 35.7 Review decisions
 

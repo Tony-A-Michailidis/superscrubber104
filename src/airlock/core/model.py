@@ -140,6 +140,7 @@ class UnitKind(StrEnum):
     KNOWLEDGE_BASE = "knowledge-base"
     DATASET = "dataset"
     ZARF_PACKAGE = "zarf-package"
+    HAULER_HAUL = "hauler-haul"
 
 
 class ComponentType(StrEnum):

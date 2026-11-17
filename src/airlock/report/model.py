@@ -381,6 +381,12 @@ _SUMMARY: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("signature", ("signature", "status")),
         ("differential base", ("differential", "base")),
     ),
+    "hauler-haul": (
+        ("images", ("images",)),
+        ("charts", ("charts",)),
+        ("files", ("files",)),
+        ("signatures", ("signatures",)),
+    ),
 }
 
 

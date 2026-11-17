@@ -4,6 +4,7 @@ from airlock.core.interfaces import UnitAssembler
 from airlock.core.model import UnitKind
 from airlock.units.container_image import ContainerImageAssembler
 from airlock.units.dataset import DatasetAssembler
+from airlock.units.hauler_haul import HaulAssembler
 from airlock.units.knowledge_base import KnowledgeBaseAssembler
 from airlock.units.locked_env import LockedEnvironmentAssembler
 from airlock.units.model_package import ModelPackageAssembler
@@ -27,6 +28,7 @@ def default_assemblers() -> tuple[UnitAssembler, ...]:
         RepoMirrorAssembler(),
         VmImageAssembler(),
         ZarfPackageAssembler(),
+        HaulAssembler(),
         LockedEnvironmentAssembler(UnitKind.JVM_ENVIRONMENT, "maven"),
         LockedEnvironmentAssembler(UnitKind.GO_ENVIRONMENT, "go"),
         LockedEnvironmentAssembler(UnitKind.RUST_ENVIRONMENT, "cargo"),

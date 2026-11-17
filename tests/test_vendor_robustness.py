@@ -20,6 +20,7 @@ from airlock.formats import openpgp
 from airlock.formats.deb import DebError, read_deb
 from airlock.formats.golang import ZipHashError, zip_hash
 from tests import vm_fixtures as vm
+from tests.hauler_fixtures import haul, haul_bytes
 from tests.models_helpers import findings_of, inspect
 from tests.software_fixtures import write
 from tests.test_ecosystems import _crate, _jar, _module, _nupkg, _zip
@@ -237,6 +238,21 @@ SAMPLES: dict[str, tuple[str, bytes, dict[str, bytes]]] = {
     **(
         {"zarf-zstd": (f"z/{ZARF_NAME}.zst", package_bytes(build(), zstd=True), {})} if ZSTD else {}
     ),
+    "haul": ("h/haul.tar", haul_bytes(haul()), {}),
+    "haul-gzip": ("h/haul.tar.gz", haul_bytes(haul(), "gzip"), {}),
+    "haul-odd-index": (
+        "h/haul.tar",
+        tar(
+            {
+                "oci-layout": b"{}",
+                "index.json": b'{"manifests": [1, {"digest": "sha256:' + b"0" * 64 + b'", '
+                b'"annotations": {"kind": "dev.hauler/sigs"}}, {"annotations": []}]}',
+                "blobs/sha256/" + "0" * 64: b'{"layers": 5, "config": []}',
+            }
+        ),
+        {},
+    ),
+    **({"haul-zstd": ("h/haul.tar.zst", haul_bytes(haul(), "zstd"), {})} if ZSTD else {}),
 }
 
 
