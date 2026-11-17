@@ -12,6 +12,7 @@ from airlock.units.python_env import PythonEnvironmentAssembler
 from airlock.units.repo_mirror import RepoMirrorAssembler
 from airlock.units.runtime_profile import RuntimeProfileAssembler
 from airlock.units.vm_image import VmImageAssembler
+from airlock.units.zarf_package import ZarfPackageAssembler
 
 
 def default_assemblers() -> tuple[UnitAssembler, ...]:
@@ -25,6 +26,7 @@ def default_assemblers() -> tuple[UnitAssembler, ...]:
         RuntimeProfileAssembler(),
         RepoMirrorAssembler(),
         VmImageAssembler(),
+        ZarfPackageAssembler(),
         LockedEnvironmentAssembler(UnitKind.JVM_ENVIRONMENT, "maven"),
         LockedEnvironmentAssembler(UnitKind.GO_ENVIRONMENT, "go"),
         LockedEnvironmentAssembler(UnitKind.RUST_ENVIRONMENT, "cargo"),

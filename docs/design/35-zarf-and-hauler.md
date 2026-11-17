@@ -1,8 +1,8 @@
 # 35. Zarf and Hauler
 
-> **Status: research done; the handler is a proposal awaiting review. Nothing in §35.4 to §35.7 is implemented.** Facts below are from the projects' own documentation, release notes and source code, and from one real Zarf package examined offline (§35.2). Sources are in §35.8. Where a source was secondary or a fact could not be confirmed, that is said.
+> **Status: research done; Zarf packages are inspected (§35.5); Hauler hauls are a proposal (§35.6).** Facts below are from the projects' own documentation, release notes and source code, and from one real Zarf package examined offline (§35.2 and §35.5). Sources are in §35.8. Where a source was secondary or a fact could not be confirmed, that is said.
 
-Zarf and Rancher Government Hauler are open-source tools for moving content into disconnected environments. They overlap with airlock's transport side. Their job is to move content and deploy it. airlock's job is to inspect content, decide by policy whether it may cross, and record evidence of why. This document records what they do as of November 2026, so that airlock can work with them rather than duplicate them, and proposes how airlock should inspect their packages.
+Zarf and Rancher Government Hauler are open-source tools for moving content into disconnected environments. They overlap with airlock's transport side. Their job is to move content and deploy it. airlock's job is to inspect content, decide by policy whether it may cross, and record evidence of why. This document records what they do as of November 2026, so that airlock can work with them rather than duplicate them, and describes how airlock inspects their packages.
 
 ## 35.1 Zarf (1.0)
 
@@ -87,84 +87,113 @@ What airlock adds, which neither documents:
 
 They are complementary: Zarf or Hauler builds and moves the package, and airlock inspects it before it is allowed to cross and again on arrival. The useful work for airlock is to read their packages as well as it reads anything else.
 
-## 35.5 Proposal: inspecting a Zarf package
+## 35.5 Zarf packages (as built)
 
-### Two prerequisites in the core
+`handlers/zarf.py`, kind `zarf.package`, unit `zarf-package`. The owner's decisions on the review questions are in §35.7.
 
-1. **zstd.** Zarf packages are zstd-compressed by default, and airlock's archive walker recognises zstd but cannot open it, so today a Zarf package is hashed and recorded with its contents **not assessed**. Python 3.14's standard library reads zstd (`compression.zstd`), with no new dependency. Proposal: on 3.14 and later, zstd joins gzip, bzip2 and xz in the walker, with the same expansion budget. Before 3.14 it stays not assessed, with the advice to build with `metadata.uncompressed: true` or to decompress before packing. Zarf's checksums cover the members, not the compressed archive, so a decompressed package remains fully verifiable.
-2. **Images in an OCI layout inside an archive.** The container handler finds an OCI layout through `resolve()`, which does not reach into archives, so the images in `images/` would not be checked. Proposal: factor the container handler's layout checks (index to manifests to configs and layers, each digest equal to its name, every referenced blob present) so that they run over a store built from a streaming pass, as well as over a directory. The Zarf handler then supplies that store.
+### Two changes in the core
 
-### The handler (`handlers/zarf.py`, kind `zarf.package`)
+1. **zstd.** On Python 3.14 and later, zstd joins gzip, bzip2 and xz in the archive walker (`compression.zstd`, standard library, under the same expansion budget). Before 3.14, a zstd archive is still recorded with its contents **not assessed**. The reason recorded says to run on 3.14, or to build the package with `metadata.uncompressed: true` or decompress it before packing. Zarf's checksums cover the members, not the compressed archive, so a decompressed package is still fully verifiable. No dependency was added.
+2. **Images in an OCI layout inside an archive.** The container handler's layout checks run over any store (`containers.MemoryStore`, `inspect_store`), not just a directory or an image tar:
+   * index to manifests to configs and layers;
+   * every digest equal to its name;
+   * every referenced blob present.
+   The Zarf handler fills a store from its own streaming pass.
 
-Recognised by name (`zarf-package-*.tar[.zst]`, `zarf-init-*.tar[.zst]`), confirmed by finding `zarf.yaml` in the archive. **One streaming pass** over the archive:
+The default `limits.archive.maxDepth` rose from 4 to 5. A package holds image layers, and the layers hold archives of their own (wheels, model zips).
 
-* hashes every member with sha256;
-* keeps only the small control files: `zarf.yaml`, `checksums.txt`, `zarf.bundle.sig`, `images/index.json`, and image manifests and configs (blobs under 4 MiB);
-* holds nothing else in memory, so a 400 MiB package costs one read.
+### The handler
+
+**Recognised** by name (`zarf-package-*.tar[.zst]`, `zarf-init-*.tar[.zst]`), with a tar or zstd header. It is a Zarf package only if `zarf.yaml` is in it; otherwise it is left to the other handlers.
+
+**One streaming pass** over the archive, decompressed through `archive.capped` within `maxExpandedBytes`:
+* hashes every member, and every file inside each `components/<name>.tar`, with sha256;
+* keeps only `zarf.yaml`, `checksums.txt` and `zarf.bundle.sig` (up to 16 MiB each), plus the image index, manifests and configs (JSON blobs up to 4 MiB, 64 MiB in all).
+
+A package is read once by this handler, and once more by the archive walk that inspects its contents.
 
 Then, in order:
 
-1. **Definition.** `zarf.yaml` is read with the untrusted YAML loader. The schema is taken from `apiVersion` (none or `zarf.dev/v1alpha1`, or `zarf.dev/v1beta1`; anything else is recorded as not assessed). The field locations that differ between the two are handled explicitly.
-2. **Checksum chain** (records that travelled with the content, so mismatches are final):
-   * the sha256 of `checksums.txt` against `aggregateChecksum`;
-   * each listed file against `checksums.txt`;
-   * a listed file that is absent.
-   A file present but neither listed nor named in `build.provenanceFiles` is not covered by the publisher's checksums or signature (see question 1).
-3. **Signature.** `zarf.bundle.sig` is verified against keys pinned in `trust.upstream` with a new scope, `zarf.package`:
-   * keyless: `type: sigstore`, with the trusted root and accepted identities and issuers, exactly as for model signatures;
-   * key or KMS: `type: x509` with the public key in PEM.
-   This needs `formats/sigstore.py` to accept a message-signature bundle with a `hashedrekord` log entry as well as the DSSE bundles of model signing. The scratch check in §35.2 shows that the pieces are already there.
-   * The outcome reuses `upstream.signature.invalid` (final) and `upstream.signature.untrusted`.
-   * A package whose `zarf.yaml` says `signed: true` but carries no signature file is recorded as untrusted with that reason. (Stripping the signature and editing the flag would leave no trace; a site that needs signed packages says so with `trust.minimumLevels`.)
-4. **Trust levels.** A verified signature gives `zarf.yaml` a signature-level verification. Through the checksum chain, every member gets one too, as dnf and apt mirrors do (doc 28). An unsigned but consistent package gives its members checksum level.
-5. **Images.** The layout checks run over the `images/` store (prerequisite 2). Every image `zarf.yaml` names must be in `images/index.json`, after reference normalisation, unless the package is differential (see 9).
-6. **Component files.** Each `files` entry with a recorded `shasum` or `checksum` is compared with the file in the component tar: final on mismatch.
-   * A file whose target is a host path (anything not under `###ZARF_TEMP###` or the cluster) is listed on the unit with its target and whether it is executable.
-   * Downloaded files with no recorded checksum are noted.
-7. **Actions.** `onDeploy` and `onRemove` commands run on the deploying host with the deployer's rights. They are reported, with the command text and component, as `zarf.component.actions`, as maintainer scripts and agent hooks are. `onCreate` actions ran on the low side and are only listed.
-8. **Everything inside.** The rest needs no new code once zstd is readable: the analyzer's archive walk already descends into the members.
-   * Component tars hold charts (templates recorded as not rendered, doc 30), manifests (workload posture, doc 30), host files (the executables handler) and git repositories (source).
-   * Image layer blobs are gzip tars, walked like any other, so **models inside images** (the usual way LeapfrogAI-style packages carry them) meet the model handlers.
-   * `sboms.tar` and `documentation.tar` are walked as archives.
-   * The nesting is deeper than usual (package, layer, files), so `limits.archive.maxDepth` may need to rise from 4 to 5 for Zarf packages (see question 4).
-9. **Differential packages.** `build.differential`, the reference version and the components left out are recorded. Image completeness is then not assessed, with the reason. Whether the base is present on the high side cannot be known offline; the unit says which base it needs.
-10. **Unit.** A new unit kind, `zarf-package`, holds:
-    * members: definition, signature, checksums, components, images;
-    * name, version, kind (init or package), architecture and schema;
-    * signature status, signer identity and anchor;
-    * per-component images, charts, manifests, host files and actions;
-    * the differential base.
-    The SBOMs Zarf made are recorded as present; they are the packer's claim, and airlock's own SBOM is built from what it inspected.
+1. **Definition.** `zarf.yaml` is read with the untrusted YAML loader.
+   * Schemas: no `apiVersion` or `zarf.dev/v1alpha1` (Zarf 1.0's own packages), or `zarf.dev/v1beta1`.
+   * Field locations that differ between the two are handled: the aggregate checksum in `metadata` or `build`; images as strings or objects; file checksums as `shasum` or `checksum: sha256:…`; targets as `target` or `destination`; differential base as `differentialPackageVersion` or `differential.fromVersion`.
+   * Any other schema, or a definition that cannot be read, makes every Zarf rule **not assessed**, never a failure.
+2. **Checksum chain.** These are records that travelled with the content, so all are **final**.
+   * `zarf.package.checksum-mismatch`: the sha256 of `checksums.txt` differs from the aggregate checksum, or a listed file differs from its line. A duplicated member name counts if any copy differs.
+   * `zarf.package.incomplete`: a listed file is absent, or the definition has an aggregate checksum but there is no `checksums.txt`.
+   * `zarf.package.unlisted` (high): a file is neither listed nor among the provenance files (`zarf.yaml`, `checksums.txt`, `zarf.bundle.sig`, and whatever `build.provenanceFiles` names, which the signature covers).
+   * A package with no `checksums.txt` and no aggregate checksum has these rules recorded as not assessed.
+3. **Signature.** `zarf.bundle.sig` is verified against `trust.upstream` entries with scope `zarf.package`:
+   * keyless: `type: sigstore` with the trusted root and the identities and issuers it accepts;
+   * a key or a CA: `type: x509`, PEM.
 
-Proposed rules (the integrity class is decided per the conventions in CLAUDE.md):
+   `formats/sigstore.py` reads message-signature bundles, the signature being over the bytes of `zarf.yaml`. For keyless signatures, the log entry is a `hashedrekord` that must record both the hash of `zarf.yaml` and this signature.
 
-| Rule | Severity | Class | When |
-|---|---|---|---|
-| `zarf.package.checksum-mismatch` | critical | final | aggregate checksum, a listed file, or a component file's recorded checksum does not match |
-| `zarf.package.incomplete` | critical | final | a file `checksums.txt` lists is absent, or an image `zarf.yaml` names is not in the image index (non-differential) |
-| `zarf.package.unlisted` | high | see question 1 | a file the checksums and provenance list do not cover |
-| `zarf.component.actions` | medium | policy | commands that run on the deploying host |
-| `zarf.component.host-files` | low | policy | files written to host paths, especially executables |
-| `zarf.package.differential` | info | policy | the package needs a base version on the high side |
-| `upstream.signature.invalid` / `.untrusted` | existing | existing | the signature, reused with scope `zarf.package` |
+   Outcomes:
+   * The signature does not hold, or the bundle's message digest is not the hash of `zarf.yaml`: `upstream.signature.invalid`, final.
+   * It holds for no key, CA or identity the policy pins, or the bundle cannot be read: `upstream.signature.untrusted`.
+   * `build.signed: true` with no signature file: untrusted, with status `missing`.
 
-**Not proposed now:**
+   A package whose signature and flag were both removed and whose checksums were recomputed is indistinguishable from an unsigned one. It is recorded as `unsigned` with checksum-level trust, so a site that needs signed packages says so with `trust.minimumLevels`.
+4. **Trust levels.** `zarf.yaml` gets a signature-level verification when the signature verifies. Every file the chain binds also gets one: the aggregate binds `checksums.txt`, which binds the rest. An unsigned but consistent package gives those files checksum level. A broken chain gives nothing.
+5. **Images.** The container checks run over `images/`. Their findings and the `container-image` unit are rooted at `images/index.json`.
 
-* split packages (`.partNNN`): their metadata format has not been seen;
-* packages pulled from OCI registries;
-* running anything Zarf would run;
-* checking packages against a live cluster.
+   Every image a component names must appear in the index's `org.opencontainers.image.ref.name` annotations, after normalisation: `library/registry:3.1.1` becomes `docker.io/library/registry:3.1.1`. A missing image is `zarf.package.incomplete`, unless the package is differential (see 8).
+6. **Component files.** A `files` entry with a recorded sha256 is compared with the one file stored under `<component>/files/<index>/`. A mismatch is `zarf.package.checksum-mismatch` (final), and a missing file or component tar is `zarf.package.incomplete`.
 
-### Tests and validation
+   Entries with `extractPath`, or whose source was a directory, are not compared: their recorded checksum is of something else. A component tar that cannot be read leaves the comparison not assessed.
 
-* Synthetic packages are built in `tests/zarf_fixtures.py` to the layout in §35.2: uncompressed tar on any Python, zstd on 3.14. They are signed with throwaway keys and a throwaway Fulcio-like CA and log key, as the model-signing tests already do.
-* Cases: a clean package; a changed member, `checksums.txt` or `zarf.yaml`; a stripped signature; an unpinned signer; a missing image; a host action; a differential package; a model inside an image layer.
-* Damaged samples join `tests/test_vendor_robustness.py`.
-* The real init package is checked again from the scratchpad before the work is committed, and the result recorded here. A v1beta1 package and a key-signed package should be found or built for the same check (see question 5).
+   Files placed outside `###ZARF_TEMP###` are listed under `zarf.component.host-files` (low), with target, executable flag and symlinks.
+7. **Actions.** Every `onDeploy` and `onRemove` command is reported under `zarf.component.actions`, always medium, so it needs approval. Each entry gives the component, event, stage, command text and description. `wait` actions are not commands and are not listed. `onCreate` commands ran on the low side and are only listed on the unit.
+8. **Differential packages.** `zarf.package.differential` (info) records the base version and the components left out. Image completeness is then recorded as not assessed, with the reason, because the images are in the base. Whether that base is on the high side cannot be known offline.
+9. **Everything inside** goes through the ordinary archive walk:
+   * component tars: charts, manifests, host files, git repositories;
+   * image layers (gzip tars): **models in images** reach the model handlers;
+   * `sboms.tar` and `documentation.tar`.
+10. **Unit.** `zarf-package` holds:
+    * members: the package, its definition, checksums, signature, component tars, image index, SBOMs and documentation;
+    * name, version, kind, architecture, schema and the Zarf version that built it;
+    * the checksum summary and the signature outcome;
+    * per-component images, charts, manifests, repositories and file counts;
+    * host files, action counts, `onCreate` commands, and the differential base.
+
+    Zarf's own SBOMs are recorded as present. They are the builder's claim; airlock's SBOM is built from what it inspected.
+
+**Not built:** split packages (`.partNNN`), packages pulled from OCI registries, running anything Zarf would run, and checking a package against a live cluster.
+
+### Validation
+
+Tests are in `tests/test_zarf.py`. The packages in `tests/zarf_fixtures.py` are synthetic, built to the §35.2 layout and signed with throwaway keys, a throwaway Fulcio-like CA and a throwaway log. They cover:
+* clean, v1beta1 and unknown-schema packages;
+* a changed member, `checksums.txt`, component file or `zarf.yaml`;
+* an unlisted file; a listed file or an image that is absent;
+* differential packages;
+* host actions and files;
+* key and keyless signatures, an unaccepted identity, a re-signing key and a stripped signature;
+* a model inside an image layer;
+* zstd on 3.14, and not assessed before it.
+
+Damaged and odd packages are in `tests/test_vendor_robustness.py`.
+
+The real `zarf-init-amd64-v1.0.1.tar.zst` (§35.2) was inspected again, from the scratchpad, with Python 3.14 and Sigstore's public trusted root pinned for `zarf.package`. Accepted identity: `https://github.com/zarf-dev/zarf/.github/workflows/release.yml@refs/tags/v*`, issuer `https://token.actions.githubusercontent.com`. It took 28 seconds for 411 MB and 11,846 artifacts.
+
+| Check | Result |
+|---|---|
+| Keyless signature | verified offline |
+| Aggregate checksum and `checksums.txt` | 35 of 35 files match |
+| Component files with a recorded checksum | 3 of 3 match |
+| Images named by components | 4 of 4 in the image index |
+| Host actions | 11 `onDeploy`/`onRemove` commands, k3s's `systemctl` and clean-up commands among them |
+| Host files | 4, including `/usr/sbin/k3s` and its symlinks |
+| Trust | 36 members at signature level |
+| Contents walked | charts, manifests, the k3s airgap image archive (zstd), image layers |
+| Depth limit | not reached at 5 |
+
+With an identity the policy does not accept, the signature is `untrusted` (not `invalid`), and the 36 members fall back to checksum level.
 
 ## 35.6 Proposal: Hauler hauls (cheap part only)
 
-With zstd readable, a haul is an OCI layout in a tar, and prerequisite 2 already reads that:
+With zstd readable, a haul is an OCI layout in a tar, and the store-based layout checks from §35.5 already read that:
 
 * image digests are checked (existing final rule `container.layer.digest-mismatch`);
 * charts (Helm chart layers, `.tgz`) and files (Hauler file layers) are walked as content;
@@ -174,14 +203,16 @@ A small `hauler.haul` kind would add a unit listing images, charts, files, and w
 
 **Not cheap, so deferred:** verifying the cosign image signatures a haul carries. They are a different format from Sigstore bundles (simple-signing payloads in OCI artifacts). Hauler itself verifies them before saving and after loading, so for now airlock would record their presence, not their validity.
 
-## 35.7 Questions for review
+## 35.7 Review decisions
 
-1. **Unlisted files in a Zarf package.** Final, as `integrity.entry.unexpected` is for airlock's own bundles? A file the publisher's signature does not cover is content nobody vouched for. Or high and policy? Recommendation: final when the package is signed, high when it is not.
-2. **Actions severity.** Medium (require approval) for any `onDeploy` or `onRemove` command, or info when the package's signature verified against a pinned publisher? Recommendation: medium always. The commands run as root on hosts, and approval is cheap evidence.
-3. **zstd before Python 3.14.** Accept "not assessed" with advice on 3.11 to 3.13? Or allow an optional `zstandard` dependency? Recommendation: stdlib only, as the dependency rule in CLAUDE.md asks.
-4. **Archive depth.** Raise the default `maxDepth` from 4 to 5 globally, or only within a recognised Zarf package?
-5. **More real samples.** May a pinned Zarf binary be run in the scratchpad, never in the repository or tests, to build a v1beta1, a key-signed, a differential and a split package for validation? The alternative is to find published ones. The same question applies to Hauler, where building one sample haul would confirm §35.3.
-6. **Scope.** Zarf first, Hauler after (as above)? Or both in one change?
+The owner's answers to the questions this document raised:
+
+1. **Unlisted files in a Zarf package** are final, signed or not: content nobody vouched for.
+2. **Actions** are medium (require approval) always, whoever signed the package.
+3. **zstd before Python 3.14** stays not assessed, with advice. No optional dependency.
+4. **Archive depth:** the default `maxDepth` is 5 globally.
+5. **More real samples:** no Zarf or Hauler binary is run to build them. v1beta1, key-signed, differential and split packages are covered by synthetic fixtures only, built from the published Go types. A published sample of each should be checked when one is found.
+6. **Scope:** Zarf first, Hauler after.
 
 ## 35.8 Sources
 

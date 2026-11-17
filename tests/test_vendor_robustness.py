@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from airlock.archive import ExpansionLimit, capped
+from airlock.archive import ZSTD, ExpansionLimit, capped
 from airlock.formats import openpgp
 from airlock.formats.deb import DebError, read_deb
 from airlock.formats.golang import ZipHashError, zip_hash
@@ -36,6 +36,8 @@ from tests.vendor_fixtures import (
     repomd_xml,
     rpm_bytes,
 )
+from tests.zarf_fixtures import NAME as ZARF_NAME
+from tests.zarf_fixtures import KeySigner, build, package_bytes, tar
 
 ED = PGPKey()
 RPM = rpm_bytes(RPMSpec(), ED, package_signature=True)
@@ -215,6 +217,26 @@ SAMPLES: dict[str, tuple[str, bytes, dict[str, bytes]]] = {
     "ova": ("vm/a.ova", vm.tar({"a.ovf": OVF, "a.mf": MANIFEST, "d.vmdk": DISK}), {}),
     "ovf": ("ovf/a.ovf", OVF, {"ovf/d.vmdk": DISK}),
     "glance": ("gl/a.qcow2.json", GLANCE, {"gl/a.qcow2": vm.qcow2()}),
+    "zarf": (f"z/{ZARF_NAME}", package_bytes(build(signer=KeySigner())), {}),
+    "zarf-odd-definition": (
+        f"z/{ZARF_NAME}",
+        tar(
+            {
+                "zarf.yaml": b"apiVersion: zarf.dev/v1beta1\nmetadata: []\n"
+                b"build: {differential: {fromVersion: 3}, provenanceFiles: 7}\n"
+                b"components: [1, {name: x, images: [{}, 2], files: [3, {target: 5}],"
+                b" actions: {onDeploy: [1], onRemove: {before: [{cmd: 4}]}}}]\n",
+                "checksums.txt": b"zz\nnot-hex x\n" + b"0" * 64 + b" ../../etc/passwd\n",
+                "zarf.bundle.sig": b'{"messageSignature": {"signature": 5}}',
+                "images/index.json": b'{"manifests": [1, {"annotations": 5, "digest": 3}]}',
+                "components/x.tar": b"not a tar",
+            }
+        ),
+        {},
+    ),
+    **(
+        {"zarf-zstd": (f"z/{ZARF_NAME}.zst", package_bytes(build(), zstd=True), {})} if ZSTD else {}
+    ),
 }
 
 

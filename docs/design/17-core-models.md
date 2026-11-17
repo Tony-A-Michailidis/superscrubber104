@@ -230,7 +230,7 @@ allowlists:
   models: { mode: enforce, entries: [{ id: "huggingface:example-org/tiny-chat", sha256: "…" }] }
 
 limits:
-  archive: { maxDepth: 4, maxMembers: 200000, maxRatio: 200, ratioMinBytes: 16MiB, maxExpandedBytes: 500GiB }
+  archive: { maxDepth: 5, maxMembers: 200000, maxRatio: 200, ratioMinBytes: 16MiB, maxExpandedBytes: 500GiB }
   maxArtifactBytes: 1TiB
   maxPathLength: 1024
 

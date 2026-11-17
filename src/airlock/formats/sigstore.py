@@ -1,7 +1,13 @@
-"""Sigstore bundles, as written by OpenSSF model signing (``model.sig``), verified offline.
+"""Sigstore bundles, verified offline.
 
-A bundle holds a DSSE envelope (an in-toto statement listing every file of the model with its
-sha256) and the material to verify its signature. Three ways of signing are supported:
+Two kinds of bundle are read:
+
+* a **DSSE envelope**, as written by OpenSSF model signing (``model.sig``): an in-toto statement
+  listing every file of the model with its sha256;
+* a **message signature**, as written by Zarf (``zarf.bundle.sig``): a signature over one
+  artifact's bytes, which the caller supplies. Its log entry is a ``hashedrekord``.
+
+Three ways of signing are supported:
 
 * **key**: a bare public key. The policy pins the key (``type: x509``, a PEM public key).
 * **certificate**: a certificate chain from your own PKI. The policy pins the CA certificate
@@ -46,6 +52,10 @@ class BundleError(ValueError):
     pass
 
 
+class DigestMismatch(BundleError):
+    """The bundle records a digest for the artifact that the artifact does not have."""
+
+
 @dataclass(frozen=True, slots=True)
 class Bundle:
     media_type: str
@@ -56,6 +66,12 @@ class Bundle:
     certificates: tuple[x509.Certificate, ...]  # leaf first
     tlog: tuple[dict[str, Any], ...]
     statement: dict[str, Any]
+    kind: str = "dsse"  # dsse | message
+
+    @property
+    def message(self) -> bytes:
+        """The bytes the signature is over."""
+        return self.payload if self.kind == "message" else pae(self.payload_type, self.payload)
 
     @property
     def method(self) -> str:
@@ -105,21 +121,46 @@ def _b64(value: object, what: str) -> bytes:
         raise BundleError(f"{what} is not base64") from exc
 
 
-def parse_bundle(data: bytes) -> Bundle:
+def parse_bundle(data: bytes, artifact: bytes | None = None) -> Bundle:
+    """A bundle. A message-signature bundle is over ``artifact``, which must then be given."""
     try:
         doc = json.loads(data)
     except (ValueError, UnicodeDecodeError) as exc:
         raise BundleError(f"not JSON: {exc}") from exc
-    if not isinstance(doc, dict) or "dsseEnvelope" not in doc:
-        raise BundleError("not a Sigstore bundle with a DSSE envelope")
-    envelope = doc["dsseEnvelope"]
+    if not isinstance(doc, dict):
+        raise BundleError("not a Sigstore bundle")
     material = doc.get("verificationMaterial") or {}
-    if not isinstance(envelope, dict) or not isinstance(material, dict):
+    if not isinstance(material, dict):
         raise BundleError("malformed bundle")
-    signatures = envelope.get("signatures") or []
-    if len(signatures) != 1 or not isinstance(signatures[0], dict):
-        raise BundleError("expected exactly one signature")
-    payload = _b64(envelope.get("payload"), "payload")
+    statement: object = {}
+    if "messageSignature" in doc:
+        if artifact is None:
+            raise BundleError("a message signature needs the artifact it signs")
+        signed = doc["messageSignature"]
+        if not isinstance(signed, dict):
+            raise BundleError("malformed message signature")
+        digest = signed.get("messageDigest")
+        if isinstance(digest, dict) and digest.get("digest") is not None:
+            if str(digest.get("algorithm", "SHA2_256")) != "SHA2_256":
+                raise BundleError(f"unsupported digest algorithm {digest.get('algorithm')}")
+            if _b64(digest.get("digest"), "message digest") != hashlib.sha256(artifact).digest():
+                raise DigestMismatch("the bundle records a different digest for the artifact")
+        kind, payload_type, payload = "message", "", artifact
+        signature = _b64(signed.get("signature"), "signature")
+    elif isinstance(doc.get("dsseEnvelope"), dict):
+        envelope = doc["dsseEnvelope"]
+        signatures = envelope.get("signatures") or []
+        if len(signatures) != 1 or not isinstance(signatures[0], dict):
+            raise BundleError("expected exactly one signature")
+        kind, payload_type = "dsse", str(envelope.get("payloadType"))
+        payload = _b64(envelope.get("payload"), "payload")
+        signature = _b64(signatures[0].get("sig"), "signature")
+        try:
+            statement = json.loads(payload)
+        except ValueError as exc:
+            raise BundleError(f"payload is not JSON: {exc}") from exc
+    else:
+        raise BundleError("not a Sigstore bundle with a DSSE envelope or a message signature")
     certificates: list[x509.Certificate] = []
     raw = []
     if isinstance(material.get("certificate"), dict):
@@ -131,10 +172,6 @@ def parse_bundle(data: bytes) -> Bundle:
             certificates.append(x509.load_der_x509_certificate(_b64(item, "certificate")))
         except ValueError as exc:
             raise BundleError(f"unreadable certificate: {exc}") from exc
-    try:
-        statement = json.loads(payload)
-    except ValueError as exc:
-        raise BundleError(f"payload is not JSON: {exc}") from exc
     hint = (
         material.get("publicKey", {}).get("hint")
         if isinstance(material.get("publicKey"), dict)
@@ -143,13 +180,14 @@ def parse_bundle(data: bytes) -> Bundle:
     tlog = tuple(e for e in material.get("tlogEntries") or [] if isinstance(e, dict))
     return Bundle(
         media_type=str(doc.get("mediaType")),
-        payload_type=str(envelope.get("payloadType")),
+        payload_type=payload_type,
         payload=payload,
-        signature=_b64(signatures[0].get("sig"), "signature"),
+        signature=signature,
         key_hint=str(hint) if hint else None,
         certificates=tuple(certificates),
         tlog=tlog,
         statement=statement if isinstance(statement, dict) else {},
+        kind=kind,
     )
 
 
@@ -241,9 +279,11 @@ def load_anchor_key(data: bytes) -> object:
 # --- the three methods ---------------------------------------------------------------------------
 
 
-def verify_key(bundle: Bundle, anchors: Sequence[tuple[str, bytes]]) -> Outcome:
+def verify_key(
+    bundle: Bundle, anchors: Sequence[tuple[str, bytes]], what: str = "models"
+) -> Outcome:
     outcome = Outcome("unverifiable", "key")
-    message = pae(bundle.payload_type, bundle.payload)
+    message = bundle.message
     for name, data in anchors:
         try:
             key = load_anchor_key(data)
@@ -255,7 +295,7 @@ def verify_key(bundle: Bundle, anchors: Sequence[tuple[str, bytes]]) -> Outcome:
     outcome.reasons.append(
         "no key pinned in the policy verifies the signature"
         if outcome.status == "untrusted"
-        else "the policy pins no public key for models"
+        else f"the policy pins no public key for {what}"
     )
     return outcome
 
@@ -265,7 +305,7 @@ def verify_certificate(
 ) -> Outcome:
     chain = list(bundle.certificates)
     leaf = chain[0]
-    message = pae(bundle.payload_type, bundle.payload)
+    message = bundle.message
     roots = []
     for name, data in anchors:
         if b"CERTIFICATE" in data:
@@ -320,12 +360,31 @@ def _window(item: dict[str, Any], moment: datetime) -> bool:
     return (not start or _time(start) <= moment) and (not end or moment <= _time(end))
 
 
+def _logs_this(body: object, bundle: Bundle) -> bool:
+    """Whether a log entry's body records this bundle's signature (or, for DSSE, its payload)."""
+    spec = body.get("spec") if isinstance(body, dict) else None
+    if not isinstance(spec, dict):
+        return False
+    digest = hashlib.sha256(bundle.payload).hexdigest()
+    encoded = base64.b64encode(bundle.signature).decode()
+    if bundle.kind == "message":  # hashedrekord: the artifact's hash and the signature
+        data = spec.get("data")
+        hashed = data.get("hash") if isinstance(data, dict) else None
+        logged_hash = hashed.get("value") if isinstance(hashed, dict) else None
+        signature = spec.get("signature")
+        content = signature.get("content") if isinstance(signature, dict) else None
+        return logged_hash == digest and content == encoded
+    payload_hash = (spec.get("payloadHash") or {}).get("value")
+    logged = {s.get("signature") for s in spec.get("signatures") or [] if isinstance(s, dict)}
+    return payload_hash == digest or encoded in logged
+
+
 def verify_sigstore(
     bundle: Bundle, anchors: Sequence[tuple[str, bytes, Sequence[str], Sequence[str]]]
 ) -> Outcome:
     """``anchors``: (name, trusted_root.json, accepted identities, accepted issuers)."""
     leaf = bundle.certificates[0]
-    message = pae(bundle.payload_type, bundle.payload)
+    message = bundle.message
     signer = ", ".join(identities(leaf)) or None
     issuer = fulcio_issuer(leaf)
     if not anchors:
@@ -383,13 +442,7 @@ def verify_sigstore(
                 anchor=name,
                 reasons=["the log's signed entry timestamp does not verify"],
             )
-        spec = body.get("spec") or {}
-        payload_hash = (spec.get("payloadHash") or {}).get("value")
-        logged = {s.get("signature") for s in spec.get("signatures") or [] if isinstance(s, dict)}
-        if (
-            payload_hash != hashlib.sha256(bundle.payload).hexdigest()
-            and base64.b64encode(bundle.signature).decode() not in logged
-        ):
+        if not _logs_this(body, bundle):
             return Outcome(
                 "invalid",
                 "sigstore",

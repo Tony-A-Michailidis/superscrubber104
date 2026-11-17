@@ -633,6 +633,61 @@ WINDOWS = (
     ),
 )
 
+ZARF = (
+    _rule(
+        "zarf.package.checksum-mismatch",
+        "Zarf package differs from its own checksums",
+        C,
+        ("SI-7", "SR-11"),
+        "zarf.yaml's aggregate checksum does not match checksums.txt, a file differs from the "
+        "hash checksums.txt lists for it, or a component file differs from the checksum "
+        "zarf.yaml records for it: the package is not the one its publisher built.",
+        final=True,
+    ),
+    _rule(
+        "zarf.package.incomplete",
+        "Zarf package is missing something it lists",
+        C,
+        ("SI-7", "CM-8"),
+        "A file checksums.txt lists, a component file zarf.yaml declares, or an image a "
+        "component deploys is not in the package.",
+        final=True,
+    ),
+    _rule(
+        "zarf.package.unlisted",
+        "Zarf package holds a file its checksums do not cover",
+        H,
+        ("SI-7", "SR-11"),
+        "Neither checksums.txt nor the provenance files name it, so neither the publisher's "
+        "checksums nor their signature vouch for it.",
+        final=True,
+    ),
+    _rule(
+        "zarf.component.actions",
+        "Zarf component runs commands on the deploying host",
+        M,
+        ("CM-7", "CM-11"),
+        "onDeploy and onRemove actions run on the host with the deployer's rights (often root). "
+        "Review the commands before the package is deployed.",
+    ),
+    _rule(
+        "zarf.component.host-files",
+        "Zarf component writes files to the deploying host",
+        L,
+        ("CM-7", "CM-11"),
+        "Files with a target outside Zarf's temporary directory are placed on the host when the "
+        "package is deployed; executables among them are listed.",
+    ),
+    _rule(
+        "zarf.package.differential",
+        "Zarf package needs a base package on the high side",
+        I,
+        ("CM-8",),
+        "A differential package leaves out the images and repositories its base version holds; "
+        "it can only be deployed where that base already is.",
+    ),
+)
+
 SOFTWARE_RULES = (
     *AGENTS,
     *CONTAINERS,
@@ -644,4 +699,5 @@ SOFTWARE_RULES = (
     *IDE,
     *VM,
     *WINDOWS,
+    *ZARF,
 )

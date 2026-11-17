@@ -32,28 +32,33 @@ _LIMIT = 16 << 20
 SCOPE = "model.signature"
 
 
-def _anchors(ctx: Context, kind: UpstreamKeyType) -> list[UpstreamKey]:
+def _anchors(ctx: Context, kind: UpstreamKeyType, scope: str) -> list[UpstreamKey]:
     today = ctx.now.date()
     return [
         key
         for key in ctx.policy.upstream
         if key.type is kind
-        and any(fnmatchcase(SCOPE, pattern) for pattern in key.scope)
+        and any(fnmatchcase(scope, pattern) for pattern in key.scope)
         and key.validity.problem(today) is None
     ]
 
 
-def _verify(bundle: Bundle, ctx: Context) -> Outcome:
+def verify_bundle(
+    bundle: Bundle, ctx: Context, scope: str = SCOPE, what: str = "models"
+) -> Outcome:
+    """Verify a Sigstore bundle against what the policy pins for ``scope``."""
     if bundle.method == "sigstore":
         roots = [
             (k.name, k.file.path.read_bytes(), k.identities, k.issuers)
-            for k in _anchors(ctx, UpstreamKeyType.SIGSTORE)
+            for k in _anchors(ctx, UpstreamKeyType.SIGSTORE, scope)
         ]
         return verify_sigstore(bundle, roots)
-    pinned = [(k.name, k.file.path.read_bytes()) for k in _anchors(ctx, UpstreamKeyType.X509)]
+    pinned = [
+        (k.name, k.file.path.read_bytes()) for k in _anchors(ctx, UpstreamKeyType.X509, scope)
+    ]
     if bundle.method == "certificate":
         return verify_certificate(bundle, pinned, ctx.now)
-    return verify_key(bundle, pinned)
+    return verify_key(bundle, pinned, what)
 
 
 class ModelSignatureHandler:
@@ -83,7 +88,7 @@ class ModelSignatureHandler:
         predicate = str(bundle.statement.get("predicateType", ""))
         if not predicate.startswith("https://model_signing/"):
             return Inspection(kind="unclassified")  # some other Sigstore bundle
-        outcome = _verify(bundle, ctx)
+        outcome = verify_bundle(bundle, ctx)
         detail = {
             "method": outcome.method,
             "status": outcome.status,

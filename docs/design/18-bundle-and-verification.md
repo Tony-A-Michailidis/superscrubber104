@@ -146,10 +146,10 @@ The adjustment does not relax anything else: bundles are still checked for age, 
 Archives are **inspected, never extracted**.
 
 - Member bytes are streamed through a hash. A member is kept only when something must read it again (a nested archive, or a handler that recognised it): in memory up to 1 MiB, otherwise in a private scratch file under a generated name. Every text member is kept, because the secrets scan reads it. **Member names never touch the filesystem**, so path traversal, link tricks and device nodes can be reported but cannot take effect.
-- Format is detected from magic bytes, never from the file name. zip (and everything built on it: wheels, JARs, VSIX, Office documents), tar, and gzip/bzip2/xz streams are read. zstd, 7z and RAR are recognised but cannot be opened by the standard library; their member checks are reported as "not assessed".
+- Format is detected from magic bytes, never from the file name. zip (and everything built on it: wheels, JARs, VSIX, Office documents), tar, and gzip/bzip2/xz streams are read. zstd streams are read on Python 3.14 and later (`compression.zstd`, with the same budget); before 3.14 they are recognised but not opened, and their member checks are reported as "not assessed" with advice to run on 3.14 or decompress first. 7z and RAR are recognised but cannot be opened by the standard library; their member checks are "not assessed".
 - **One budget per top-level artifact**, shared by everything nested inside it, counting bytes actually produced rather than sizes declared in headers:
   - `maxRatio`: expanded bytes per byte of the outermost archive (judged only above `ratioMinBytes`, so small, highly compressible files are not false positives)
-  - `maxExpandedBytes`, `maxMembers`, `maxDepth`
+  - `maxExpandedBytes`, `maxMembers`, `maxDepth` (5 by default: a Zarf package holds image layers, which hold archives of their own)
 
   When a limit trips, inspection of that artifact stops and `archive.limit.*` is reported on the top-level artifact, with the nested archive where it stopped.
 - **Member checks:** path traversal (`..`, absolute paths, drive letters, with either separator), unsafe names, links pointing outside the archive, devices and FIFOs, setuid/setgid bits, encrypted members, duplicate names (tools disagree on which copy wins), corrupt or truncated archives.
@@ -164,7 +164,7 @@ Archives are **inspected, never extracted**.
 - **zip archives hidden behind a prefix** (self-extracting executables, llamafile-style polyglots) are not opened yet, because detection reads leading bytes. That arrives with the executable handlers.
 - **Nested archive members cannot `resolve()` their neighbours** yet, so a model package inside an archive is inventoried but not assembled as a unit.
 - **Approvals are appended to the bundle's custody log in place**, so the bundle must be on writable storage when someone approves on the receiving side.
-- zstd, 7z and RAR contents are not inspected (no standard-library reader).
+- 7z and RAR contents are not inspected (no standard-library reader), nor are zstd contents before Python 3.14.
 
 ## 18.9 Module map
 

@@ -22,6 +22,7 @@ from airlock.archive import (
     ARCHIVE_ERRORS,
     COMPRESSION,
     UNSUPPORTED,
+    ZSTD_ADVICE,
     Member,
     decompress,
     detect_format,
@@ -53,7 +54,7 @@ _ROOTFS_DIRS = frozenset(
 )
 _HEAD = 65536
 _IN_MEMORY = 1 << 20  # archive members up to this size are kept in memory, not on disk
-_SUFFIXES = (".gz", ".bz2", ".xz")
+_SUFFIXES = (".gz", ".bz2", ".xz", ".zst")
 
 
 class LimitExceeded(Exception):
@@ -245,7 +246,8 @@ class Analyzer:
                 ARCHIVE_MEMBER_RULES,
                 subject,
                 tool=TOOL,
-                reason=f"{fmt} archives cannot be opened; contents were not inspected",
+                reason=f"{fmt} archives cannot be opened; contents were not inspected"
+                + (f" ({ZSTD_ADVICE})" if fmt == "zstd" else ""),
             )
             return
         max_depth = self.ctx.policy.limits.archive.max_depth

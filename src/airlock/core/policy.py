@@ -277,7 +277,7 @@ class Allowlist:
 
 @dataclass(frozen=True, slots=True)
 class ArchiveLimits:
-    max_depth: int = 4
+    max_depth: int = 5  # a Zarf package: package, image layer, archive in the layer
     max_members: int = 200_000
     max_ratio: int = 200  # expanded bytes per byte of the outermost archive
     ratio_min_bytes: int = 16 * 2**20  # the ratio is only judged once this much has expanded

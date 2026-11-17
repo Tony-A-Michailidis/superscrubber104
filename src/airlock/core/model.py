@@ -139,6 +139,7 @@ class UnitKind(StrEnum):
     PATCH_SET = "patch-set"
     KNOWLEDGE_BASE = "knowledge-base"
     DATASET = "dataset"
+    ZARF_PACKAGE = "zarf-package"
 
 
 class ComponentType(StrEnum):

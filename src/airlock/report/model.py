@@ -375,6 +375,12 @@ _SUMMARY: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("embedding models", ("embeddingModels",)),
     ),
     "runtime-profile": (("server", ("declared", "server", "name")),),
+    "zarf-package": (
+        ("version", ("version",)),
+        ("components", ("componentNames",)),
+        ("signature", ("signature", "status")),
+        ("differential base", ("differential", "base")),
+    ),
 }
 
 

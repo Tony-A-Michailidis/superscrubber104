@@ -52,6 +52,7 @@ _DOMAINS: Mapping[str, str] = {
     "trust": "Trust in publishers and signers",
     "upstream": "Publishers' checksums and signatures",
     "vm": "VM images and appliances",
+    "zarf": "Zarf packages",
     "vuln": "Vulnerabilities",
 }
 

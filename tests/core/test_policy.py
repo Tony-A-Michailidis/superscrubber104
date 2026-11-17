@@ -97,7 +97,7 @@ def test_default_policy_is_safe() -> None:
     assert policy.defaults.severity[Severity.CRITICAL] is Disposition.BLOCK
     assert policy.defaults.not_assessed is Disposition.WARN
     assert policy.licences.unknown is Disposition.REQUIRE_APPROVAL
-    assert policy.limits.archive.max_depth == 4
+    assert policy.limits.archive.max_depth == 5
     assert policy.signers == ()
 
 

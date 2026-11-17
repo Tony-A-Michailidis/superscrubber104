@@ -10,6 +10,7 @@ import gzip
 import io
 import lzma
 import stat
+import sys
 import tarfile
 import zipfile
 import zlib
@@ -19,9 +20,36 @@ from typing import IO, Any, cast
 
 from airlock.core.model import EntryType
 
-COMPRESSION = frozenset({"gzip", "bzip2", "xz"})  # single-stream compression layers
+# The standard library reads zstd from Python 3.14 (``compression.zstd``); no dependency is added
+# for older versions, where zstd archives are recorded with their contents not assessed.
+ZSTD = sys.version_info >= (3, 14)
+ZSTD_ADVICE = (
+    "zstd needs Python 3.14 or later; run airlock on 3.14, or decompress the archive before "
+    "packing (for Zarf, build the package with metadata.uncompressed: true)"
+)
+
+# single-stream compression layers
+COMPRESSION = frozenset({"gzip", "bzip2", "xz", *(("zstd",) if ZSTD else ())})
 CONTAINERS = frozenset({"zip", "tar"})
-UNSUPPORTED = frozenset({"zstd", "7z", "rar"})  # recognised, but contents cannot be read
+# recognised, but contents cannot be read
+UNSUPPORTED = frozenset({"7z", "rar", *(() if ZSTD else ("zstd",))})
+
+
+class ExpansionLimit(ValueError):
+    """A decompressed stream is larger than its reader allows."""
+
+
+def _zstd_error() -> type[Exception]:
+    """What a damaged zstd stream raises; a stand-in that is never raised before 3.14."""
+    if not ZSTD:
+        return ExpansionLimit
+    from compression import zstd  # type: ignore[import-not-found,unused-ignore]
+
+    return zstd.ZstdError  # type: ignore[no-any-return,unused-ignore]
+
+
+ZstdError = _zstd_error()
+
 
 # Everything the standard library raises for damaged, truncated or exotic archives.
 ARCHIVE_ERRORS = (
@@ -35,6 +63,7 @@ ARCHIVE_ERRORS = (
     RuntimeError,
     NotImplementedError,
     ValueError,
+    ZstdError,
 )
 
 _MAGIC = (
@@ -70,10 +99,6 @@ class Member:
     open: Callable[[], IO[bytes]] | None = None  # None when there is no readable content
 
 
-class ExpansionLimit(ValueError):
-    """A decompressed stream is larger than its reader allows."""
-
-
 class _Capped(io.RawIOBase):
     def __init__(self, stream: IO[bytes], limit: int) -> None:
         self._stream, self._left = stream, limit
@@ -107,6 +132,10 @@ def decompress(fmt: str, stream: IO[bytes]) -> IO[bytes]:
         return cast(IO[bytes], bz2.BZ2File(stream, mode="rb"))
     if fmt == "xz":
         return cast(IO[bytes], lzma.LZMAFile(stream, mode="rb"))
+    if fmt == "zstd" and ZSTD:
+        from compression import zstd  # type: ignore[import-not-found,unused-ignore]
+
+        return cast(IO[bytes], zstd.ZstdFile(stream, mode="rb"))
     raise ValueError(f"not a compression format: {fmt}")
 
 

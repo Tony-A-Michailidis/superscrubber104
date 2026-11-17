@@ -25,7 +25,7 @@ from typing import IO, Any, Protocol
 
 from airlock import __version__
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
-from airlock.core.model import Subject, ToolRef, UnitKind
+from airlock.core.model import ArtifactRef, Subject, ToolRef, UnitKind
 from airlock.handlers.common import is_literal_secret, make_claim, name_of
 
 TOOL = ToolRef("airlock.containers", __version__)
@@ -45,6 +45,40 @@ class _Store(Protocol):
     def sha256(self, path: str) -> str | None: ...
 
     def json(self, path: str) -> Any: ...
+
+    def blobs(self) -> Iterator[str]:
+        """Blobs to check even when nothing references them."""
+        ...
+
+
+class MemoryStore:
+    """An OCI layout already read in one streaming pass by another handler (a Zarf package).
+
+    ``digests`` and ``sizes`` cover every file; ``documents`` holds the small JSON ones (index,
+    manifests, configs). Paths are relative to the layout's root.
+    """
+
+    def __init__(
+        self, digests: dict[str, str], sizes: dict[str, int], documents: dict[str, bytes]
+    ) -> None:
+        self.digests, self.sizes, self.documents = digests, sizes, documents
+
+    def exists(self, path: str) -> bool:
+        return path in self.digests
+
+    def size(self, path: str) -> int | None:
+        return self.sizes.get(path)
+
+    def sha256(self, path: str) -> str | None:
+        return self.digests.get(path)
+
+    def json(self, path: str) -> Any:
+        if path not in self.documents:
+            raise ValueError(f"{path} is missing or was too large to read")
+        return json.loads(self.documents[path])
+
+    def blobs(self) -> Iterator[str]:
+        return (p for p in sorted(self.digests) if p.startswith("blobs/sha256/"))
 
 
 class _TarStore:
@@ -339,14 +373,21 @@ def _check_config(image: _Image, ctx: Context, view: ArtifactView) -> None:
         )
 
 
-def _inspect(store: _Store, ctx: Context, view: ArtifactView, kind: str) -> Inspection:
+def inspect_store(
+    store: _Store,
+    ctx: Context,
+    view: ArtifactView,
+    kind: str,
+    root: ArtifactRef | None = None,
+) -> Inspection:
+    """Check the images in ``store`` and claim them, as ``view``, for the unit rooted at ``root``
+    (by default the archive itself, or the directory holding a layout)."""
     reader = _Reader(store, ctx, view)
     images = reader.images()
     if not images:
         return Inspection(kind="unclassified")
-    if isinstance(store, _TarStore):
-        for blob in store.blobs():  # unreferenced blobs must still hash to their names
-            reader.verify(blob)
+    for blob in store.blobs():  # unreferenced blobs must still hash to their names
+        reader.verify(blob)
     subject = Subject.of_artifact(view.ref)
     if reader.missing:
         ctx.recorder.fail(
@@ -370,7 +411,8 @@ def _inspect(store: _Store, ctx: Context, view: ArtifactView, kind: str) -> Insp
         if image.config:
             _check_config(image, ctx, view)
     summaries = [_summary(image) for image in images]
-    root = view.ref if isinstance(store, _TarStore) else None
+    if root is None and isinstance(store, _TarStore):
+        root = view.ref
     claims = tuple(
         make_claim(view, UnitKind.CONTAINER_IMAGE, "image", {"image": s}, root=root)
         for s in summaries
@@ -413,7 +455,7 @@ class ContainerImageHandler:
 
     def inspect(self, artifact: ArtifactView, ctx: Context) -> Inspection:
         if name_of(artifact.ref) == "index.json":
-            return _inspect(_DirStore(artifact), ctx, artifact, "container.image.oci-layout")
+            return inspect_store(_DirStore(artifact), ctx, artifact, "container.image.oci-layout")
         if _layout_part(artifact):
             # A blob or marker of an OCI layout directory; index.json is where it is checked.
             return Inspection(kind="container.image.part")
@@ -425,7 +467,7 @@ class ContainerImageHandler:
                     or (store.exists("index.json") and store.exists("oci-layout"))
                 ):
                     return Inspection(kind="unclassified")
-                return _inspect(store, ctx, artifact, "container.image.archive")
+                return inspect_store(store, ctx, artifact, "container.image.archive")
         except (tarfile.TarError, ValueError, KeyError) as exc:
             return Inspection(
                 kind="unclassified", metadata={"container": {"unreadable": str(exc)[:200]}}

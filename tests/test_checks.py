@@ -95,6 +95,9 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "package.checksum-mismatch",
         "vm.metadata.mismatch",
         "authenticode.signature.invalid",
+        "zarf.package.checksum-mismatch",  # against the package's own checksums
+        "zarf.package.incomplete",
+        "zarf.package.unlisted",  # owner's decision: nobody vouched for it
     }
     assert all(r.rationale for r in registry)
 

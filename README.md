@@ -5,7 +5,7 @@
 > * models, with their publishers' signatures;
 > * datasets, knowledge bases and corpora, and notebooks;
 > * agent and MCP configuration;
-> * container images and VM images;
+> * container images, VM images and Zarf packages;
 > * the inference and GPU stack;
 > * Python, npm, Java, Go, Rust and .NET environments;
 > * OS packages and package mirrors, with vendor signatures;
@@ -197,7 +197,12 @@ Neither inspects what is inside the artifacts, applies a site's policy, or recor
 | Inspection of content: models, pickles, prompts, secrets, offline readiness | not documented | yes |
 | Policy decision, approvals, evidence mapped to NIST 800-53 / ITSG-33 | not documented | yes |
 
-airlock does not yet open Zarf packages or Hauler hauls: today their contents are only inventoried and hashed. Reading them is proposed in [doc 35](docs/design/35-zarf-and-hauler.md), which also records, with sources, what each tool does as of Zarf 1.0 and Hauler 2.1.
+airlock opens Zarf packages without running Zarf. It checks:
+* the package's own checksum chain and signature, against keys or Sigstore identities pinned in the policy (a mismatch is final);
+* the images it carries;
+* the commands and host files that deploying it would run or write.
+
+Everything inside a Zarf package, including models in image layers, goes through the same handlers as any other delivery. zstd-compressed packages, Zarf's default, need Python 3.14. Hauler hauls are not opened yet. [Doc 35](docs/design/35-zarf-and-hauler.md) has the details, and records with sources what each tool does as of Zarf 1.0 and Hauler 2.1.
 
 ## Roadmap
 
