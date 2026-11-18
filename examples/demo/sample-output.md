@@ -7,7 +7,7 @@ What happens, in brief:
 2. Someone with access to the media changes a model shard, adds an undeclared file and plants a malicious pickle.
 3. The high side verifies again and refuses the bundle (exit 3).
 
-The hash mismatch and the undeclared files are final, so no policy or approval can override them. The pickle is found by reading its opcodes, never by loading it. Scanners the demo does not configure are reported as not assessed rather than left out. [The quick start](../../docs/quickstart-wsl.md) explains how to run it.
+The hash mismatch and the undeclared files are final, so no policy or approval can override them. The pickle is found by reading its opcodes, never by loading it. Scanners the demo does not configure are reported as not assessed rather than left out. [The quick start](../../docs/quickstart-wsl.md) explains how to run it. For a report on a real delivery of public projects (3.5 GB), see [real-delivery.md](real-delivery.md).
 
 ```text
 Working in /home/user/airlock-demo
