@@ -21,6 +21,7 @@ command that finishes the job where one is needed (``skopeo copy``, ``createrepo
 """
 
 import base64
+import contextlib
 import hashlib
 import html
 import json
@@ -119,7 +120,10 @@ class _Stager:
                 )
             partial.replace(target)
         except OSError as exc:
-            partial.unlink(missing_ok=True)
+            # Best effort: the cause may also stop the clean-up (on Linux, a file where a
+            # directory should be makes unlink fail with ENOTDIR, which missing_ok does not cover).
+            with contextlib.suppress(OSError):
+                partial.unlink(missing_ok=True)
             raise StageError(f"could not stage {path} to {target}: {exc}") from exc
         self.report.copied += 1
         return target
