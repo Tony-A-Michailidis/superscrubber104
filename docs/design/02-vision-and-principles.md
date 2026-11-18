@@ -28,4 +28,4 @@
 - **Deterministic and reproducible.** Same inputs produce the same manifest and hashes.
 - **Scale-aware.** Model packages and images can be hundreds of GB. Stream hashing, avoid loading files into memory, support multi-volume bundles and resumable verification.
 - **Minimal dependencies.** Python 3.11+, `cryptography` for ed25519, `pyyaml`, `typer` or `click`. Avoid heavy frameworks; never import ML frameworks just to inspect a model.
-- **Public sources only.** Nothing derived from DND or any client environment. Use generic examples. This is an OPSEC and contract guardrail; never relax it.
+- **Public sources only.** Nothing derived from any employer, client or other non-public environment. Use generic examples. This is an operational-security guardrail; never relax it.

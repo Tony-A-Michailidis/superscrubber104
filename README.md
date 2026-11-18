@@ -1,5 +1,7 @@
 # airlock
 
+[![CI](https://github.com/Tony-A-Michailidis/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/Tony-A-Michailidis/airlock/actions/workflows/ci.yml)
+
 > **Status: pre-alpha.** `keygen`, `pack`, `verify` and `stage` work end to end, with multi-volume and delta bundles. airlock inspects:
 >
 > * models, with their publishers' signatures;
@@ -29,6 +31,8 @@ AI projects are usually built on connected, unclassified networks and then have 
 It runs fully offline, has minimal dependencies, and is designed to cross its own airlock.
 
 ## Demo
+
+To install airlock and run the demo yourself, follow the [quick start](docs/quickstart-wsl.md) (WSL on AlmaLinux 9 or 10; the steps work on any Linux with Python 3.11+).
 
 ```console
 $ python examples/demo/demo.py
@@ -66,7 +70,7 @@ WARN     malware.detected (not assessed)  [f6490e189d646738]
          bundle: Malware scanner reports a detection
          reason: no malware scanner is configured (plugins.clamav)
 ...
-81 of 205 rules exercised, 315 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+81 of 211 rules exercised, 315 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
 verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
 ```
 

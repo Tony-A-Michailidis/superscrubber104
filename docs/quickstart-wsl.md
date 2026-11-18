@@ -35,15 +35,14 @@ Below, `python3.12` means `python3` on AlmaLinux 10.
 
 ## 3. Get the code
 
-Clone the repository into the Linux filesystem; working under `/mnt/c` is much slower. If your checkout is on the Windows side, for example `C:\src\airlock`, clone that:
+Clone into the Linux filesystem (your home directory), not under `/mnt/c`, which is much slower:
 
 ```bash
-git config --global --add safe.directory /mnt/c/src/airlock   # Git refuses a repo owned by your Windows user without this
-git clone /mnt/c/src/airlock ~/airlock
+git clone https://github.com/Tony-A-Michailidis/airlock ~/airlock
 cd ~/airlock
 ```
 
-To pick up later changes made on the Windows side: `cd ~/airlock && git pull`.
+To pick up later changes: `cd ~/airlock && git pull`.
 
 ## 4. Install airlock
 
@@ -171,7 +170,6 @@ ClamAV, Trivy, Semgrep, Bandit, qemu-img and osslsigncode run as optional plugin
 
 | Symptom | Fix |
 |---|---|
-| `fatal: detected dubious ownership` when cloning | `git config --global --add safe.directory <path>` (step 3) |
 | `airlock: command not found` | activate the environment: `source ~/airlock/.venv/bin/activate` |
 | pip says `requires a different Python` | on AlmaLinux 9 the venv was made with the system 3.9; recreate it with `python3.12 -m venv .venv` |
 | zstd archives reported "not assessed" | expected before Python 3.14 (step 8) |
