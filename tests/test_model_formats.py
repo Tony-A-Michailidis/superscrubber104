@@ -288,6 +288,31 @@ def test_torchscript_is_code(tmp_path: Path) -> None:
     assert artifact(result, "scripted.pt").kinds[1] == "model.torchscript"
 
 
+# What TorchScript writes: a module of class __torch__.Module, and int lists rebuilt by
+# torch.jit._pickle (as rust-bert's rust_model.ot holds them).
+TS_MODULE = b"\x80\x02c__torch__\nModule\n)\x81."
+TS_INTLIST = b"\x80\x02ctorch.jit._pickle\nbuild_intlist\n]\x85R."
+
+
+def test_torchscript_references_are_expected_in_a_torch_archive(tmp_path: Path) -> None:
+    result = inspect(
+        write(
+            tmp_path,
+            {
+                "rust_model.ot": torch_zip(TS_MODULE, torchscript=True),
+                "list.pt": torch_zip(TS_INTLIST),
+                "loose.pkl": TS_MODULE,  # outside a torch archive, it is not TorchScript's
+                "bad.ot": torch_zip(os_system_pickle(), torchscript=True),
+            },
+        )
+    )
+    dangerous = {f.subject.display for f in findings_of(result)["model.pickle.dangerous-import"]}
+    assert dangerous == {"loose.pkl", "bad.ot!/archive/data.pkl"}
+    assert artifact(result, "rust_model.ot").kinds[1] == "model.torchscript"
+    code = {f.subject.display for f in findings_of(result)["model.format.code-capable"]}
+    assert "rust_model.ot" in code and "rust_model.ot!/archive/data.pkl" not in code
+
+
 def test_legacy_pytorch_file(tmp_path: Path) -> None:
     legacy = (
         pickle.dumps(0x1950A86A20F9469CFC6C, protocol=2) + torch_pickle() + b"\x00\x00raw storage"

@@ -100,6 +100,7 @@ class _Package:
     verifications: dict[ArtifactRef, list[Verification]] = field(default_factory=dict)
     aliases: set[str] = field(default_factory=set)
     licence: str | None = None
+    variant_of: ArtifactRef | None = None  # the model repository a format variant belongs to
 
     @property
     def id(self) -> str:
@@ -144,8 +145,21 @@ def _group(claims: Sequence[UnitClaim]) -> list[_Package]:
     for root, package in packages.items():
         directory = parent_of(root)
         is_file = any(c.artifact == root for c in package.claims)
-        if is_file and directory not in packages:
-            package.claims.extend(c for c in groups.get(directory, []) if c.role in _SHARED_ROLES)
+        if not is_file or directory in packages:
+            continue
+        shared = [c for c in groups.get(directory, []) if c.role in _SHARED_ROLES]
+        owner = parent_of(directory)
+        if (
+            not shared
+            and owner != directory
+            and owner in packages
+            and not any(c.artifact == owner for c in packages[owner].claims)
+        ):
+            # onnx/model.onnx, openvino/openvino_model.xml: a format variant in a model
+            # repository, under the repository's licence and model card.
+            shared = [c for c in groups[owner] if c.role in _SHARED_ROLES]
+            package.variant_of = owner
+        package.claims.extend(shared)
     return [packages[root] for root in sorted(packages)]
 
 
@@ -200,6 +214,8 @@ class _Checks:
     def run(self) -> None:
         p = self.p
         p.attributes["identity"] = self.identity()
+        if p.variant_of is not None:
+            p.attributes["variantOf"] = p.variant_of.display
         p.attributes["weights"] = self.weights()
         self.index()
         self.shards()
@@ -238,6 +254,9 @@ class _Checks:
             name = name_or_path
         else:
             root_name = name_of(p.root) if p.root.path != "." else None
+            if p.variant_of is not None:  # all-MiniLM-L6-v2/onnx/model.onnx, not model.onnx
+                within = relative_to(p.root, p.variant_of)
+                root_name = f"{name_of(p.variant_of)}/{within}" if within else root_name
             name = _str(gguf.get("name")) or root_name or architecture or "unnamed model"
         p.name = name
         candidates = (name, name_or_path, gguf.get("name"), gguf.get("basename"), name_of(p.root))

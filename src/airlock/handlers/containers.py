@@ -6,7 +6,10 @@ manifests and configs), never by running a container engine:
 * **Integrity.** OCI blobs are named by the sha256 of their content and descriptors carry sizes;
   legacy ``docker save`` layers are recorded by digest in the config. Every one is checked. A
   difference is a hash mismatch, which is final.
-* **Completeness.** Every config, manifest and layer referenced must be in the archive.
+* **Completeness.** Every config, manifest and layer referenced must be in the archive. A
+  multi-platform index may be delivered for some of its platforms only, as ``docker save`` with
+  the containerd store writes it: the platforms present are checked in full and the others are
+  recorded as not delivered.
 * **Configuration.** The image's user (root by default), and literal credentials in ``ENV``.
 
 The layers themselves are tar archives, so the ordinary archive walk opens them and every file
@@ -19,6 +22,7 @@ import hashlib
 import json
 import re
 import tarfile
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import IO, Any, Protocol
@@ -247,6 +251,18 @@ def _title(document: Any) -> str | None:
     return None
 
 
+def _platform(descriptor: dict[str, Any]) -> str:
+    """``os/architecture[/variant]`` of an index entry, or what else it is."""
+    annotations = descriptor.get("annotations")
+    if isinstance(annotations, dict) and annotations.get("vnd.docker.reference.type"):
+        return str(annotations["vnd.docker.reference.type"])[:100]
+    platform = descriptor.get("platform")
+    if isinstance(platform, dict) and platform.get("architecture"):
+        parts = [platform.get("os"), platform.get("architecture"), platform.get("variant")]
+        return "/".join(str(p) for p in parts if p)[:100]
+    return str(descriptor.get("digest", "unknown"))[:100]
+
+
 def _blob(digest: str) -> str | None:
     match = _DIGEST.match(digest)
     return f"blobs/sha256/{match[1]}" if match else None
@@ -260,6 +276,7 @@ class _Reader:
         self.missing: list[str] = []
         self.mismatched: list[dict[str, object]] = []
         self.checked: set[str] = set()
+        self.not_delivered: list[str] = []
 
     def need(self, path: str | None, what: str) -> bool:
         if path is None or not self.store.exists(path):
@@ -321,14 +338,15 @@ class _Reader:
         return images
 
     def _oci(self, index: Any, depth: int) -> list[_Image]:
-        images = []
+        images: list[_Image] = []
+        absent: list[tuple[dict[str, Any], str | None]] = []
         for descriptor in (index.get("manifests") or []) if isinstance(index, dict) else []:
             if not isinstance(descriptor, dict):
                 continue
             path = _blob(str(descriptor.get("digest", "")))
-            if not self.need(path, "manifest"):
+            if path is None or not self.store.exists(path):
+                absent.append((descriptor, path))
                 continue
-            assert path is not None  # noqa: S101
             self.verify(
                 path, descriptor.get("size") if type(descriptor.get("size")) is int else None
             )
@@ -365,6 +383,13 @@ class _Reader:
                     title=_title(document) if kind == "file" else None,
                 )
             )
+        if absent and depth > 0 and any(i.kind == "image" for i in images):
+            # A multi-platform index saved for some of its platforms (docker save with the
+            # containerd store keeps the whole index but only the local platform's blobs). What
+            # is here is checked in full; the rest is recorded as not delivered.
+            self.not_delivered += [_platform(d) for d, _ in absent]
+        else:
+            self.missing += [f"manifest: {path}" for _, path in absent]
         return images
 
     def _docker(self, manifest: Any) -> list[_Image]:
@@ -481,7 +506,7 @@ def inspect_store(
     (by default the archive itself, or the directory holding a layout)."""
     reader = _Reader(store, ctx, view)
     images = reader.images()
-    if not images:
+    if not images and not reader.missing:
         return Inspection(kind="unclassified")
     for blob in store.blobs():  # unreferenced blobs must still hash to their names
         reader.verify(blob)
@@ -527,6 +552,9 @@ def inspect_store(
     metadata: dict[str, object] = {"images": summaries, "blobsChecked": len(reader.checked)}
     if others:
         metadata["artifacts"] = others
+    if reader.not_delivered:
+        counts = Counter(reader.not_delivered)
+        metadata["notDelivered"] = {key: counts[key] for key in sorted(counts)}
     return Inspection(kind=kind, metadata={"container": metadata}, claims=claims)
 
 

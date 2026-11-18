@@ -113,6 +113,29 @@ def normalise_identifier(value: str, name: str | None = None) -> str | None:
     return None
 
 
+# Names of licence families, as Python package classifiers give them, and the identifiers that
+# make each one specific ("BSD License" beside BSD-3-Clause says nothing more).
+_FAMILIES = {
+    "bsd license": ("BSD-", "0BSD"),
+    "gnu general public license (gpl)": ("GPL-",),
+    "gnu lesser general public license (lgpl)": ("LGPL-",),
+    "gnu library or lesser general public license (lgpl)": ("LGPL-",),
+    "gnu affero general public license": ("AGPL-",),
+    "apache software license": ("Apache-",),
+    "mozilla public license": ("MPL-",),
+    "mit license": ("MIT",),
+    "isc license (iscl)": ("ISC",),
+    "academic free license (afl)": ("AFL-",),
+    "artistic license": ("Artistic-",),
+}
+
+
+def made_specific(name: str | None, identifiers: list[str]) -> bool:
+    """Whether a family name (``BSD License``) is made specific by one of ``identifiers``."""
+    prefixes = _FAMILIES.get((name or "").strip().lower())
+    return prefixes is not None and any(i.startswith(prefixes) for i in identifiers)
+
+
 def combine(declared: list[Declared]) -> tuple[str | None, bool]:
     """One expression for everything declared, and whether the declarations disagree.
 

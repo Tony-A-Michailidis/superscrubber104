@@ -107,7 +107,8 @@ def _kind(view: ArtifactView) -> str | None:
     lower = name.lower()
     if lower in _REPO_SIGNATURES:
         return None
-    if _LIST_NAMES.match(name):
+    if _LIST_NAMES.match(name) and b"\0" not in view.head(4096):
+        # The text check keeps out binaries with the same names (coreutils' sha256sum).
         return "upstream.checksum-list"
     if _sidecar(name) and view.size <= 4096 and _looks_like_checksums(view.head(256)):
         return "upstream.checksum-list"

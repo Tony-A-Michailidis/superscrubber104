@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from airlock.analyzer import TOOL
 from airlock.core.interfaces import Context
 from airlock.core.model import Disposition, Severity, Subject
-from airlock.licences import Declared, combine
+from airlock.licences import Declared, combine, made_specific
 
 _RULES = ("licence.denied", "licence.approval-required", "licence.unidentified", "licence.missing")
 
@@ -28,7 +28,10 @@ def check_licences(subject: Subject, declared: Sequence[Declared], ctx: Context)
                 recorder.passed(other)
         return None
     recorder.passed("licence.missing")
-    unidentified = [d for d in declared if d.identifier is None]
+    identified = [d.identifier for d in declared if d.identifier]
+    unidentified = [
+        d for d in declared if d.identifier is None and not made_specific(d.name, identified)
+    ]
     if unidentified:
         recorder.fail(
             "licence.unidentified",

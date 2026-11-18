@@ -25,13 +25,17 @@ from airlock.formats import pickle_scan
 from airlock.handlers.ai.common import SHARD, TOOL, claim, name_of
 from airlock.handlers.ai.weights import shard_facts, weight_role
 
-TORCH_SUFFIXES = (".pt", ".pth", ".bin", ".ckpt", ".pt2", ".ptl", ".tar")
+# .ot: TorchScript saved through libtorch bindings (tch, rust-bert).
+TORCH_SUFFIXES = (".pt", ".pth", ".bin", ".ckpt", ".pt2", ".ptl", ".tar", ".ot")
 _PICKLE_SUFFIXES = (".pkl", ".pickle", ".joblib", ".sav", ".p")
 # The first pickle of a legacy torch.save() file is this magic number.
 LEGACY_TORCH_MAGIC = pickle.dumps(0x1950A86A20F9469CFC6C, protocol=2)[:-1]
 _ZLIB = (b"\x78\x01", b"\x78\x5e", b"\x78\x9c", b"\x78\xda")
 _IMPORT_RULES = ("model.pickle.dangerous-import", "model.pickle.unknown-import")
-_REMEDIATION = "Convert to safetensors in an isolated environment before transfer."
+_REMEDIATION = (
+    "Loading this file runs code. Convert weights to safetensors in an isolated environment "
+    "before transfer; for other data, use a data-only format or confirm what loads it."
+)
 
 
 def _is_pickle_start(head: bytes) -> bool:
@@ -58,7 +62,9 @@ def _inside_torch_archive(view: ArtifactView) -> bool:
     if not view.ref.member:
         return False
     outer = (view.ref.path, *view.ref.member[:-1])[-1]
-    return outer.lower().endswith(TORCH_SUFFIXES) and name_of(view.ref).endswith(".pkl")
+    return outer.lower().endswith(TORCH_SUFFIXES) and name_of(view.ref).endswith(
+        (".pkl", ".debug_pkl")
+    )
 
 
 def scan_and_report(
@@ -72,8 +78,12 @@ def scan_and_report(
         if isinstance(entry, str)
     ]
     verdicts: dict[str, list[str]] = {"dangerous": [], "unknown": [], "safe": []}
+    # TorchScript's own references are expected inside a torch archive, which carries the
+    # code-capable finding for the code it holds.
+    torchscript = _inside_torch_archive(view)
     for module, attr in result.globals:
-        verdicts[pickle_scan.classify(module, attr, allowed)].append(f"{module}.{attr}")
+        verdict = pickle_scan.classify(module, attr, allowed, torchscript=torchscript)
+        verdicts[verdict].append(f"{module}.{attr}")
     subject = Subject.of_artifact(view.ref)
     if verdicts["dangerous"]:
         ctx.recorder.fail(

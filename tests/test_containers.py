@@ -1,5 +1,6 @@
 """Container images: docker save archives and OCI layouts."""
 
+import hashlib
 import io
 import json
 import tarfile
@@ -116,6 +117,80 @@ def test_oci_layout_directory(tmp_path: Path) -> None:
     unit = _unit(result, "oci")
     assert unit.attributes["images"][0]["os"] == "linux"
     assert "container.image.incomplete" not in findings_of(result)
+
+
+def _partial_multiplatform(blobs: dict[str, bytes | str], *, keep_local: bool) -> None:
+    """Wrap the image in a multi-platform index the way docker save (containerd store) does:
+    the whole index, but blobs only for the local platform."""
+    index = json.loads(blobs["index.json"])
+    [local] = index["manifests"]
+    local = {**local, "platform": {"os": "linux", "architecture": "amd64"}}
+    local.pop("annotations")
+    absent = [
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": f"sha256:{digit * 64}",
+            "size": 100,
+            **extra,
+        }
+        for digit, extra in (
+            ("a", {"platform": {"os": "linux", "architecture": "arm64", "variant": "v8"}}),
+            (
+                "b",
+                {
+                    "platform": {"os": "unknown", "architecture": "unknown"},
+                    "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+                },
+            ),
+            ("c", {"platform": {"os": "linux", "architecture": "s390x"}}),
+        )
+    ]
+    nested = json.dumps(
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": ([local] if keep_local else []) + absent,
+        }
+    ).encode()
+    digest = hashlib.sha256(nested).hexdigest()
+    blobs[f"blobs/sha256/{digest}"] = nested
+    blobs["index.json"] = json.dumps(
+        {
+            "schemaVersion": 2,
+            "manifests": [
+                {
+                    "mediaType": "application/vnd.oci.image.index.v1+json",
+                    "digest": f"sha256:{digest}",
+                    "size": len(nested),
+                    "annotations": {"io.containerd.image.name": "docker.io/library/app:1"},
+                }
+            ],
+        }
+    )
+
+
+def test_multiplatform_index_saved_for_one_platform(tmp_path: Path) -> None:
+    blobs = oci_blobs()
+    _partial_multiplatform(blobs, keep_local=True)
+    result = inspect(write(tmp_path / "d", {"app.tar": tar_bytes(blobs)}))
+    found = findings_of(result)
+    assert "container.image.incomplete" not in found
+    assert "container.layer.digest-mismatch" not in found
+    metadata = artifact(result, "app.tar").metadata["container"]
+    assert metadata["notDelivered"] == {
+        "attestation-manifest": 1,
+        "linux/arm64/v8": 1,
+        "linux/s390x": 1,
+    }
+    assert _unit(result, "app.tar").attributes["images"][0]["architecture"] == "amd64"
+
+
+def test_multiplatform_index_with_no_platform_delivered(tmp_path: Path) -> None:
+    blobs = oci_blobs()
+    _partial_multiplatform(blobs, keep_local=False)
+    found = findings_of(inspect(write(tmp_path / "d", {"app.tar": tar_bytes(blobs)})))
+    [missing] = found["container.image.incomplete"]
+    assert missing.detail["missing"] == [f"manifest: blobs/sha256/{d * 64}" for d in "abc"]
 
 
 def test_a_plain_tar_is_not_an_image(tmp_path: Path) -> None:

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from airlock import __version__
 from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import UNCLASSIFIED, Severity, Subject, ToolRef
-from airlock.handlers.common import full_path
+from airlock.handlers.common import TEST_CONTEXT, TEST_PATH, full_path
 
 TOOL = ToolRef("airlock.secrets", __version__)
 _LIMIT = 256 << 20
@@ -86,12 +86,11 @@ _PLACEHOLDER = re.compile(
     r"(?i)(\$\{|\{\{|%\(|<[a-z_]+>|^\*+$|x{4,}|change.?me|example|placeholder|your[_-]|dummy"
     r"|redacted|secret|password|passw0rd|token|^test|fake|sample|\.\.\.)"
 )
+# A value that names where the secret is kept (GIT_AUTH_HEADER, as BuildKit's provenance
+# records build secrets) is a reference, not a secret.
+_VARIABLE_NAME = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
 # Vendors' documented example credentials (AKIAIOSFODNN7EXAMPLE) and obvious dummies.
 _EXAMPLE = re.compile(r"(?i)example|x{6,}|0{10,}|dummy|fake|sample|placeholder")
-_TEST_PATH = re.compile(
-    r"(?i)(^|/)(tests?|testing|test_?data|testdata|fixtures?|examples?|samples?|docs?|spec)(/|$)"
-    r"|(^|/)test_[^/]*$|_test\.[a-z]+$|(^|/)(examples?|samples?)[-_.][^/]*$"
-)
 
 
 def _entropy(value: str) -> float:
@@ -104,7 +103,11 @@ def _plausible(kind: _Kind, match: re.Match[str]) -> bool:
     value = match.group("value") or match.group("urlpass")
     if value is None:  # a typed token: only documented examples and dummies are dropped
         return not _EXAMPLE.search(match.group(0))
-    return not _PLACEHOLDER.search(value) and _entropy(value) >= 3.0
+    return (
+        not _PLACEHOLDER.search(value)
+        and not _VARIABLE_NAME.fullmatch(value)
+        and _entropy(value) >= 3.0
+    )
 
 
 def _blocks(view: ArtifactView) -> Iterator[bytes]:
@@ -205,7 +208,7 @@ class SecretsHandler:
 
     def inspect(self, artifact: ArtifactView, ctx: Context) -> Inspection:
         recorder = ctx.recorder
-        test_path = bool(_TEST_PATH.search(full_path(artifact.ref)))
+        test_path = bool(TEST_PATH.search(full_path(artifact.ref)))
         found = 0
         pending_key: tuple[int, _Kind] | None = None
         first_line = 1  # line number of the current block's first line
@@ -274,7 +277,7 @@ class SecretsHandler:
         if length is not None:
             detail["length"] = length
         if test_path:
-            detail["context"] = "test or example path"
+            detail["context"] = TEST_CONTEXT
         ctx.recorder.fail(
             "secret.detected",
             Subject.of_artifact(view.ref, locator=f"line {line}"),

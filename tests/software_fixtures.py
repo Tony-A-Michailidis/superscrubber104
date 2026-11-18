@@ -172,11 +172,13 @@ def wheel_bytes(
     pth: str | None = None,
     tamper: bool = False,
     extra_file: bool = False,
+    classifiers: tuple[str, ...] = (),
 ) -> bytes:
     dist = f"{name}-{version}.dist-info"
     metadata = f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\nSummary: test\n"
     if licence:
         metadata += f"License-Expression: {licence}\n"
+    metadata += "".join(f"Classifier: {c}\n" for c in classifiers)
     files: dict[str, bytes] = {
         f"{name}/__init__.py": b"VALUE = 1\n",
         f"{dist}/METADATA": metadata.encode(),

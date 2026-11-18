@@ -166,3 +166,20 @@ def test_secrets_in_very_long_lines(tmp_path: Path) -> None:
     assert found == {
         "data/api.json#line 2": [{"type": "aws-access-key-id", "severity": Severity.HIGH}]
     }
+
+
+def test_a_value_that_names_a_secret_is_not_one(tmp_path: Path) -> None:
+    # BuildKit provenance records which build secrets were mounted, by name.
+    statement = '{"args": {"git.authheadersecret": "GIT_AUTH_HEADER", "secret": "MY_API_KEY_2"}}'
+    found = findings_of(inspect(write(tmp_path / "d", {"provenance.json": statement})))
+    assert "secret.detected" not in found
+
+
+def test_javascript_test_files_are_test_paths(tmp_path: Path) -> None:
+    files = {
+        path: f'const password = "{PASSWORD}";\n'
+        for path in ("src/__tests__/client.ts", "src/client.test.ts", "src/client.spec.js")
+    }
+    found = findings_of(inspect(write(tmp_path / "d", files)))["secret.detected"]
+    assert len(found) == 3
+    assert all(f.severity is Severity.LOW for f in found)

@@ -404,6 +404,14 @@ def test_lists_inside_archives_are_not_assessed(tmp_path: Path) -> None:
     assert "inside an archive" in reasons["drop.tar!/SHA256SUMS"]
 
 
+def test_binaries_named_like_checksum_lists_are_not_lists(tmp_path: Path) -> None:
+    elf = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56
+    result = inspect(write(tmp_path / "d", {"usr/bin/sha256sum": elf, "usr/bin/md5sum": elf}))
+    for path in ("usr/bin/sha256sum", "usr/bin/md5sum"):
+        assert "upstream.checksum-list" not in artifact(result, path).kinds
+    assert not _not_assessed(result, "upstream.checksum-mismatch")
+
+
 def test_older_version_of_a_package_in_the_same_delivery(tmp_path: Path) -> None:
     files: dict[str, bytes | str] = {
         "p/tool-1.0.rpm": rpm_bytes(RPMSpec(name="tool", version="1.0", release="1.el9")),

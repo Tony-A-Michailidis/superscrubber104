@@ -35,6 +35,16 @@ def is_literal_secret(name: str, value: object) -> bool:
     return len(stripped) >= 8 and not _PLACEHOLDER.match(stripped) and len(set(stripped)) > 3
 
 
+# Tests, fixtures, examples and documentation: what a finding there shows is usually a dummy,
+# so handlers report it at low severity with the context "test or example path".
+TEST_PATH = re.compile(
+    r"(?i)(^|/)(tests?|__tests__|testing|test_?data|testdata|fixtures?|examples?|samples?|docs?"
+    r"|spec)(/|$)|(^|/)test_[^/]*$|_test\.[a-z]+$|\.(test|spec)\.[a-z]+$"
+    r"|(^|/)(examples?|samples?)[-_.][^/]*$"
+)
+TEST_CONTEXT = "test or example path"
+
+
 def full_path(ref: ArtifactRef) -> str:
     """The innermost path: the bundle path, or the path inside the innermost archive."""
     return (ref.path, *ref.member)[-1]

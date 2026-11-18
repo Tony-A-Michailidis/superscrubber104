@@ -243,3 +243,19 @@ def test_package_allowlist(tmp_path: Path) -> None:
     report = allow.replace("enforce", "report")
     [finding] = findings_of(inspect(root, policy_yaml=report))["package.allowlist.unapproved"]
     assert finding.severity is Severity.INFO
+
+
+def test_a_licence_family_classifier_beside_an_identifier(tmp_path: Path) -> None:
+    # httpx declares BSD-3-Clause and the classifier "BSD License": nothing is unidentified.
+    family = "License :: OSI Approved :: BSD License"
+    files = {
+        f"wheels/{wheel_name('exact', '1.0')}": wheel_bytes(
+            "exact", "1.0", licence="BSD-3-Clause", classifiers=(family,)
+        ),
+        f"wheels/{wheel_name('vague', '1.0')}": wheel_bytes(
+            "vague", "1.0", licence="MIT", classifiers=(family,)
+        ),
+    }
+    found = findings_of(inspect(write(tmp_path / "d", files), licences=True))
+    unidentified = [f.subject.display for f in found.get("licence.unidentified", [])]
+    assert len(unidentified) == 1 and "vague" in unidentified[0]  # BSD beside MIT is unexplained

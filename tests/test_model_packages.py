@@ -22,6 +22,7 @@ from tests.model_fixtures import (
     adapter_package,
     hf_package,
     ollama_store,
+    onnx_bytes,
     safetensors_bytes,
     tiny_gguf,
     write,
@@ -336,6 +337,21 @@ def test_gguf_files_share_the_directory_licence(tmp_path: Path) -> None:
         declared = unit.attributes["licence"]["declared"]
         assert {d["source"] for d in declared} == {"licence-file:LICENSE", "gguf-metadata"}
         assert unit.attributes["identity"]["architecture"] == "llama"
+
+
+def test_onnx_variants_belong_to_their_repository(tmp_path: Path) -> None:
+    # Hugging Face repositories keep format variants in onnx/ and openvino/ subfolders.
+    root = hf_package(tmp_path / "models" / "tiny")
+    write(root, {"onnx/model.onnx": onnx_bytes(), "onnx/model_int8.onnx": onnx_bytes()})
+    write(tmp_path / "models" / "loose", {"onnx/model.onnx": onnx_bytes()})
+    result = inspect(tmp_path / "models", licences=True)
+    units = {u.root.display: u for u in result.analysis.units}
+    variant = units["tiny/onnx/model_int8.onnx"]
+    assert variant.attributes["variantOf"] == "tiny"
+    assert variant.name == "tiny/onnx/model_int8.onnx"
+    assert variant.attributes["licence"]["expression"] == "Apache-2.0"
+    missing = {f.subject.unit for f in findings_of(result).get("licence.missing", [])}
+    assert missing == {"model-package:loose/onnx/model.onnx"}  # no repository around it
 
 
 def test_split_gguf_completeness(tmp_path: Path) -> None:

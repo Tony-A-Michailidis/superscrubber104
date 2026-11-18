@@ -346,18 +346,37 @@ _SAFE_PATTERNS = (
 )
 
 
+_TORCHSCRIPT_NAMES = frozenset(
+    f"torch.jit._pickle.{n}"
+    for n in (
+        "build_intlist", "build_tensorlist", "build_doublelist", "build_boollist",
+        "build_genericlist", "build_tensor_from_id", "restore_type_tag",
+    )
+)  # fmt: skip
+
+
 def _within(module: str, modules: frozenset[str]) -> bool:
     parts = module.split(".")
     return any(".".join(parts[:i]) in modules for i in range(1, len(parts) + 1))
 
 
-def classify(module: str, name: str, allowed: Iterable[str] = ()) -> str:
+def classify(
+    module: str, name: str, allowed: Iterable[str] = (), *, torchscript: bool = False
+) -> str:
     """'dangerous', 'safe' or 'unknown' for one imported callable.
 
     ``allowed`` holds extra safe names from policy: ``module.name`` or ``module.*``.
-    Dangerous always wins over allowed.
+    Dangerous always wins over allowed. ``torchscript`` is set for a pickle inside a torch
+    archive: TorchScript's list builders and its ``__torch__`` classes (which name code in the
+    archive, never an importable module) are expected there.
     """
     full = f"{module}.{name}"
+    if (
+        torchscript
+        and "__" not in name
+        and (full in _TORCHSCRIPT_NAMES or module == "__torch__" or module.startswith("__torch__."))
+    ):
+        return "safe"
     first = name.split(".", 1)[0]
     if "__" in name or "__" in module.replace("__builtin__", ""):
         return "dangerous"

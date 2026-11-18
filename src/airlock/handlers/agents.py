@@ -31,6 +31,8 @@ from airlock.core.interfaces import ArtifactView, Context, Detection, Inspection
 from airlock.core.model import Severity, Subject, ToolRef
 from airlock.core.yamlio import load_untrusted_yaml
 from airlock.handlers.common import (
+    TEST_CONTEXT,
+    TEST_PATH,
     TooLarge,
     full_path,
     is_literal_secret,
@@ -84,7 +86,8 @@ _SCRIPT_EXTENSIONS = (
 _SYSTEM_PROMPT = re.compile(r"(?i)(^|[_.-])system[_-]?prompt")
 _NETWORK = re.compile(
     r"\b(?:curl|wget|nc|ncat|netcat|socat|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|scp|rsync|ftp"
-    r"|telnet)\b|https?://|\brequests\.(?:get|post|put)\b|\burllib\.request\b|\bfetch\s*\(|\bhttpx\."
+    r"|telnet)\b|https?://|\brequests\.(?:get|post|put)\b|\burllib\.request\b"
+    r"|(?<!def )(?<!function )\bfetch\s*\(|\bhttpx\."
 )
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})  # noqa: S104 - a name, not a bind
 
@@ -122,6 +125,7 @@ _NAME_DESCRIPTION = re.compile(
     re.S,
 )
 _DESCRIPTION = re.compile(r"""description\s*[:=]\s*(['"`])(?P<d>(?:(?!\1).){0,4000})\1""", re.S)
+_CREDENTIAL_NAME = r"(?i:token|secret|passw|api_?key|credential|auth)"
 _CAPABILITIES: dict[str, tuple[Severity, dict[str, re.Pattern[str]]]] = {
     "shell": (
         Severity.HIGH,
@@ -152,11 +156,12 @@ _CAPABILITIES: dict[str, tuple[Severity, dict[str, re.Pattern[str]]]] = {
         Severity.MEDIUM,
         {
             "python": re.compile(
-                r"\b(?:requests|httpx|aiohttp|urllib3)\.|\burllib\.request\b|\bsocket\.socket\b"
+                r"\brequests\.(?:get|post|put|patch|delete|head|request|Session)\b"
+                r"|\b(?:httpx|aiohttp|urllib3)\.|\burllib\.request\b|\bsocket\.socket\b"
                 r"|\bhttp\.client\b"
             ),
             "javascript": re.compile(
-                r"\bfetch\s*\(|\baxios\b|\bhttps?\.(?:request|get)\b|\bnet\.connect\b"
+                r"(?<!function )\bfetch\s*\(|\baxios\b|\bhttps?\.(?:request|get)\b|\bnet\.connect\b"
                 r"|\bnew WebSocket\b"
             ),
         },
@@ -164,16 +169,30 @@ _CAPABILITIES: dict[str, tuple[Severity, dict[str, re.Pattern[str]]]] = {
     "credentials": (
         Severity.LOW,
         {
-            "python": re.compile(r"\bos\.environ\b|\bos\.getenv\b|\bkeyring\b"),
-            "javascript": re.compile(r"\bprocess\.env\b"),
+            # Credential-named variables, a keyring, or the whole environment handed out;
+            # reading PORT or a path setting is configuration, not a credential.
+            "python": re.compile(
+                r"\bos\.(?:environ(?:\.get)?|getenv)\s*[\[(]\s*['\"]\w*"
+                + _CREDENTIAL_NAME
+                + r"|\bkeyring\b|\b(?:json\.dumps|dict)\(\s*os\.environ\b"
+            ),
+            "javascript": re.compile(
+                r"\bprocess\.env(?:\.|\[\s*['\"`])\w*"
+                + _CREDENTIAL_NAME
+                + r"|\bkeytar\b|JSON\.stringify\([^)\n]*\bprocess\.env\b"
+            ),
         },
     ),
     "dynamic-tools": (
         Severity.MEDIUM,
         {
-            "python": re.compile(r"list_changed|\badd_tool\s*\(|\bremove_tool\s*\("),
+            # The tool list, not the client's roots, which also announce list changes.
+            "python": re.compile(
+                r"\btools?_list_changed\b|tools/list_changed|\badd_tool\s*\(|\bremove_tool\s*\("
+            ),
             "javascript": re.compile(
-                r"listChanged|sendToolListChanged|\.removeTool\s*\(|\.enable\(\)"
+                r"\btools\s*:\s*\{\s*listChanged\b|sendToolListChanged|\.removeTool\s*\("
+                r"|\.enable\(\)"
             ),
         },
     ),
@@ -489,7 +508,7 @@ def _script(view: ArtifactView, ctx: Context) -> Inspection:
     text = read_text(view, 4 << 20)
     path = f"/{full_path(view.ref)}"
     subject = Subject.of_artifact(view.ref)
-    if "/skills/" in path:
+    if _in_skill(view, path):
         ctx.recorder.fail(
             "agent.skill.scripts", subject, tool=TOOL, detail={"script": name_of(view.ref)}
         )
@@ -540,6 +559,9 @@ def _mcp_server(view: ArtifactView, ctx: Context) -> Inspection:
         if description:
             _check_prompt(ctx, view, description, locator=f"tool {name}")
     found = []
+    # A server's own tests and tooling spawn processes and write files to exercise it; what they
+    # do is recorded, at low severity.
+    test_path = bool(TEST_PATH.search(full_path(view.ref)))
     for capability, (severity, patterns) in _CAPABILITIES.items():
         match = patterns[language].search(text)
         named = sorted(n for n, _ in tools if _TOOL_NAME_CAPABILITY[capability].search(n))
@@ -557,13 +579,16 @@ def _mcp_server(view: ArtifactView, ctx: Context) -> Inspection:
         else:
             # The code is elsewhere (a helper module); the tool names still say what it does.
             evidence, locator = {"toolNames": named[:20]}, "tool names"
+        detail: dict[str, object] = {"capability": capability, "evidence": evidence}
+        if test_path:
+            detail["context"] = TEST_CONTEXT
         ctx.recorder.fail(
             "mcp.server.capability",
             Subject.of_artifact(view.ref, locator=locator),
             tool=TOOL,
-            detail={"capability": capability, "evidence": evidence},
+            detail=detail,
             attributes={"capability": capability, "language": language},
-            severity=severity,
+            severity=Severity.LOW if test_path else severity,
             discriminator=capability,
         )
     summary = {"language": language, "tools": [n for n, _ in tools], "capabilities": found}
@@ -571,6 +596,20 @@ def _mcp_server(view: ArtifactView, ctx: Context) -> Inspection:
 
 
 # --- dispatch -----------------------------------------------------------------------------------
+
+
+def _in_skill(view: ArtifactView, path: str) -> bool:
+    """A file in an agent skill: under ``skills/<name>/`` where that folder holds a SKILL.md (an
+    application's own ``skills`` package is not one), or anywhere under ``.claude/skills/``."""
+    parts = path.strip("/").split("/")
+    at = [i for i, part in enumerate(parts[:-2]) if part == "skills"]
+    if not at:
+        return False
+    i = at[-1]
+    if i > 0 and parts[i - 1] == ".claude":
+        return True
+    below = len(parts) - (i + 3)  # folders between the skill's folder and the file
+    return view.resolve("../" * below + "SKILL.md") is not None
 
 
 def _dispatch(view: ArtifactView) -> Callable[[ArtifactView, Context], Inspection] | None:
@@ -605,7 +644,7 @@ def _dispatch(view: ArtifactView) -> Callable[[ArtifactView, Context], Inspectio
         return _prompt_text("agent.system-prompt")
     if lowered.endswith(_SCRIPT_EXTENSIONS) and (
         "/.claude/hooks/" in path
-        or "/skills/" in path
+        or _in_skill(view, path)
         or ("/hooks/" in path and "/.claude/" in path)
     ):
         return _script

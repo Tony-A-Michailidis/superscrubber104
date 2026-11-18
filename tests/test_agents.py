@@ -259,3 +259,57 @@ def test_capability_inferred_from_tool_names(tmp_path: Path) -> None:
     assert capability.attributes["capability"] == "filesystem-write"
     assert capability.detail["evidence"] == {"toolNames": ["write_file"]}
     assert capability.subject.display == "src/server.ts#tool names"
+
+
+def test_only_folders_with_a_skill_md_are_agent_skills(tmp_path: Path) -> None:
+    # An application's own "skills" package is code, not an agent skill.
+    write(
+        tmp_path / "p",
+        {
+            "app/components/skills/loader.py": "async def fetch():\n    return []\n",
+            "app/components/skills/services/store.py": "VALUE = 1\n",
+            "plugin/skills/report/SKILL.md": "---\nname: report\ndescription: Report\n---\nRun it.\n",
+            "plugin/skills/report/scripts/run.py": "print('report')\n",
+        },
+    )
+    found = findings_of(inspect(tmp_path / "p"))
+    assert [f.subject.display for f in found["agent.skill.scripts"]] == [
+        "plugin/skills/report/scripts/run.py"
+    ]
+    assert "agent.hook.network" not in found
+
+
+def test_capability_noise_is_kept_quiet(tmp_path: Path) -> None:
+    client_side = (
+        'import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";\n'
+        "const server = new McpServer({ name: 'x', version: '1' });\n"
+        "const client = { capabilities: { roots: { listChanged: true } } };\n"
+        "const PORT = process.env.PORT || 3001;\n"
+    )
+    credential = client_side + "const token = process.env.GITHUB_TOKEN;\n"
+    python = (
+        "from mcp.server.fastmcp import FastMCP\n"
+        "requests = []\n"
+        "requests.append(1)\n"
+        "async def fetch():\n"
+        "    return requests\n"
+    )
+    write(
+        tmp_path / "p",
+        {
+            "servers/quiet.ts": client_side,
+            "servers/token.ts": credential,
+            "servers/quiet.py": python,
+            "servers/tests/test_ops.py": PY_SERVER,
+        },
+    )
+    found = findings_of(inspect(tmp_path / "p"))
+    capabilities = {
+        (f.subject.artifact.path, f.attributes["capability"]): f
+        for f in found["mcp.server.capability"]
+    }
+    assert not any(path in ("servers/quiet.ts", "servers/quiet.py") for path, _ in capabilities)
+    assert ("servers/token.ts", "credentials") in capabilities
+    shell = capabilities[("servers/tests/test_ops.py", "shell")]
+    assert shell.severity is Severity.LOW
+    assert shell.detail["context"] == "test or example path"
