@@ -2,7 +2,7 @@
 
 > **Status: implemented** (task 7). Spec: [§17](13-checks-and-controls.md) (secrets, malware, vulnerability matching, scanner plugins), the binaries and documents rows of [§6](04-artifact-coverage.md). Setup guide for operators: [docs/scanners.md](../scanners.md).
 
-Every delivery gets these checks, AI or not. Three are built in and need nothing external; two need a scanner and a database that changes daily, and are optional plugins. The rule from CLAUDE.md applies throughout: what could not be checked is recorded as *not assessed*, never left out.
+Every delivery gets these checks, AI or not. Three are built in and need nothing external; two need a scanner and a database that changes daily, and are optional plugins. The project's guardrail applies throughout: what could not be checked is recorded as *not assessed*, never left out.
 
 ## 21.1 Built in
 

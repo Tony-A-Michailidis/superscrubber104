@@ -31,7 +31,7 @@
 
 ## 20. First tasks for Claude Code
 
-1. Split this brief into `docs/design/*.md`; trim `CLAUDE.md` to an index.
+1. Split this brief into `docs/design/*.md`; trim the project instructions to an index.
 2. Scaffold: `pyproject.toml`, Apache-2.0 licence, README skeleton, CI (GitLab CI and/or GitHub Actions), pre-commit, pytest.
 3. Core models: `TransferRequest`, `Bundle`, `Artifact`, `Component`, `Unit`, `Manifest`, `Finding`, `Policy`, `ControlMapping`, `Receipt`; `Handler`, `Plugin`, `Stager` interfaces.
 4. Walker with safe extraction + generic handler + keygen/pack/verify (hashing and signing only), end to end, with tamper, zip-bomb and path-traversal tests.
