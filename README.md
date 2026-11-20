@@ -80,6 +80,44 @@ Each import also gets its evidence: an HTML report, a CycloneDX SBOM/ML-BOM (the
 
 The demo exits 0 only when everything happens as described, and the test suite runs it. Its full output is in [examples/demo/sample-output.md](examples/demo/sample-output.md).
 
+## A real delivery
+
+The demo's files are synthetic. airlock has also been tried on 3.5 GB of real, public projects: the [private-gpt](https://github.com/zylon-ai/private-gpt) RAG application, the [MCP reference servers](https://github.com/modelcontextprotocol/servers) and a client configuration that starts them, three Hugging Face models with every format their repositories publish, a small client with hash-pinned wheels, and the `python:3.12-slim` image. It inspected 1,800 files and 5,645 archive members in 27 seconds and blocked the delivery for 19 reasons, each one real:
+
+| Blockers | Why |
+|---|---|
+| 2 × `mcp.server.runtime-fetch` | `uvx` and `npx` download the MCP servers when they start |
+| 5 × `*.environment.unresolvable` | private-gpt, three Python MCP servers and the npm workspace arrived without their packages |
+| 8 × `offline.endpoint.cloud-ai` | private-gpt defaults to `api.openai.com` |
+| 1 × `model.pickle.unknown-import` | a model's `training_args.bin` is a pickle importing training classes, which inference does not need |
+| 3 × `mcp.server.capability` (shell) | the MCP repository's release scripts start processes |
+
+The first run also reported findings that were airlock's mistakes: a multi-platform image saved for one platform was called incomplete, coreutils' `sha256sum` was taken for a checksum list, an application's `skills` package for agent skills. Each was fixed with a regression test built from the real layout. [The full account](examples/demo/real-delivery.md) and [the report itself](examples/demo/real-delivery-report.html) are in `examples/demo/`.
+
+One of the models, `HuggingFaceTB/SmolLM2-135M-Instruct` at revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, inspected in place:
+
+```console
+$ airlock model inspect smollm2-135m
+model package  .  (LlamaForCausalLM)
+  architecture   LlamaForCausalLM, 134.5M parameters
+  weights        safetensors, 1 file(s), BF16 x272
+  tokenizer      BPE, 49152 tokens
+  chat template  sha256:872be49dbb638044... (tokenizer_config.json#chat_template)
+  licence        Apache-2.0
+  provenance     huggingface-download-record unknown@12fd25f77366fa6b3b4b768ec3050bf629380bac, 25 file(s) verified
+  members        34
+...
+BLOCK           model.pickle.unknown-import  [3f930721fb6da0fb]
+                training_args.bin!/training_args/data.pkl: Pickle imports callables outside the known-safe set
+                hint: add trusted classes to the policy's 'pickle-globals' allowlist
+                approvals: 0 of 2 required
+...
+32 of 212 rules exercised, 252 checks passed; findings: 1 block, 10 need approval, 2 warn, 35 allowed
+verdict: BLOCKED - a policy blocker stands; it can be overridden by an approval quorum
+```
+
+The 25 files verified are checked against the hashes Hugging Face's own download tool recorded. Of the 10 approvals, 9 are the Apache-2.0 licence of the model and its eight ONNX variants (the default policy asks for approval of every licence; a site policy lists the ones it accepts), and one is `training_args.bin`, a file that can run code when loaded.
+
 ## Quick start
 
 Requires Python 3.11+. From a clone: `pip install -e .` (the [WSL guide](docs/quickstart-wsl.md) has every step).

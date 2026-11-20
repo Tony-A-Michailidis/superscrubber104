@@ -39,7 +39,7 @@ Handlers emit claims (`role` + facts); the assembler groups them by root:
 | The first shard | Split GGUF (`name-00001-of-0000N.gguf`) |
 | The manifest | An Ollama model |
 
-A group is a package only if it holds a *core* role: weights, an index, a model config, an adapter, a Modelfile or a manifest. A directory with only a README and a LICENSE is not a package. A file-rooted package (a GGUF) inherits the licence and model card of its directory when that directory is not a package itself. A format variant in a subfolder of a model repository (`onnx/model_int8.onnx`, `openvino/openvino_model.xml`, as Hugging Face repositories keep them) stays its own package but takes the repository's licence and model card, is named `<repository>/onnx/model_int8.onnx`, and records `variantOf`. Packages form inside archives too: the assembler works from the claims' facts, not by re-reading files.
+A group is a package only if it holds a *core* role: weights, an index, a model config, an adapter, a Modelfile or a manifest. A directory with only a README and a LICENSE is not a package. A file-rooted package (a GGUF) inherits the licence and model card of its directory when that directory is not a package itself. A format variant in a subfolder of a model repository (`onnx/model_int8.onnx`, `openvino/openvino_model.xml`, as Hugging Face repositories keep them) stays its own package but takes the repository's licence and model card, is named `<repository>/onnx/model_int8.onnx` (or `onnx/model_int8.onnx` when the repository itself is inspected), and records `variantOf`. Packages form inside archives too: the assembler works from the claims' facts, not by re-reading files.
 
 ### Checks
 

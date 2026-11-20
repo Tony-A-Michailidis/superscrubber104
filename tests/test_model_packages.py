@@ -352,6 +352,9 @@ def test_onnx_variants_belong_to_their_repository(tmp_path: Path) -> None:
     assert variant.attributes["licence"]["expression"] == "Apache-2.0"
     missing = {f.subject.unit for f in findings_of(result).get("licence.missing", [])}
     assert missing == {"model-package:loose/onnx/model.onnx"}  # no repository around it
+    # Inspecting the repository itself: the variant is named from there, without "./".
+    alone = {u.root.display: u for u in inspect(root).analysis.units}
+    assert alone["onnx/model_int8.onnx"].name == "onnx/model_int8.onnx"
 
 
 def test_split_gguf_completeness(tmp_path: Path) -> None:

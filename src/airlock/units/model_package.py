@@ -256,7 +256,9 @@ class _Checks:
             root_name = name_of(p.root) if p.root.path != "." else None
             if p.variant_of is not None:  # all-MiniLM-L6-v2/onnx/model.onnx, not model.onnx
                 within = relative_to(p.root, p.variant_of)
-                root_name = f"{name_of(p.variant_of)}/{within}" if within else root_name
+                repository = name_of(p.variant_of) if p.variant_of.path != "." else None
+                if within:
+                    root_name = f"{repository}/{within}" if repository else within
             name = _str(gguf.get("name")) or root_name or architecture or "unnamed model"
         p.name = name
         candidates = (name, name_or_path, gguf.get("name"), gguf.get("basename"), name_of(p.root))
