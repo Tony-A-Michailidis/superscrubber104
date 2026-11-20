@@ -38,7 +38,7 @@ Below, `python3.12` means `python3` on AlmaLinux 10.
 Clone into the Linux filesystem (your home directory), not under `/mnt/c`, which is much slower:
 
 ```bash
-git clone https://github.com/Tony-A-Michailidis/airlock ~/superscrubber104
+git clone https://github.com/Tony-A-Michailidis/superscrubber104 ~/superscrubber104
 cd ~/superscrubber104
 ```
 

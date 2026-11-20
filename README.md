@@ -1,6 +1,6 @@
 # superscrubber104
 
-[![CI](https://github.com/Tony-A-Michailidis/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/Tony-A-Michailidis/airlock/actions/workflows/ci.yml)
+[![CI](https://github.com/Tony-A-Michailidis/superscrubber104/actions/workflows/ci.yml/badge.svg)](https://github.com/Tony-A-Michailidis/superscrubber104/actions/workflows/ci.yml)
 
 > **Pre-alpha.** It works end to end, but it is not yet ready for real transfers.
 
