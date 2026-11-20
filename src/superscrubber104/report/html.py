@@ -23,7 +23,7 @@ body { background: var(--bg); color: var(--fg); margin: 0 auto; max-width: 1180p
 h1 { font-size: 22px; margin: 0 0 8px; } h2 { font-size: 17px; margin: 28px 0 8px; }
 table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; }
 th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left;
-  vertical-align: top; }
+  vertical-align: top; overflow-wrap: anywhere; }
 th { background: var(--head); font-weight: 600; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
@@ -36,6 +36,11 @@ code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
 .WARN, .noted { color: var(--warn); }
 .ok, .passed, .no-findings, .OVERRIDE, .APPROVED { color: var(--ok); }
 details { margin: 8px 0; } summary { cursor: pointer; font-weight: 600; }
+td:first-child, td:nth-child(4), th { overflow-wrap: normal; white-space: nowrap; }
+td:nth-child(2) { min-width: 14em; } td:last-child { min-width: 9em; }
+@page { size: A4 landscape; margin: 12mm; }
+@media print { body { max-width: none; padding: 0; font-size: 10.5px; }
+  code, .mono { font-size: 10px; } tr { break-inside: avoid; } }
 """
 
 _CSP = "default-src 'none'; style-src 'unsafe-inline'"
