@@ -1,0 +1,81 @@
+name: Release
+
+# Pushing a tag vX.Y.Z publishes a GitHub release: a wheel and an sdist built reproducibly
+# (SOURCE_DATE_EPOCH is the tagged commit's time), SHA256SUMS over them, and a signed SLSA
+# build-provenance attestation. RELEASING.md describes the steps and how to check a release.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: mypy
+      - run: pytest -q
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release
+      id-token: write      # sign the provenance with the workflow's identity
+      attestations: write  # store the attestation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The tag names the version in the code
+        run: |
+          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/superscrubber104/__init__.py)"
+          test "v$version" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME does not match __version__ $version"; exit 1; }
+      - name: The changelog has a section for it
+        run: grep -q "^## \[${GITHUB_REF_NAME#v}\]" CHANGELOG.md
+      - name: Build, reproducibly
+        run: |
+          pip install build==1.6.1
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          python -m build --outdir dist
+          (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+      - name: Release notes from the changelog
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            $0 ~ "^## \\[" v "\\]" {on=1; next}
+            on && /^## \[/ {exit}
+            on {print}' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ### Checking this release
+
+          Every file is listed in `SHA256SUMS`, and the wheel and sdist carry a signed build-provenance attestation from this repository's release workflow:
+
+          ```console
+          $ sha256sum --check SHA256SUMS
+          $ gh attestation verify superscrubber104-*.whl --repo ${{ github.repository }}
+          ```
+
+          The build is reproducible: building the tagged commit with `build==1.6.1` and `SOURCE_DATE_EPOCH` set to the commit's time gives the same hashes. See RELEASING.md.
+          EOF
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "superscrubber104 ${GITHUB_REF_NAME#v}" --notes-file notes.md --prerelease

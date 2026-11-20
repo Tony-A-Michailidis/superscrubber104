@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27"]  # PEP 639 licence metadata
+requires = ["hatchling==1.33.0"]  # exact: releases are rebuilt byte for byte (RELEASING.md)
 build-backend = "hatchling.build"
 
 [project]

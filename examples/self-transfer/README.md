@@ -38,26 +38,26 @@ click==8.5.1 --hash=sha256:8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d0
 cryptography==50.0.2 --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079
 pycparser==3.12 --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
 pyyaml==6.0.3 --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc
-superscrubber104==0.0.1 --hash=sha256:f69b508a65ee5e5689cb6f7d9668db17e5b77f4c67ba522c23ac2848722cb564
-SHA256SUMS digest, to send out of band: 0da427d624885c3f2455e980e52a2964c53ddc4bd3720f5f1f570c1fb874bc90
+superscrubber104==0.1.0 --hash=sha256:99544f5668595db9f96e14d0b820c365339d2c9ae3d09103bbc38ff34ac2aa18
+SHA256SUMS digest, to send out of band: d60ae3c9b4aedd442492c4a93f22862185418b0eba9791b11cb7a6d5e8181c1c
 
 == 4. Low side: superscrubber104 packs itself ==
 31 of 212 rules exercised, 3245 checks passed; findings: 0 block, 0 need approval, 3 warn, 0 allowed
 verdict: PASSED
-manifest: sha256:89da93b3e05e19d8364ee285b117c0a075f562099923c3c756053d9ae3d088f9
-bundle:   bundle (signed by ed25519:d29a7c3fb21f4b461396937618d21e1b9c3e0c05ffe701d7d75e572baf056d15)
+manifest: sha256:5040faac6f3fdd2a52a29834013d008bf76916af03acab38659ffefa1b64b403
+bundle:   bundle (signed by ed25519:0c45d54ba939c8ae68bc04cc2c4f5e6fe857efbc914a1f6cfc1b5a5b59177149)
 [pack exit 0]
 
 == 6. High side, with no network ==
 no network: pypi.org cannot be reached
 
 -- 6a. check the first crossing with standard tools --
-expected: 0da427d624885c3f2455e980e52a2964c53ddc4bd3720f5f1f570c1fb874bc90
-actual:   0da427d624885c3f2455e980e52a2964c53ddc4bd3720f5f1f570c1fb874bc90
+expected: d60ae3c9b4aedd442492c4a93f22862185418b0eba9791b11cb7a6d5e8181c1c
+actual:   d60ae3c9b4aedd442492c4a93f22862185418b0eba9791b11cb7a6d5e8181c1c
 every file matches SHA256SUMS
 
 -- 6b. install from the bundle, offline, every wheel checked against its hash --
-superscrubber104, version 0.0.1
+superscrubber104, version 0.1.0
 
 -- 6c. the installed superscrubber104 verifies the signed bundle it came in --
 47 of 212 rules exercised, 3279 checks passed; findings: 0 block, 0 need approval, 3 warn, 0 allowed
