@@ -122,7 +122,19 @@ def _b64(value: object, what: str) -> bytes:
 
 
 def parse_bundle(data: bytes, artifact: bytes | None = None) -> Bundle:
-    """A bundle. A message-signature bundle is over ``artifact``, which must then be given."""
+    """A bundle. A message-signature bundle is over ``artifact``, which must then be given.
+
+    Anything malformed is a ``BundleError``, whatever shape the JSON takes: a field of the wrong
+    type is an unreadable bundle, never an exception that escapes."""
+    try:
+        return _parse_bundle(data, artifact)
+    except BundleError:
+        raise
+    except (AttributeError, TypeError, KeyError, IndexError, ValueError) as exc:
+        raise BundleError(f"malformed bundle: {type(exc).__name__}: {exc}") from exc
+
+
+def _parse_bundle(data: bytes, artifact: bytes | None) -> Bundle:
     try:
         doc = json.loads(data)
     except (ValueError, UnicodeDecodeError) as exc:

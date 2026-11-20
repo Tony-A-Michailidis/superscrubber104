@@ -36,6 +36,7 @@ from superscrubber104.handlers.common import (
     TooLarge,
     full_path,
     is_literal_secret,
+    items,
     mapping,
     name_of,
     read_json,
@@ -285,7 +286,7 @@ def _mcp_config(view: ArtifactView, ctx: Context) -> Inspection:
         subject = Subject.of_artifact(view.ref, locator=locator)
         attributes = {"server": name}
         command = str(server.get("command") or "")
-        args = [str(a) for a in server.get("args") or [] if isinstance(a, str | int | float)]
+        args = [str(a) for a in items(server.get("args")) if isinstance(a, str | int | float)]
         url = str(server.get("url") or server.get("serverUrl") or "")
         program = posixpath.basename(command.replace("\\", "/")).lower().removesuffix(".exe")
         transport = "http" if url else "stdio"

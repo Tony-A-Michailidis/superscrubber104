@@ -79,7 +79,9 @@ _PASSPHRASE = click.option(
 
 
 def _reports_errors(command: Callable[P, None]) -> Callable[P, None]:
-    """Turn expected failures (bad input, bad config) into a message and exit code 2."""
+    """Turn expected failures (bad input, bad config) into a message and exit code 2, and anything
+    unexpected into a refusal (exit code 3): a command that failed part-way has not accepted
+    anything, and must never be read as a pass or as an ordinary policy blocker."""
 
     @functools.wraps(command)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
@@ -88,6 +90,15 @@ def _reports_errors(command: Callable[P, None]) -> Callable[P, None]:
         except Superscrubber104Error as exc:
             click.echo(f"error: {exc}", err=True)
             sys.exit(EXIT_USAGE)
+        except (click.ClickException, click.exceptions.Exit, click.Abort):
+            raise
+        except Exception as exc:
+            click.echo(
+                f"internal error: {type(exc).__name__}: {exc}\n"
+                "The command did not complete; treat its result as refused.",
+                err=True,
+            )
+            sys.exit(EXIT_REFUSED)
 
     return wrapper
 

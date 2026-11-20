@@ -139,7 +139,7 @@ Exit codes are the same for every command:
 | 0 | accepted |
 | 1 | a policy blocker or an open gap (overridable by approvals) |
 | 2 | usage error |
-| 3 | refused: integrity or authenticity failed (never overridable) |
+| 3 | refused: integrity or authenticity failed, or the tool failed part-way (never overridable) |
 
 Without `--policy`, the built-in default policy is used. `superscrubber104 rules` lists every check, and the same list is in [rules.md](rules.md).
 

@@ -192,7 +192,7 @@ Exit codes are the same for every command, so they work as CI gates:
 | 0 | Accepted |
 | 1 | A policy blocker stands, or approvals are outstanding |
 | 2 | Usage or configuration error |
-| 3 | Refused: an integrity or authenticity check failed |
+| 3 | Refused: an integrity or authenticity check failed, or the tool itself failed part-way |
 
 ## What it checks
 

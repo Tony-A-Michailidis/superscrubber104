@@ -117,9 +117,10 @@ def run_scanners(
                 continue
             try:
                 scanner.scan(ready, targets, analysis, ctx)
-            except ScanError as exc:
+            except Exception as exc:
                 subject = plugin_subject(scanner.name)
-                ctx.recorder.error("plugin.scan.error", subject, tool=ready.tool, error=str(exc))
+                error = str(exc) if isinstance(exc, ScanError) else f"{type(exc).__name__}: {exc}"
+                ctx.recorder.error("plugin.scan.error", subject, tool=ready.tool, error=error)
                 continue
             ran.add(scanner.capability)
     for capability, (rules, applies, reason) in CAPABILITIES.items():

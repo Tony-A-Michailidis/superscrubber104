@@ -291,6 +291,7 @@ extensions: { }                   # ignored by this version; still covered by th
 3. The first unexpired **waiver** that names this rule, matches the subject, matches `where`, and (if it sets `sha256`) matches the content. (Never for a final rule.)
 4. The first **rule** that matches (rule glob, `paths`, `where`) *and* sets an outcome for this result. A rule that only sets `notAssessed` never swallows a FAIL.
 5. Otherwise the **defaults**: by severity for a FAIL, `notAssessed` or `error` otherwise.
+6. **Fail closed.** A check that crashed (result `error`) is never decided `allow` or `warn` by a default or a rule; such an outcome is raised to `require-approval`. Only a waiver, a recorded human decision, can accept it. Every handler, assembler and scanner exception becomes such an error, and a command that fails part-way exits 3 with a message, never a traceback (tested in `tests/test_fail_closed.py`, which also feeds every structured format back with values of the wrong JSON type).
 
 The decision records which entry decided it (`rules[3]`, `waivers[0]`, `defaults.severity.high`, `final`), so every outcome traces to one policy line.
 

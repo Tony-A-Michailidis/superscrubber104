@@ -417,6 +417,10 @@ class Policy:
                     )
 
         outcome, matched, rule = self._outcome(finding)
+        if finding.result is Result.ERROR and outcome in (Disposition.ALLOW, Disposition.WARN):
+            # Fail closed: a check that crashed found nothing either way, so no default or rule
+            # lets it pass unreviewed. Only a waiver, a recorded human decision, can.
+            outcome, matched = Disposition.REQUIRE_APPROVAL, f"{matched} (raised: check error)"
         if outcome is Disposition.REQUIRE_APPROVAL:
             required = (rule.approvals if rule else None) or self.defaults.approvals
             return Decision(finding.id, outcome, matched, required)

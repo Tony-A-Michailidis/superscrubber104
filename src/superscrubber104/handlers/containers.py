@@ -210,6 +210,16 @@ class _Image:
     title: str | None = None  # a file's name, from its layer's annotations
 
 
+def _d(value: object) -> dict[str, Any]:
+    """A JSON object, or an empty one: documents from the delivery may have any shape."""
+    return value if isinstance(value, dict) else {}
+
+
+def _l(value: object) -> list[Any]:
+    """A JSON array, or an empty one."""
+    return value if isinstance(value, list) else []
+
+
 def _artifact_kind(annotations: dict[str, Any], document: Any) -> str:
     """What an OCI manifest holds. Only images get image checks (user, environment, start)."""
     if not isinstance(document, dict):
@@ -224,7 +234,7 @@ def _artifact_kind(annotations: dict[str, Any], document: Any) -> str:
     )
     layers = [
         str(layer.get("mediaType") or "")
-        for layer in document.get("layers") or []
+        for layer in _l(document.get("layers"))
         if isinstance(layer, dict)
     ]
     reference = str(annotations.get("org.opencontainers.image.ref.name") or "")
@@ -244,7 +254,7 @@ def _artifact_kind(annotations: dict[str, Any], document: Any) -> str:
 
 
 def _title(document: Any) -> str | None:
-    for layer in (document.get("layers") or []) if isinstance(document, dict) else []:
+    for layer in _l(document.get("layers")) if isinstance(document, dict) else []:
         annotations = layer.get("annotations") if isinstance(layer, dict) else None
         if isinstance(annotations, dict) and annotations.get("org.opencontainers.image.title"):
             return str(annotations["org.opencontainers.image.title"])[:300]
@@ -323,9 +333,7 @@ class _Reader:
                 if image.kind == "image":  # other artifacts' configs need not be JSON
                     config = self.store.json(image.config_path)
                     image.config = config if isinstance(config, dict) else {}
-            diff_ids = (
-                ((image.config.get("rootfs") or {}).get("diff_ids") or []) if image.config else []
-            )
+            diff_ids = _l(_d(image.config.get("rootfs")).get("diff_ids"))
             for index, (path, size) in enumerate(image.layers):
                 if not self.need(path, "layer"):
                     continue
@@ -340,7 +348,7 @@ class _Reader:
     def _oci(self, index: Any, depth: int) -> list[_Image]:
         images: list[_Image] = []
         absent: list[tuple[dict[str, Any], str | None]] = []
-        for descriptor in (index.get("manifests") or []) if isinstance(index, dict) else []:
+        for descriptor in _l(index.get("manifests")) if isinstance(index, dict) else []:
             if not isinstance(descriptor, dict):
                 continue
             path = _blob(str(descriptor.get("digest", "")))
@@ -357,22 +365,23 @@ class _Reader:
                 if depth < 2:
                     images += self._oci(document, depth + 1)
                 continue
-            annotations = descriptor.get("annotations") or {}
-            name = annotations.get("io.containerd.image.name") or annotations.get(
+            annotations = _d(descriptor.get("annotations"))
+            named = annotations.get("io.containerd.image.name") or annotations.get(
                 "org.opencontainers.image.ref.name"
             )
-            config = (document.get("config") or {}) if isinstance(document, dict) else {}
+            name = str(named)[:300] if named else None
+            config = _d(document.get("config")) if isinstance(document, dict) else {}
             layers = [
                 (
                     _blob(str(layer.get("digest", "")))
                     or f"<invalid digest {layer.get('digest')}>",
                     layer.get("size") if type(layer.get("size")) is int else None,
                 )
-                for layer in (document.get("layers") or [])
+                for layer in (_l(document.get("layers")) if isinstance(document, dict) else [])
                 if isinstance(layer, dict)
             ]
             config_path = _blob(str(config.get("digest", ""))) or "<missing config digest>"
-            kind = _artifact_kind(annotations if isinstance(annotations, dict) else {}, document)
+            kind = _artifact_kind(annotations, document)
             images.append(
                 _Image(
                     name,
@@ -397,9 +406,9 @@ class _Reader:
         for entry in manifest if isinstance(manifest, list) else []:
             if not isinstance(entry, dict):
                 continue
-            tags = [t for t in entry.get("RepoTags") or [] if isinstance(t, str)]
+            tags = [t for t in _l(entry.get("RepoTags")) if isinstance(t, str)]
             layers: list[tuple[str, int | None]] = [
-                (str(layer), None) for layer in entry.get("Layers") or []
+                (str(layer), None) for layer in _l(entry.get("Layers"))
             ]
             images.append(_Image(tags[0] if tags else None, None, str(entry.get("Config")), layers))
         return images
@@ -425,8 +434,8 @@ _START_DOWNLOAD = re.compile(
 
 
 def _summary(image: _Image) -> dict[str, object]:
-    config = image.config.get("config") or {} if image.config else {}
-    env = [e for e in config.get("Env") or [] if isinstance(e, str)]
+    config = _d(image.config.get("config"))
+    env = [e for e in _l(config.get("Env")) if isinstance(e, str)]
     settings = {
         key: value for key, _, value in (e.partition("=") for e in env) if key in RECORDED_ENV
     }
@@ -441,17 +450,17 @@ def _summary(image: _Image) -> dict[str, object]:
         "entrypoint": config.get("Entrypoint"),
         "cmd": config.get("Cmd"),
         "workingDir": config.get("WorkingDir"),
-        "exposedPorts": sorted((config.get("ExposedPorts") or {}).keys()),
+        "exposedPorts": sorted(str(port) for port in _d(config.get("ExposedPorts"))),
         "env": sorted(e.split("=", 1)[0] for e in env),
         "settings": settings,
-        "labels": dict(list((config.get("Labels") or {}).items())[:50]),
+        "labels": dict(list(_d(config.get("Labels")).items())[:50]),
         "layers": len(image.layers),
-        "history": len(image.config.get("history") or []),
+        "history": len(_l(image.config.get("history"))),
     }
 
 
 def _check_config(image: _Image, ctx: Context, view: ArtifactView) -> None:
-    config = image.config.get("config") or {} if image.config else {}
+    config = _d(image.config.get("config"))
     locator = f"image {image.name or image.config_path}"
     subject = Subject.of_artifact(view.ref, locator=locator)
     user = str(config.get("User") or "").strip()
@@ -467,7 +476,7 @@ def _check_config(image: _Image, ctx: Context, view: ArtifactView) -> None:
         ctx.recorder.passed("container.user.root")
     literal = [
         e.split("=", 1)[0]
-        for e in config.get("Env") or []
+        for e in _l(config.get("Env"))
         if isinstance(e, str) and "=" in e and is_literal_secret(*e.split("=", 1))
     ]
     if literal:
@@ -479,7 +488,11 @@ def _check_config(image: _Image, ctx: Context, view: ArtifactView) -> None:
         )
     else:
         ctx.recorder.passed("container.env.credential")
-    start = [str(p) for key in ("Entrypoint", "Cmd") for p in (config.get(key) or [])]
+    start = [
+        str(p)
+        for key in ("Entrypoint", "Cmd")
+        for p in ([config[key]] if isinstance(config.get(key), str) else _l(config.get(key)))
+    ]
     command = " ".join(start)
     if _START_DOWNLOAD.search(command):
         ctx.recorder.fail(

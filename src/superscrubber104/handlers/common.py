@@ -108,6 +108,11 @@ def relative_to(ref: ArtifactRef, root: ArtifactRef) -> str | None:
     return None
 
 
+def items(value: object) -> list[Any]:
+    """A JSON array, or an empty one: delivered documents may have any shape."""
+    return value if isinstance(value, list) else []
+
+
 def mapping(value: object) -> dict[str, Any]:
     """``value`` if it is a JSON object, else an empty one."""
     return value if isinstance(value, dict) else {}

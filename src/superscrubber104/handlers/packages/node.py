@@ -290,6 +290,7 @@ def _entry(
 
 def _package_lock(text: str) -> tuple[str, list[dict[str, Any]]]:
     document = json.loads(text)
+    document = document if isinstance(document, dict) else {}
     entries = []
     packages = document.get("packages")
     if isinstance(packages, dict):  # lockfileVersion 2 and 3

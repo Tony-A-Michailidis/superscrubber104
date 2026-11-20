@@ -19,6 +19,7 @@ superscrubber104 decides whether a delivery may cross into a disconnected networ
 - Decide when adding a rule whether it is `final`. Integrity and authenticity rules (a hash, a signature, a replay, the wrong enclave) are: no policy, waiver or approval changes them. A hash mismatch against a record that travelled with the content (an image digest, a wheel `RECORD`, a lockfile hash) is final; anything about what the content *does* is policy.
 - A policy `block` can be overridden for one bundle, but only by an approval quorum with a written justification, and never by the packer.
 - A parser's failure is "not assessed", never a `final` finding: unreadable and altered are different things.
+- Fail closed. Any exception inside the tool becomes a check error or "not assessed", never an accept; a check error is never decided `allow` or `warn` except by a waiver. Read untrusted JSON and YAML with the shape guards (`mapping`, `items`), never `x.get(...) or []`. `tests/test_fail_closed.py` checks every format with values of the wrong type.
 - A signature earns trust only for what it covers (an RPM header signature without a checked payload digest does not cover the payload). Times and expiry are trusted only from signed fields.
 
 **Evidence**

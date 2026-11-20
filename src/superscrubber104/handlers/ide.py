@@ -35,6 +35,7 @@ from superscrubber104.core.model import (
 from superscrubber104.handlers.common import (
     TooLarge,
     full_path,
+    items,
     mapping,
     name_of,
     read_bytes,
@@ -96,7 +97,7 @@ class IdeExtensionHandler:
         identifier = f"{publisher}.{name}".lower()
         version = str(manifest.get("version", ""))
         subject = Subject.of_artifact(view.ref)
-        activation = [str(e) for e in manifest.get("activationEvents") or [] if isinstance(e, str)]
+        activation = [str(e) for e in items(manifest.get("activationEvents")) if isinstance(e, str)]
         startup = sorted(_STARTUP.intersection(activation))
         if startup:
             ctx.recorder.fail(
@@ -105,7 +106,7 @@ class IdeExtensionHandler:
                 tool=TOOL,
                 detail={"extension": identifier, "events": startup},
             )
-        proposed = [str(p) for p in manifest.get("enabledApiProposals") or []]
+        proposed = [str(p) for p in items(manifest.get("enabledApiProposals"))]
         if proposed:
             ctx.recorder.fail(
                 "ide.extension.proposed-api",
@@ -138,8 +139,8 @@ class IdeExtensionHandler:
                 discriminator=f"extension:{identifier}",
             )
         check_allowlist(ctx, "vscode", [(identifier, version)], subject)
-        dependencies = [str(d).lower() for d in manifest.get("extensionDependencies") or []]
-        pack = [str(d).lower() for d in manifest.get("extensionPack") or []]
+        dependencies = [str(d).lower() for d in items(manifest.get("extensionDependencies"))]
+        pack = [str(d).lower() for d in items(manifest.get("extensionPack"))]
         engine = str(mapping(manifest.get("engines")).get("vscode", ""))
         part = Component(
             bom_ref=f"vscode:{identifier}@{version}#{view.sha256 or full_path(view.ref)}"[:300],
