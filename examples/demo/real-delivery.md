@@ -1,6 +1,6 @@
 # A real delivery
 
-The demo uses small synthetic files. [real-delivery-report.html](real-delivery-report.html) is the report from a trial on real, public projects: `superscrubber104 model inspect` run in place over a delivery of 3.5 GB. GitHub shows HTML as source; download the file and open it in a browser. The report was produced before the project was renamed, so it calls the tool by its earlier working name, `airlock`.
+The demo uses small synthetic files. [real-delivery-report.pdf](real-delivery-report.pdf) is the report from a trial on real, public projects: `superscrubber104 model inspect` run in place over a delivery of 3.5 GB. It is the HTML report the tool produced, printed to PDF with every section expanded (71 pages; all findings and the coverage of every rule are at the end). It was produced before the project was renamed, so it calls the tool by its earlier working name, `airlock`, and uses the labels of that time (`APPROVE` for what is now `NEEDS APPROVAL`).
 
 ## What was in it
 

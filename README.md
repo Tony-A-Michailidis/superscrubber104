@@ -92,7 +92,7 @@ The demo's files are synthetic. superscrubber104 has also been tried on 3.5 GB o
 | 1 × `model.pickle.unknown-import` | a model's `training_args.bin` is a pickle importing training classes, which inference does not need |
 | 3 × `mcp.server.capability` (shell) | the MCP repository's release scripts start processes |
 
-The first run also reported findings that were superscrubber104's mistakes: a multi-platform image saved for one platform was called incomplete, coreutils' `sha256sum` was taken for a checksum list, an application's `skills` package for agent skills. Each was fixed with a regression test built from the real layout. [The full account](examples/demo/real-delivery.md) and [the report itself](examples/demo/real-delivery-report.html) are in `examples/demo/`.
+The first run also reported findings that were superscrubber104's mistakes: a multi-platform image saved for one platform was called incomplete, coreutils' `sha256sum` was taken for a checksum list, an application's `skills` package for agent skills. Each was fixed with a regression test built from the real layout. [The full account](examples/demo/real-delivery.md) and [the report itself](examples/demo/real-delivery-report.pdf) (PDF) are in `examples/demo/`.
 
 One of the models, `HuggingFaceTB/SmolLM2-135M-Instruct` at revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, inspected in place:
 

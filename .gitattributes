@@ -3,3 +3,4 @@
 *.gguf binary
 *.safetensors binary
 *.qcow2 binary
+*.pdf binary
