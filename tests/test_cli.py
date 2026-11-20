@@ -40,6 +40,7 @@ def test_keygen_pack_verify_and_exit_codes(tmp_path: Path) -> None:
     assert code == 0
     assert "key id: ed25519:" in output
     assert "holder: ci" in output
+    assert f"publicKey: {(keys / 'pack.pub').as_posix()}" in output  # the path as given
     code, output = run("keygen", "-o", keys, "--name", "pack")
     assert code == 2
     assert "refusing to overwrite" in output

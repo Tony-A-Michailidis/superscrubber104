@@ -134,11 +134,14 @@ def keygen(out: Path, name: str, holder: str, passphrase_env: str | None) -> Non
     click.echo(f"key id: {key.key_id}")
     if passphrase is None:
         click.echo("warning: the private key is not encrypted; protect the file", err=True)
-    click.echo("\nTo trust this key, add it to the receiving side's policy:\n")
+    click.echo(
+        "\nTo trust this key, add it to the receiving side's policy "
+        "(publicKey is relative to the policy file):\n"
+    )
     click.echo(
         "trust:\n  signers:\n"
         f'    - keyId: "{key.key_id}"\n'
-        f"      publicKey: {public.name}\n"
+        f"      publicKey: {public.as_posix()}\n"
         f'      sha256: "{pin}"\n'
         f"      holder: {holder}\n"
         "      roles: [pack]"
