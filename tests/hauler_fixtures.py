@@ -135,7 +135,7 @@ def haul_bytes(members: Mapping[str, bytes], fmt: str = "tar") -> bytes:
     if fmt == "gzip":
         return gzip.compress(data, mtime=0)
     if fmt == "zstd":
-        from compression import zstd  # type: ignore[import-not-found,unused-ignore]
+        from airlock.archive import zstd_module
 
-        return bytes(zstd.compress(data))
+        return bytes(zstd_module().compress(data))
     return data

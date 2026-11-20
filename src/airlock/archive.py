@@ -10,7 +10,6 @@ import gzip
 import io
 import lzma
 import stat
-import sys
 import tarfile
 import zipfile
 import zlib
@@ -20,12 +19,26 @@ from typing import IO, Any, cast
 
 from airlock.core.model import EntryType
 
-# The standard library reads zstd from Python 3.14 (``compression.zstd``); no dependency is added
-# for older versions, where zstd archives are recorded with their contents not assessed.
-ZSTD = sys.version_info >= (3, 14)
+
+def zstd_module() -> Any:
+    """The zstd module: the standard library's from Python 3.14, else the optional backport of the
+    same API (``pip install airlock[zstd]``), else None. The core adds no dependency for it; without
+    either, zstd archives are recorded with their contents not assessed."""
+    try:
+        from compression import zstd  # type: ignore[import-not-found,unused-ignore]
+    except ImportError:
+        try:
+            from backports import zstd  # type: ignore[import-not-found,no-redef,unused-ignore]
+        except ImportError:
+            return None
+    return zstd
+
+
+ZSTD = zstd_module() is not None
 ZSTD_ADVICE = (
-    "zstd needs Python 3.14 or later; run airlock on 3.14, or decompress the archive before "
-    "packing (for Zarf, build the package with metadata.uncompressed: true)"
+    "zstd needs Python 3.14 or later, or the optional backport (pip install 'airlock[zstd]'); "
+    "or decompress the archive before packing (for Zarf, build the package with "
+    "metadata.uncompressed: true)"
 )
 
 # single-stream compression layers
@@ -40,12 +53,9 @@ class ExpansionLimit(ValueError):
 
 
 def _zstd_error() -> type[Exception]:
-    """What a damaged zstd stream raises; a stand-in that is never raised before 3.14."""
-    if not ZSTD:
-        return ExpansionLimit
-    from compression import zstd  # type: ignore[import-not-found,unused-ignore]
-
-    return zstd.ZstdError  # type: ignore[no-any-return,unused-ignore]
+    """What a damaged zstd stream raises; a stand-in, never raised, when zstd cannot be read."""
+    zstd = zstd_module()
+    return ExpansionLimit if zstd is None else cast(type[Exception], zstd.ZstdError)
 
 
 ZstdError = _zstd_error()
@@ -132,9 +142,7 @@ def decompress(fmt: str, stream: IO[bytes]) -> IO[bytes]:
         return cast(IO[bytes], bz2.BZ2File(stream, mode="rb"))
     if fmt == "xz":
         return cast(IO[bytes], lzma.LZMAFile(stream, mode="rb"))
-    if fmt == "zstd" and ZSTD:
-        from compression import zstd  # type: ignore[import-not-found,unused-ignore]
-
+    if fmt == "zstd" and (zstd := zstd_module()) is not None:
         return cast(IO[bytes], zstd.ZstdFile(stream, mode="rb"))
     raise ValueError(f"not a compression format: {fmt}")
 

@@ -1,12 +1,12 @@
 """Hauler hauls: the OCI layout checked, contents listed, cosign signatures recorded as not
 assessed. Hauls are synthetic (``tests/hauler_fixtures.py``); none was published to check."""
 
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from airlock.archive import ZSTD
 from airlock.core.model import Result, UnitKind
 from airlock.model_inspect import InspectResult
 from tests.hauler_fixtures import haul, haul_bytes
@@ -31,7 +31,7 @@ def _unit(result: InspectResult) -> dict[str, Any]:
         pytest.param(
             "haul.tar.zst",
             "zstd",
-            marks=pytest.mark.skipif(sys.version_info < (3, 14), reason="zstd needs 3.14"),
+            marks=pytest.mark.skipif(not ZSTD, reason="zstd needs 3.14 or the backport"),
         ),
     ],
 )
@@ -89,8 +89,8 @@ def test_named_like_a_haul_but_not_a_layout(tmp_path: Path) -> None:
     assert not [u for u in result.analysis.units if u.kind is UnitKind.HAULER_HAUL]
 
 
-@pytest.mark.skipif(sys.version_info >= (3, 14), reason="before 3.14 zstd cannot be read")
-def test_zstd_haul_before_python_314_is_not_assessed(tmp_path: Path) -> None:
+@pytest.mark.skipif(ZSTD, reason="zstd can be read here")
+def test_zstd_haul_is_not_assessed_without_zstd(tmp_path: Path) -> None:
     root = write(tmp_path / "d", {"haul.tar.zst": b"\x28\xb5\x2f\xfd" + b"\x00" * 64})
     (finding,) = findings_of(inspect(root))["container.layer.digest-mismatch"]
     assert finding.result is Result.NOT_ASSESSED

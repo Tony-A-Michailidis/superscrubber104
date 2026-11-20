@@ -76,7 +76,7 @@ Component: `pkg:rpm/<vendor>/<name>@<version>-<release>?arch=…&epoch=…`, wit
 
 A `.deb` has no signature of its own. Its authenticity comes from the repository: the signed `InRelease` lists the hash of `Packages`, which lists the hash of every `.deb`. That chain is checked by the mirror assembler ([28](28-package-mirrors.md)).
 
-zstd control archives (Ubuntu since 21.10) need Python 3.14's `compression.zstd`. On older Pythons, identity comes from the file name and the scripts check is recorded as **not assessed**, never silently skipped. `deb_vercmp` orders versions exactly as `dpkg` does.
+zstd control archives (Ubuntu since 21.10) need Python 3.14's `compression.zstd` or the optional `zstd` extra (`pip install 'airlock[zstd]'`, the `backports.zstd` package). Without either, identity comes from the file name and the scripts check is recorded as **not assessed**, never silently skipped. `deb_vercmp` orders versions exactly as `dpkg` does.
 
 ## 27.5 Checksum lists and detached signatures
 

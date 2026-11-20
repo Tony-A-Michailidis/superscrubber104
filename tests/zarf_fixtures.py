@@ -322,7 +322,7 @@ def relist(members: dict[str, bytes]) -> None:
 def package_bytes(members: Mapping[str, bytes], *, zstd: bool = False) -> bytes:
     data = tar(members)
     if zstd:
-        from compression import zstd as zstandard  # type: ignore[import-not-found,unused-ignore]
+        from airlock.archive import zstd_module
 
-        return bytes(zstandard.compress(data))
+        return bytes(zstd_module().compress(data))
     return data

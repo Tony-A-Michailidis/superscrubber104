@@ -71,5 +71,5 @@ Checked against the real AlmaLinux 9 repository (`repomd.xml` and its signature,
 
 * Not read: `filelists`, `other`, `modules.yaml` and `updateinfo.xml` (the last is for `airlock patch`). Their hashes are still checked against `repomd.xml`. Also not read: apt `Contents`, `i18n` and `by-hash`.
 * `xml:base` in `primary.xml` (packages served from another host) is not followed.
-* zstd-compressed indexes need Python 3.14. Before that, the index is reported as malformed with the reason given.
+* zstd-compressed indexes need Python 3.14 or the `zstd` extra. Without either, the index is reported as malformed with the reason given.
 * Conda channels, Maven repositories, Go module proxies, Cargo registries and NuGet feeds are covered with their ecosystems ([29](29-more-ecosystems.md)).

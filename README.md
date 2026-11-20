@@ -252,7 +252,7 @@ airlock opens Zarf packages without running Zarf. It checks:
 * the images it carries;
 * the commands and host files that deploying it would run or write.
 
-Everything inside a Zarf package, including models in image layers, goes through the same handlers as any other delivery. zstd-compressed packages, Zarf's default, need Python 3.14.
+Everything inside a Zarf package, including models in image layers, goes through the same handlers as any other delivery. zstd-compressed packages, Zarf's default, are read on Python 3.14, or on 3.11 to 3.13 with the optional extra: `pip install 'airlock[zstd]'`.
 
 Hauler hauls are opened too: their image layout is checked and their images, charts and files are inspected. The cosign signatures they carry are recorded as "not assessed", because airlock does not verify cosign signatures yet. [Doc 35](docs/design/35-zarf-and-hauler.md) has the details, and records with sources what each tool does as of Zarf 1.0 and Hauler 2.1.
 

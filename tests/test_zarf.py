@@ -5,13 +5,13 @@ Packages are synthetic (``tests/zarf_fixtures.py``). The handler was also checke
 """
 
 import hashlib
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from airlock.archive import ZSTD
 from airlock.core.model import Result, TrustLevel, UnitKind
 from airlock.formats.sigstore import BundleError, parse_bundle
 from airlock.handlers.zarf import normalise_image
@@ -317,16 +317,16 @@ def test_message_signature_needs_its_artifact() -> None:
 # --- compression -------------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(sys.version_info < (3, 14), reason="zstd is in the standard library from 3.14")
-def test_zstd_package_is_read_on_python_314(tmp_path: Path) -> None:
+@pytest.mark.skipif(not ZSTD, reason="zstd needs 3.14 or the backport")
+def test_zstd_package_is_read_when_zstd_is_available(tmp_path: Path) -> None:
     result = _run(tmp_path, build(), zstd=True)
     for rule in ZARF_RULES:
         assert rule not in findings_of(result), rule
     assert _unit(result)["checksums"]["matched"] > 0
 
 
-@pytest.mark.skipif(sys.version_info >= (3, 14), reason="before 3.14 zstd cannot be read")
-def test_zstd_package_is_not_assessed_before_python_314(tmp_path: Path) -> None:
+@pytest.mark.skipif(ZSTD, reason="zstd can be read here")
+def test_zstd_package_is_not_assessed_without_zstd(tmp_path: Path) -> None:
     root = write(tmp_path / "d", {NAME + ".zst": b"\x28\xb5\x2f\xfd" + b"\x00" * 64})
     result = inspect(root)
     (finding,) = findings_of(result)["zarf.package.checksum-mismatch"]

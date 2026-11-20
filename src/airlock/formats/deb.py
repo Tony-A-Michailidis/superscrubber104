@@ -18,6 +18,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import BinaryIO
 
+from airlock.archive import ZSTD_ADVICE, zstd_module
+
 _AR_MAGIC = b"!<arch>\n"
 _CONTROL_LIMIT = 16 << 20
 SCRIPTS = ("preinst", "postinst", "prerm", "postrm", "config", "triggers")
@@ -102,12 +104,9 @@ def _decompress(name: str, data: bytes) -> bytes:
         elif name.endswith(".xz"):
             out = lzma.LZMADecompressor().decompress(data, _CONTROL_LIMIT + 1)
         elif name.endswith(".zst"):
-            try:  # the standard library has zstd from Python 3.14
-                from compression import zstd  # type: ignore[import-not-found]
-            except ImportError as exc:
-                raise DebError(
-                    "zstd-compressed control archive: readable from Python 3.14 (compression.zstd)"
-                ) from exc
+            zstd = zstd_module()
+            if zstd is None:
+                raise DebError(f"zstd-compressed control archive: {ZSTD_ADVICE}")
             out = bytes(zstd.ZstdDecompressor().decompress(data, _CONTROL_LIMIT + 1))
         else:
             out = data

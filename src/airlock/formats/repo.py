@@ -16,10 +16,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from typing import IO, Any, BinaryIO
+from typing import IO, Any, BinaryIO, cast
 from urllib.parse import unquote, urlsplit
 
-from airlock.archive import capped
+from airlock.archive import ZSTD_ADVICE, capped, zstd_module
 from airlock.formats.deb import parse_fields
 
 _REPO_NS = "{http://linux.duke.edu/metadata/repo}"
@@ -67,13 +67,10 @@ def _decompressing(name: str, stream: BinaryIO) -> IO[bytes]:
     if name.endswith(".bz2"):
         return bz2.BZ2File(stream)
     if name.endswith(".zst"):
-        try:
-            from compression import zstd  # type: ignore[import-not-found]
-        except ImportError as exc:
-            raise RepoError(
-                "zstd-compressed metadata needs Python 3.14 (compression.zstd)"
-            ) from exc
-        return zstd.ZstdFile(stream)  # type: ignore[no-any-return]
+        zstd = zstd_module()
+        if zstd is None:
+            raise RepoError(f"zstd-compressed metadata: {ZSTD_ADVICE}")
+        return cast(IO[bytes], zstd.ZstdFile(stream))
     return stream
 
 

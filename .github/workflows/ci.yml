@@ -27,11 +27,18 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        extras: ["dev"]
+        include:
+          # zstd before 3.14 comes from the optional backport; the other jobs cover zstd built
+          # in (3.14) and no zstd at all (3.11 to 3.13).
+          - os: ubuntu-latest
+            python-version: "3.12"
+            extras: "dev,zstd"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[${{ matrix.extras }}]"
       - run: pytest --cov --cov-report=term --cov-report=xml

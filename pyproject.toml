@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Security :: Cryptography",
     "Topic :: System :: Archiving :: Packaging",
@@ -41,6 +42,8 @@ dev = [
     "ruff>=0.6",
     "types-PyYAML",
 ]
+# zstd archives (Zarf packages, Hauler hauls) before Python 3.14, which has it built in.
+zstd = ["backports.zstd>=1.0; python_version < '3.14'"]
 
 [project.scripts]
 airlock = "airlock.cli:main"

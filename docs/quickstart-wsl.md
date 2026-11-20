@@ -62,7 +62,7 @@ Run `source ~/airlock/.venv/bin/activate` in every new shell. `[dev]` adds pytes
 pytest
 ```
 
-Expect about 720 passed and 2 skipped, in under a minute. The two skipped tests read zstd-compressed Zarf packages and Hauler hauls, which needs Python 3.14 (see step 8).
+Expect about 735 passed and a few skipped, in under a minute. Two of the skipped tests read zstd-compressed Zarf packages and Hauler hauls, which needs Python 3.14 or the `zstd` extra (see step 8).
 
 ## 6. Run the demo
 
@@ -143,11 +143,19 @@ Exit codes are the same for every command:
 
 Without `--policy`, the built-in default policy is used. `airlock rules` lists every check, and the same list is in [rules.md](rules.md).
 
-## 8. Optional: Python 3.14, for Zarf packages and Hauler hauls
+## 8. Optional: zstd, for Zarf packages and Hauler hauls
 
-Zarf and Hauler compress with zstd by default. Python reads zstd from 3.14, and airlock adds no dependency for it. On an older Python, such a package is still hashed and recorded, but its contents are reported as "not assessed".
+Zarf and Hauler compress with zstd by default. Python reads zstd from 3.14; before that, airlock's optional `zstd` extra adds the backport of the same module. Without either, such a package is still hashed and recorded, but its contents are reported as "not assessed".
 
-AlmaLinux has no Python 3.14 package; `uv` installs one. On a connected machine:
+The simplest way, on the Python you already have:
+
+```bash
+cd ~/airlock
+pip install -e ".[dev,zstd]"
+pytest            # the two zstd tests now run too
+```
+
+Or use Python 3.14 itself. AlmaLinux has no Python 3.14 package; `uv` installs one. On a connected machine:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -172,5 +180,5 @@ ClamAV, Trivy, Semgrep, Bandit, qemu-img and osslsigncode run as optional plugin
 |---|---|
 | `airlock: command not found` | activate the environment: `source ~/airlock/.venv/bin/activate` |
 | pip says `requires a different Python` | on AlmaLinux 9 the venv was made with the system 3.9; recreate it with `python3.12 -m venv .venv` |
-| zstd archives reported "not assessed" | expected before Python 3.14 (step 8) |
+| zstd archives reported "not assessed" | expected before Python 3.14 without the `zstd` extra (step 8) |
 | everything is slow | the clone is under `/mnt/c`; clone into `~` instead (step 3) |

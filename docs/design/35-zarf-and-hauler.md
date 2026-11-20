@@ -93,7 +93,7 @@ They are complementary: Zarf or Hauler builds and moves the package, and airlock
 
 ### Two changes in the core
 
-1. **zstd.** On Python 3.14 and later, zstd joins gzip, bzip2 and xz in the archive walker (`compression.zstd`, standard library, under the same expansion budget). Before 3.14, a zstd archive is still recorded with its contents **not assessed**. The reason recorded says to run on 3.14, or to build the package with `metadata.uncompressed: true` or decompress it before packing. Zarf's checksums cover the members, not the compressed archive, so a decompressed package is still fully verifiable. No dependency was added.
+1. **zstd.** On Python 3.14 and later, zstd joins gzip, bzip2 and xz in the archive walker (`compression.zstd`, standard library, under the same expansion budget). Before 3.14, the optional `zstd` extra (`pip install 'airlock[zstd]'`, the `backports.zstd` package) provides the same module. Without either, a zstd archive is still recorded with its contents **not assessed**. The reason recorded says to use 3.14 or the extra, or to build the package with `metadata.uncompressed: true` or decompress it before packing. Zarf's checksums cover the members, not the compressed archive, so a decompressed package is still fully verifiable. The core has no new dependency.
 2. **Images in an OCI layout inside an archive.** The container handler's layout checks run over any store (`containers.MemoryStore`, `inspect_store`), not just a directory or an image tar:
    * index to manifests to configs and layers;
    * every digest equal to its name;
@@ -171,7 +171,7 @@ Tests are in `tests/test_zarf.py`. The packages in `tests/zarf_fixtures.py` are 
 * host actions and files;
 * key and keyless signatures, an unaccepted identity, a re-signing key and a stripped signature;
 * a model inside an image layer;
-* zstd on 3.14, and not assessed before it.
+* zstd when it can be read, and not assessed when it cannot.
 
 Damaged and odd packages are in `tests/test_vendor_robustness.py`.
 
@@ -232,7 +232,7 @@ The owner's answers to the questions this document raised:
 
 1. **Unlisted files in a Zarf package** are final, signed or not: content nobody vouched for.
 2. **Actions** are medium (require approval) always, whoever signed the package.
-3. **zstd before Python 3.14** stays not assessed, with advice. No optional dependency.
+3. **zstd before Python 3.14** stays not assessed, with advice. Revised after review: the optional `zstd` extra (`pip install 'airlock[zstd]'`, the `backports.zstd` package) reads it, as an optional extra; the core still has no dependency for it. The real `zarf-init-amd64-v1.0.1.tar.zst` reads the same on 3.12 with the extra as on 3.14 (35 of 35 checksums, the image complete).
 4. **Archive depth:** the default `maxDepth` is 5 globally.
 5. **More real samples:** no Zarf or Hauler binary is run to build them. v1beta1, key-signed, differential and split packages are covered by synthetic fixtures only, built from the published Go types. A published sample of each should be checked when one is found.
 6. **Scope:** Zarf first, Hauler after.
