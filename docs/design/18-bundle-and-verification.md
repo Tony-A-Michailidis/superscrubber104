@@ -77,7 +77,7 @@ Points worth knowing:
 | 0 | passed | Accepted |
 | 1 | blocked, needs-approval | A policy blocker stands, or approvals are outstanding. Both can be cleared with `superscrubber104 approve` |
 | 2 | | Usage or configuration error (bad policy, missing key, not a bundle) |
-| 3 | refused | An integrity or authenticity check failed (tampering, bad signature, replay, wrong enclave). Nothing can override it; do not retry, investigate |
+| 3 | refused | An integrity or authenticity check failed (tampering, bad signature, replay, wrong enclave), or a block on a rule the policy marks `overridable: false` stands. Nothing can override it; do not retry, investigate |
 
 ### Receiving-side state
 

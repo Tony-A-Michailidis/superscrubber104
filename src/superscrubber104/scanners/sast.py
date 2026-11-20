@@ -102,7 +102,7 @@ class _Sast:
     def command(self, ready: Ready, files: Sequence[Target], output: Path) -> list[str]:
         raise NotImplementedError
 
-    def results(self, report: dict[str, object]) -> list[dict[str, object]]:
+    def results(self, report: dict[str, object], ready: Ready) -> list[dict[str, object]]:
         raise NotImplementedError
 
     def scan(
@@ -130,7 +130,7 @@ class _Sast:
             if not isinstance(report, dict):
                 raise ScanError(f"{self.name} report is not a JSON object")
             by_key = {_key(str(t.location)): t for t in batch}
-            for result in self.results(report):
+            for result in self.results(report, ready):
                 target = by_key.get(_key(str(result["path"])))
                 if target is None:
                     continue
@@ -150,11 +150,32 @@ class _Sast:
                     Subject.of_artifact(target.ref, locator=f"line {result['line']}"),
                     tool=ready.tool,
                     detail={k: result.get(k) for k in ("rule", "message", "cwe", "confidence")},
-                    attributes={"scanner": self.name, "ruleId": str(result["rule"])},
+                    attributes={
+                        "scanner": self.name,
+                        "ruleId": str(result["rule"]),
+                        "category": str(result.get("category") or "unknown"),
+                    },
                     severity=severity,
                     discriminator=f"{self.name}:{result['rule']}:{result['line']}",
                 )
         ctx.recorder.passed("sast.finding", len({t.ref.path for t in chosen} - flagged))
+
+
+def _rules_prefix(rules: Path | None) -> str:
+    """The prefix Semgrep puts on the ids of rules loaded from ``rules``: its path, dotted.
+
+    ``/home/user/tools/semgrep/rules/python/x.yaml`` gives ids such as
+    ``home.user.tools.semgrep.rules.python.lang.x``. Left in, the evidence would carry the
+    operator's directory, and the same rule would have another id on every host.
+    """
+    if rules is None:
+        return ""
+    parts = (p.strip("/\\:") for p in rules.parts)
+    return ".".join(p for p in parts if p) + "."
+
+
+def _strip(rule: str, prefix: str) -> str:
+    return rule[len(prefix) :] if prefix and rule.startswith(prefix) else rule
 
 
 class Semgrep(_Sast):
@@ -202,8 +223,9 @@ class Semgrep(_Sast):
             *(str(t.location) for t in files),
         ]
 
-    def results(self, report: dict[str, object]) -> list[dict[str, object]]:
+    def results(self, report: dict[str, object], ready: Ready) -> list[dict[str, object]]:
         out: list[dict[str, object]] = []
+        prefix = _rules_prefix(ready.policy.database)
         for item in _list(report.get("results")):
             if not isinstance(item, dict):
                 continue
@@ -221,7 +243,8 @@ class Semgrep(_Sast):
                 {
                     "path": item.get("path"),
                     "line": start.get("line"),
-                    "rule": item.get("check_id"),
+                    "rule": _strip(str(item.get("check_id") or ""), prefix),
+                    "category": meta.get("category"),
                     "message": str(extra.get("message") or "")[:300],
                     "cwe": [str(c) for c in cwe][:5] if isinstance(cwe, list) else cwe,
                     "confidence": meta.get("confidence"),
@@ -263,7 +286,7 @@ class Bandit(_Sast):
             *(str(t.location) for t in files),
         ]
 
-    def results(self, report: dict[str, object]) -> list[dict[str, object]]:
+    def results(self, report: dict[str, object], ready: Ready) -> list[dict[str, object]]:
         out: list[dict[str, object]] = []
         for item in _list(report.get("results")):
             if not isinstance(item, dict):
@@ -281,6 +304,7 @@ class Bandit(_Sast):
                     "cwe": f"CWE-{cwe.get('id')}" if isinstance(cwe, dict) else None,
                     "confidence": item.get("issue_confidence"),
                     "severity": severity,
+                    "category": "security",  # every Bandit test is a security check
                 }
             )
         for error in _list(report.get("errors")):

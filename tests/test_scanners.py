@@ -7,6 +7,7 @@ reads the answers, and everything that happens before a tool is allowed to run.
 
 import hashlib
 import json
+import os
 from collections.abc import Callable, Sequence
 from datetime import timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ import pytest
 from superscrubber104.core.model import Result, Severity, SubjectKind, Verdict
 from superscrubber104.scanners import base
 from superscrubber104.scanners.base import Completed, ScanError, scrubbed_environment
+from superscrubber104.summary import render
 from tests.helpers import NOW
 from tests.models_helpers import findings_of, inspect
 from tests.software_fixtures import docker_archive, wheel_bytes, wheel_name, write
@@ -42,7 +44,14 @@ class FakeTools:
     ) -> Completed:
         self.calls.append(list(command))
         tool = Path(command[0]).stem
-        result = self.handlers[tool](command[1:])
+        # A real scanner runs in its private working directory, so the stand-in does too: a
+        # relative path that superscrubber104 passes by mistake names nothing here either.
+        previous = Path.cwd()
+        os.chdir(workdir)
+        try:
+            result = self.handlers[tool](command[1:])
+        finally:
+            os.chdir(previous)
         if result.returncode not in ok:
             raise ScanError(f"exit code {result.returncode}")
         return result
@@ -94,6 +103,11 @@ def _clamscan(found: dict[str, str]) -> Runner:
         listing = next(a.split("=", 1)[1] for a in args if a.startswith("--file-list="))
         lines, hit = [], False
         for path in Path(listing).read_text(encoding="utf-8").splitlines():
+            if not Path(path).is_file():
+                return Completed(2, "", f"{path}: No such file or directory\n")
+            if Path(path).stat().st_size == 0:  # what clamscan 1.4 really prints
+                lines.append(f"{path}: Empty file")
+                continue
             signature = next((s for name, s in found.items() if path.endswith(name)), None)
             hit |= signature is not None
             lines.append(f"{path}: {signature} FOUND" if signature else f"{path}: OK")
@@ -120,6 +134,15 @@ def test_not_assessed_scans_can_be_made_to_block(tmp_path: Path) -> None:
     policy = "rules:\n  - {rule: 'malware.*', notAssessed: block}\n"
     result = inspect(write(tmp_path / "d", {"a.txt": "x"}), policy_yaml=policy, plugins=True)
     assert result.assessment.summary.verdict is Verdict.BLOCKED
+
+
+def test_a_policy_refusal_is_not_called_an_integrity_failure(tmp_path: Path) -> None:
+    policy = "rules:\n  - {rule: 'malware.*', overridable: false, notAssessed: block}\n"
+    result = inspect(write(tmp_path / "d", {"a.txt": "x"}), policy_yaml=policy, plugins=True)
+    assert result.assessment.summary.verdict is Verdict.REFUSED
+    verdict = render(result.assessment).splitlines()[-1]
+    assert verdict.startswith("verdict: REFUSED - a block the policy marks 'overridable: false'")
+    assert "integrity" not in verdict
 
 
 # --- ClamAV -------------------------------------------------------------------------------------
@@ -165,6 +188,70 @@ def test_clamav_detection_limits_and_evidence(
     assert "--alert-exceeds-max=yes" in scan
 
 
+def test_relative_inputs_reach_the_scanner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``inspect delivery`` from the operator's directory: the scanner, in its own working
+    directory, must still find every file (a real trial failed exactly this way)."""
+    tools = FakeTools(monkeypatch)
+    tools.handlers["clamscan"] = _clamscan({"dropper.exe": "Win.Trojan.Agent-123"})
+    policy = _clamav_policy(tmp_path / "tools")
+    write(tmp_path / "d", {"dropper.exe": b"MZ not really", "readme.txt": "fine"})
+    monkeypatch.chdir(tmp_path)
+    found = findings_of(inspect(Path("d"), policy_yaml=policy, plugins=True))
+    assert "plugin.scan.error" not in found
+    [detection] = found["malware.detected"]
+    assert detection.result is Result.FAIL and detection.subject.display == "dropper.exe"
+    [scan] = [c for c in tools.commands("clamscan") if c != ["--version"]]
+    listing = next(a.split("=", 1)[1] for a in scan if a.startswith("--file-list="))
+    assert listing  # the list itself lives in the scanner's working directory
+
+
+def test_empty_files_are_clean_not_unscanned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = FakeTools(monkeypatch)
+    tools.handlers["clamscan"] = _clamscan({})
+    policy = _clamav_policy(tmp_path / "tools")
+    root = write(tmp_path / "d", {"pkg/__init__.py": "", "pkg/main.py": "print(1)\n"})
+    result = inspect(root, policy_yaml=policy, plugins=True)
+    assert "malware.detected" not in findings_of(result)
+    [scan] = [c for c in tools.commands("clamscan") if c != ["--version"]]
+    listing = next(a.split("=", 1)[1] for a in scan if a.startswith("--file-list="))
+    assert listing.endswith("clamscan-files.txt")
+    [coverage] = [c for c in result.assessment.coverage if c.rule == "malware.detected"]
+    assert coverage.passed == 2  # the empty file counts as clean
+
+
+def test_only_empty_files_never_reach_clamscan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = FakeTools(monkeypatch)
+    tools.handlers["clamscan"] = _clamscan({})
+    policy = _clamav_policy(tmp_path / "tools")
+    result = inspect(write(tmp_path / "d", {"__init__.py": ""}), policy_yaml=policy, plugins=True)
+    assert "malware.detected" not in findings_of(result)
+    assert [c for c in tools.commands("clamscan") if c != ["--version"]] == []
+
+
+def test_a_failed_scanner_is_named_in_the_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = FakeTools(monkeypatch)
+    tools.handlers["clamscan"] = lambda args: (
+        Completed(0, "ClamAV 1.4.3/27820/Tue Nov 10 08:00:00 2026\n", "")
+        if args == ["--version"]
+        else Completed(2, "", "something went wrong\n")
+    )
+    policy = _clamav_policy(tmp_path / "tools")
+    found = findings_of(
+        inspect(write(tmp_path / "d", {"a.txt": "x"}), policy_yaml=policy, plugins=True)
+    )
+    [error] = found["plugin.scan.error"]
+    assert error.result is Result.ERROR
+    [gap] = found["malware.detected"]
+    assert gap.result is Result.NOT_ASSESSED
+    assert gap.not_assessed_reason == "clamav is configured but failed (see plugin.scan.error)"
+
+
 def test_tampered_scanner_never_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     tools = FakeTools(monkeypatch)
     policy = _clamav_policy(tmp_path / "tools")
@@ -174,8 +261,13 @@ def test_tampered_scanner_never_runs(tmp_path: Path, monkeypatch: pytest.MonkeyP
     [mismatch] = found["plugin.integrity.mismatch"]
     assert mismatch.subject.display == "policy#plugins.clamav"
     assert result.assessment.summary.verdict is Verdict.REFUSED  # final: nothing overrides it
+    assert "an integrity or authenticity check failed" in render(result.assessment)
     assert tools.calls == []
-    assert found["malware.detected"][0].result is Result.NOT_ASSESSED
+    [gap] = found["malware.detected"]
+    assert gap.result is Result.NOT_ASSESSED
+    assert (
+        gap.not_assessed_reason == "clamav is configured but failed its pre-flight (see plugin.*)"
+    )
 
 
 def test_unpinned_signature_file_is_refused(
@@ -436,15 +528,18 @@ def _semgrep(args: Sequence[str]) -> Completed:
     if args == ["--version"]:
         return Completed(0, "1.86.0\n", "")
     files = [a for a in args if a.endswith((".py", ".ts"))]
+    # Semgrep prefixes each rule id with the rules directory it was loaded from, dotted.
+    config = Path(args[args.index("--config") + 1]).as_posix()
+    prefix = config.lstrip("/").replace(":", "").replace("/", ".") + "."
     results = [
         {
-            "check_id": "python.lang.security.audit.subprocess-shell-true",
+            "check_id": prefix + "python.lang.security.audit.subprocess-shell-true",
             "path": f,
             "start": {"line": 3},
             "extra": {
                 "severity": "ERROR",
                 "message": "shell=True",
-                "metadata": {"cwe": ["CWE-78"]},
+                "metadata": {"cwe": ["CWE-78"], "category": "security"},
             },
         }
         for f in files
@@ -518,7 +613,12 @@ def test_static_analysis_of_first_party_code(
         (f.subject.display, f.attributes["scanner"]): f for f in found if f.result is Result.FAIL
     }
     assert set(fails) == {("app/main.py#line 3", "semgrep"), ("app/main.py#line 1", "bandit")}
-    assert fails[("app/main.py#line 3", "semgrep")].severity is Severity.HIGH
+    semgrep = fails[("app/main.py#line 3", "semgrep")]
+    assert semgrep.severity is Severity.HIGH
+    # portable rule ids: never the operator's directory, the same on every host
+    assert semgrep.attributes["ruleId"] == "python.lang.security.audit.subprocess-shell-true"
+    assert semgrep.attributes["category"] == "security"
+    assert fails[("app/main.py#line 1", "bandit")].attributes["category"] == "security"
     assert fails[("app/main.py#line 1", "bandit")].severity is Severity.INFO  # low, low confidence
     assert fails[("app/main.py#line 1", "bandit")].detail["cwe"] == "CWE-502"
     gaps = {f.subject.display for f in found if f.result is Result.NOT_ASSESSED}

@@ -192,7 +192,7 @@ Exit codes are the same for every command, so they work as CI gates:
 | 0 | Accepted |
 | 1 | A policy blocker stands, or approvals are outstanding |
 | 2 | Usage or configuration error |
-| 3 | Refused: an integrity or authenticity check failed, or the tool itself failed part-way |
+| 3 | Refused: an integrity or authenticity check failed, a block the policy marks `overridable: false` stands, or the tool itself failed part-way |
 
 ## What it checks
 
@@ -262,7 +262,7 @@ superscrubber104 is pre-alpha: every command works end to end and is tested, but
 
 * [bundles and verification](docs/design/18-bundle-and-verification.md) (18.8), [volumes and deltas](docs/design/26-volumes-and-deltas.md) (26.4), [reports](docs/design/25-reports-and-controls.md) (25.6);
 * [model packages](docs/design/19-model-packages.md) (19.5), [signatures and evaluation](docs/design/24-signatures-and-eval.md) (24.3), [data and knowledge](docs/design/22-data-and-knowledge.md) (22.5), [offline readiness](docs/design/23-offline-and-runtime.md) (23.6);
-* [agents, containers and packages](docs/design/20-software-and-agents.md) (20.8), [scanners](docs/design/21-scanners-and-basics.md) (21.4): the scanner plugins have been tested against stand-ins, not the real binaries;
+* [agents, containers and packages](docs/design/20-software-and-agents.md) (20.8), [scanners](docs/design/21-scanners-and-basics.md) (21.4): ClamAV, Trivy, Semgrep, Bandit and the KEV feed have been run for real once, on [the real delivery](examples/demo/real-delivery.md#with-real-scanners); qemu-img and osslsigncode only against stand-ins;
 * [vendor trust](docs/design/27-vendor-trust.md) (27.7), [mirrors](docs/design/28-package-mirrors.md) (28.5), [more ecosystems](docs/design/29-more-ecosystems.md) (29.6), [infrastructure code](docs/design/30-infrastructure-code.md) (30.5), [IDE extensions](docs/design/31-ide-extensions.md) (31.3);
 * [VM images](docs/design/32-vm-images.md) (32.6), [patching](docs/design/33-patching-and-feeds.md) (33.6), [staging](docs/design/34-staging.md) (34.4), [Zarf and Hauler](docs/design/35-zarf-and-hauler.md) (35.5 and 35.6).
 

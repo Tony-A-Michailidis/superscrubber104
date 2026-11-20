@@ -24,7 +24,7 @@ from superscrubber104.core.rules import FindingFactory, Recorder, RuleRegistry
 EXIT_OK = 0
 EXIT_BLOCKED = 1  # a policy blocker stands, or approvals are still required
 EXIT_USAGE = 2
-EXIT_REFUSED = 3  # an integrity or authenticity check failed; nothing can override it
+EXIT_REFUSED = 3  # integrity/authenticity failed, or a non-overridable policy block
 
 ApprovalCounter = Callable[
     [Sequence[Finding], Sequence[Decision]], tuple[set[str], tuple[ApprovalRecord, ...]]

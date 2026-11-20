@@ -10,7 +10,8 @@ _VERDICT = {
     "passed": "PASSED",
     "needs-approval": "NEEDS APPROVAL: approvals are outstanding",
     "blocked": "BLOCKED: a policy blocker stands; an approval quorum can override it",
-    "refused": "REFUSED: an integrity or authenticity check failed; nothing overrides it",
+    "refused": "REFUSED: a check that nothing overrides failed (integrity, authenticity, or a "
+    "block the policy marks 'overridable: false')",
 }
 
 

@@ -270,7 +270,8 @@ def verify(
 
     Exit codes: 0 accepted; 1 a policy blocker stands or approvals are outstanding (both can
     be cleared with 'superscrubber104 approve'); 2 usage or configuration error; 3 refused: an
-    integrity or authenticity check failed, which nothing can override.
+    integrity or authenticity check failed, or a block the policy marks 'overridable: false'
+    stands; nothing can override either.
     """
     loaded = _policy(policy)
     if pubkey is None and not loaded.signers:

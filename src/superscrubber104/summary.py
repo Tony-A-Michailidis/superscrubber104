@@ -12,6 +12,18 @@ _NEXT = {
     Verdict.BLOCKED: " - a policy blocker stands; it can be overridden by an approval quorum",
     Verdict.REFUSED: " - an integrity or authenticity check failed; this cannot be overridden",
 }
+# A refusal can also come from the site's own policy: a block on a rule marked "overridable: false".
+_POLICY_REFUSAL = (
+    " - a block the policy marks 'overridable: false' stands; this cannot be overridden"
+)
+
+
+def _refusal(assessment: Assessment) -> str:
+    """Why the verdict is REFUSED: a final rule (integrity, authenticity) or the site's policy."""
+    finals = [d for d in assessment.decisions if d.final and d.disposition is Disposition.BLOCK]
+    if finals and all(d.matched != "final" for d in finals):
+        return _POLICY_REFUSAL
+    return _NEXT[Verdict.REFUSED]
 
 
 def _label(decision: Decision, cleared: bool) -> str:
@@ -87,5 +99,6 @@ def render(assessment: Assessment, *, verbose: bool = False) -> str:
         f"{counts[Disposition.WARN]} warn, {counts[Disposition.ALLOW]} allowed"
     )
     verdict = assessment.summary.verdict
-    lines.append(f"verdict: {verdict.value.upper()}{_NEXT[verdict]}")
+    note = _refusal(assessment) if verdict is Verdict.REFUSED else _NEXT[verdict]
+    lines.append(f"verdict: {verdict.value.upper()}{note}")
     return "\n".join(lines)

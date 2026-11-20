@@ -66,8 +66,12 @@ CAPABILITIES: dict[str, tuple[tuple[str, ...], Callable[[Analysis], bool], str]]
 
 
 def targets(files: Iterable[FileView]) -> list[Target]:
-    """Top-level files on disk, in the form scanners take."""
-    return [Target(f.ref, f.location, f.size) for f in files]
+    """Top-level files on disk, in the form scanners take.
+
+    Locations are made absolute: a scanner runs in its own private working directory, where a
+    path relative to the operator's directory (``inspect delivery``) would name nothing.
+    """
+    return [Target(f.ref, f.location.absolute(), f.size) for f in files]
 
 
 def default_scanners() -> tuple[Scanner, ...]:
@@ -104,6 +108,7 @@ def run_scanners(
                 detail={"reason": reason},
             )
     ran: set[str] = set()
+    failed: dict[str, list[str]] = {}  # capability -> why each configured scanner did not run
     with tempfile.TemporaryDirectory(prefix="superscrubber104-scan-") as scratch:
         for scanner in scanners:
             policy = configured.get(scanner.name)
@@ -113,7 +118,11 @@ def run_scanners(
             workdir.mkdir()
             status, ready = Preflight(scanner, policy, ctx, workdir).run()
             statuses.append(status)
-            if ready is None or preflight_only:
+            if preflight_only:
+                continue
+            if ready is None:
+                why = f"{scanner.name} is configured but failed its pre-flight (see plugin.*)"
+                failed.setdefault(scanner.capability, []).append(why)
                 continue
             try:
                 scanner.scan(ready, targets, analysis, ctx)
@@ -121,9 +130,12 @@ def run_scanners(
                 subject = plugin_subject(scanner.name)
                 error = str(exc) if isinstance(exc, ScanError) else f"{type(exc).__name__}: {exc}"
                 ctx.recorder.error("plugin.scan.error", subject, tool=ready.tool, error=error)
+                why = f"{scanner.name} is configured but failed (see plugin.scan.error)"
+                failed.setdefault(scanner.capability, []).append(why)
                 continue
             ran.add(scanner.capability)
     for capability, (rules, applies, reason) in CAPABILITIES.items():
         if capability not in ran and not preflight_only and applies(analysis):
-            ctx.recorder.not_assessed(rules, Subject.bundle(), tool=TOOL, reason=reason)
+            why = "; ".join(failed.get(capability, [])) or reason
+            ctx.recorder.not_assessed(rules, Subject.bundle(), tool=TOOL, reason=why)
     return tuple(sorted(statuses, key=lambda s: s.name))

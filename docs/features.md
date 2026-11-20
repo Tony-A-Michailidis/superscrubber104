@@ -24,7 +24,7 @@ Exit codes make the commands usable as CI gates:
 | 0 | Accepted |
 | 1 | A policy blocker stands, or approvals are outstanding |
 | 2 | Usage or configuration error |
-| 3 | Refused: an integrity or authenticity check failed, or the tool itself failed part-way |
+| 3 | Refused: an integrity or authenticity check failed, a block the policy marks `overridable: false` stands, or the tool itself failed part-way |
 
 Two kinds of failure are kept strictly apart:
 

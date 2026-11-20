@@ -101,7 +101,7 @@ class Verdict(StrEnum):
     PASSED = "passed"
     NEEDS_APPROVAL = "needs-approval"  # approvals outstanding on require-approval findings
     BLOCKED = "blocked"  # a policy blocker stands; it can be overridden by an approval quorum
-    REFUSED = "refused"  # an integrity or authenticity check failed; nothing can override it
+    REFUSED = "refused"  # integrity/authenticity failed, or a non-overridable policy block
 
 
 class Stage(StrEnum):

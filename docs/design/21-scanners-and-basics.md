@@ -65,11 +65,11 @@ src/superscrubber104/scanners/
 
 A scanner that fails its pins is a hash mismatch on a tool that decides what crosses: if it could be waved through, a tampered scanner could wave anything through. That makes `plugin.integrity.mismatch` final, under the owner's rule for integrity failures (doc 17 §17.7).
 
-The process runner uses an argument list (no shell), no standard input, a private working directory as `HOME`/`TEMP`, and an environment stripped to the essentials, with every proxy variable pointing at a closed local port (`127.0.0.1:9`). That is defence in depth for the offline-first rule: superscrubber104 itself makes no network calls, and a scanner that tries fails at once instead of leaving the enclave.
+The process runner uses an argument list (no shell), no standard input, a private working directory as `HOME`/`TEMP` (so every path handed to a scanner is absolute), and an environment stripped to the essentials, with every proxy variable pointing at a closed local port (`127.0.0.1:9`). That is defence in depth for the offline-first rule: superscrubber104 itself makes no network calls, and a scanner that tries fails at once instead of leaving the enclave.
 
 ### ClamAV
 
-One `clamscan` run per delivery, over a file list of the top-level files, with the policy's signature directory and ClamAV's limits raised to their maximum (4000 MiB). The database version and age come from the CVD/CLD headers (Talos build time), not from `freshclam` state. `Heuristics.Limits.Exceeded.*` results and files over 4000 MiB are not assessed, never clean. A delivery with a detection has `malware.detected` (critical) on that file, with the signature name.
+One `clamscan` run per delivery, over a file list of the top-level files, with the policy's signature directory and ClamAV's limits raised to their maximum (4000 MiB). The database version and age come from the CVD/CLD headers (Talos build time), not from `freshclam` state. `Heuristics.Limits.Exceeded.*` results and files over 4000 MiB are not assessed, never clean. Empty files are not sent: there is nothing in them to scan, and clamscan answers "Empty file" rather than OK, so superscrubber104 counts them clean itself. A delivery with a detection has `malware.detected` (critical) on that file, with the signature name.
 
 ### Trivy
 
@@ -92,11 +92,11 @@ Static analysis looks at the delivery's **own** code: top-level source files, sc
 * **Semgrep** (`semgrep scan`) runs with the pinned local rules directory as `--config`, `--metrics=off` and `--disable-version-check`. It never fetches rules from a registry, and a rules directory holding an unpinned rule file is refused like an unpinned ClamAV signature. Severity: `ERROR` high, `WARNING` medium, `INFO` low.
 * **Bandit** runs its built-in tests over Python files. Severity is Bandit's; a low-confidence result is lowered one step.
 
-Files go to the tools in batches of 200, so command lines stay within Windows' limit. Each result is `sast.finding` on the file and line, with the rule, message, CWE and confidence. When neither tool is configured and the delivery holds first-party source, `sast.finding` is not assessed for the bundle.
+Files go to the tools in batches of 200, so command lines stay within Windows' limit. Each result is `sast.finding` on the file and line, with the rule, message, CWE and confidence, and the attributes `scanner`, `ruleId` and `category` for policy `where` clauses. Semgrep's ids lose the dotted rules-directory prefix Semgrep adds (it would put the operator's path in the evidence and give a rule a different id on every host); `category` is the rule's metadata category, and `security` for every Bandit test. [docs/scanners.md](../scanners.md#tuning) shows the policy a real trial needed. When neither tool is configured and the delivery holds first-party source, `sast.finding` is not assessed for the bundle.
 
 ### Gaps are explicit
 
-If no malware scanner ran, `malware.detected` is not assessed for the bundle, with the reason "no malware scanner is configured (plugins.clamav)". The same goes for `vuln.component.known`. Defaults make that a warning; `notAssessed: block` on the rule makes scanning mandatory.
+If no malware scanner ran, `malware.detected` is not assessed for the bundle, with the reason "no malware scanner is configured (plugins.clamav)", or, when one is configured but did not run, which one and why ("clamav is configured but failed (see plugin.scan.error)"). The same goes for `vuln.component.known`. Defaults make that a warning; `notAssessed: block` on the rule makes scanning mandatory.
 
 `superscrubber104 plugins check --policy P` runs the pre-flight only and prints each plugin's state.
 
@@ -116,7 +116,8 @@ If no malware scanner ran, `malware.detected` is not assessed for the bundle, wi
 
 ## 21.4 Known limits
 
-- **Not run against the real binaries here.** The ClamAV and Trivy plugins are tested with a stand-in process runner that answers as the tools do (argument lists, output formats, exit codes, database layouts as documented). Running a downloaded scanner binary was not possible in the development environment. Check a real installation with `superscrubber104 plugins check` and the steps in [docs/scanners.md](../scanners.md#check-the-integration) before relying on it.
+- **Tested with a stand-in, trialled once for real.** The test suite never runs a scanner: a stand-in process runner answers as the tools do, from its own private working directory. ClamAV 1.4.6, Trivy 0.76.1, Semgrep 1.186.0, Bandit 1.9.4 and the KEV feed were run for real on AlmaLinux 10 over a 3.3 GB delivery ([examples/demo/real-delivery.md](../../examples/demo/real-delivery.md#with-real-scanners)); that trial found four bugs the stand-in had hidden (relative paths, empty files, the reason for a failed scanner's gap, host paths in Semgrep rule ids). The qemu-img and osslsigncode plugins have not been run for real. Check any installation with `superscrubber104 plugins check` before relying on it.
+- **Trivy's own release signature** (a Sigstore bundle over its checksums file) is checked by the operator with `cosign` on the connected side, as [docs/scanners.md](../scanners.md#trivy) describes; superscrubber104 pins the binary's hash but does not verify that signature.
 - **Secrets** are found by shape. A credential with no recognisable shape, assigned to an innocuous name, is missed; so is one split across lines or encoded. Git history inside git bundles is not searched (packfiles are compressed objects), and binaries are not searched.
 - **Executables:** Authenticode, codesign and ELF signatures are recorded as present or absent, not verified.
 - **PDF:** streams other than object streams are not inflated, and encrypted PDFs are not decrypted; obfuscated JavaScript inside an ordinary content stream would be missed by the keyword search (ClamAV covers known samples).

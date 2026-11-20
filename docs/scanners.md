@@ -89,6 +89,8 @@ clamscan --database=<database> --no-summary --stdout --max-filesize=4000M --max-
          --alert-exceeds-max=yes --file-list=<list of top-level files> [args...]
 ```
 
+The files are given as absolute paths, because clamscan runs in a private working directory. Empty files are not sent: they have no content to scan, and superscrubber104 counts them as clean itself (clamscan would answer "Empty file", not "OK").
+
 ClamAV looks inside archives itself. A file or archive that exceeds ClamAV's own limits (`Heuristics.Limits.Exceeded.*`) is recorded as *not assessed*, not as clean. Files over 4000 MiB, which ClamAV cannot scan, are recorded the same way. In practice these are large model shards, which superscrubber104's own format parsers check for structure and embedded code.
 
 ## Trivy
@@ -183,6 +185,24 @@ plugins:
 ```
 
 superscrubber104 runs `semgrep scan --config <rules> --json --output <file> --metrics=off --disable-version-check --quiet [args...] <files...>` over the delivery's own top-level source files, scripts, MCP servers, agent hooks and model custom code, in batches. Third-party code under `site-packages`, `node_modules` and virtual environments is left out; the vulnerability scan covers it.
+
+Each finding has the attributes `scanner`, `ruleId` and `category`. `ruleId` is the rule's own id. Semgrep prefixes ids with the directory the rules were loaded from (`home.user.tools.semgrep.rules.python.lang...`); superscrubber104 removes that prefix, so the evidence does not carry the operator's directory and a rule has the same id on every host. `category` comes from the rule's metadata (`security`, `correctness`, `maintainability`, `best-practice`, ...); every Bandit finding is `security`.
+
+### Tuning
+
+A broad rule set run over a real project reports thousands of findings, most of them about tests or code quality. In a real trial (a RAG application with its MCP servers, 337 Semgrep Python rules plus Bandit), 7,074 of 7,809 findings were Bandit's `assert_used` in test files, and most of Semgrep's high-severity findings came from maintainability rules. Tune in the policy, not by deleting findings: an allowed finding is still recorded and counted.
+
+```yaml
+rules:                           # rules match first to last
+  - rule: sast.finding           # test code does not run in production
+    paths: ["**/tests/**", "**/test_*.py", "**/*_test.py", "**/conftest.py"]
+    disposition: allow
+  - rule: sast.finding           # code quality is not a transfer decision
+    where: { category: "[!s]*" } # any category but security
+    disposition: warn
+```
+
+Security findings then keep the defaults by severity: high blocks, medium needs approval, low warns.
 
 ## Bandit (static analysis, Python)
 

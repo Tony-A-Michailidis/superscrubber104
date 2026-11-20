@@ -93,8 +93,12 @@ class ClamAV:
                 tool=ready.tool,
                 reason="larger than ClamAV can scan (4000 MiB)",
             )
-        scanned = [t for t in targets if t.size <= MAX_SIZE]
+        # An empty file has no content to carry malware. clamscan answers "Empty file" for it,
+        # not OK, so it is settled here rather than sent (a real delivery had 158 __init__.py).
+        empty = sum(1 for t in targets if t.size == 0)
+        scanned = [t for t in targets if 0 < t.size <= MAX_SIZE]
         if not scanned:
+            recorder.passed("malware.detected", empty)
             return
         listing = ready.workdir / "clamscan-files.txt"
         listing.write_text("".join(f"{t.location}\n" for t in scanned), encoding="utf-8")
@@ -121,7 +125,7 @@ class ClamAV:
                 )
         if not results:
             raise ScanError("clamscan produced no results")
-        clean = 0
+        clean = empty
         for target in scanned:
             outcome = results.get(_key(str(target.location)))
             subject = Subject.of_artifact(target.ref)
