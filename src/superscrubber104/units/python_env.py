@@ -40,6 +40,14 @@ _OS = (
 )
 
 
+def _cpython(tag: str) -> tuple[int, int]:
+    """``cp311`` -> (3, 11); anything unreadable sorts first."""
+    digits = tag[2:]
+    if len(digits) < 2 or not digits.isdigit():
+        return (0, 0)
+    return (int(digits[0]), int(digits[1:]))
+
+
 def _platform(tag: str) -> str | None:
     if tag == "any":
         return None
@@ -101,6 +109,7 @@ class _Resolution:
         self.mismatched = 0
         self.platforms: set[str] = set()
         self.pythons: set[str] = set()
+        self.abi3: set[str] = set()  # minimum CPython of stable-ABI wheels
         self.local_versions: set[str] = set()
 
     def run(self) -> Assembly:
@@ -124,7 +133,7 @@ class _Resolution:
             "conditionalUnresolvable": conditional,
             "hashed": bool(requirements) and all(r.get("hashes") for r in requirements),
             "platforms": list(sorted(self.platforms)),
-            "pythonTags": list(sorted(self.pythons)),
+            "pythonTags": list(sorted(self.pythons | self.abi3)),
             "localVersions": list(sorted(self.local_versions)),
         }
         bom_refs = {b for d in self.used if (b := as_str(d.facts.get("bomRef")))}
@@ -179,7 +188,8 @@ class _Resolution:
                 self.platforms.add(family)
             python = str(tags.get("python", ""))
             if python.startswith("cp"):
-                self.pythons.add(python)
+                # A stable-ABI wheel (cp311-abi3) runs on that CPython and every later one.
+                (self.abi3 if tags.get("abi") == "abi3" else self.pythons).add(python)
             local = as_str(d.facts.get("local"))
             if local:
                 self.local_versions.add(local)
@@ -209,12 +219,18 @@ class _Resolution:
                 )
         if not self.missing and not self.conditional:
             recorder.passed("python.environment.unresolvable")
-        if len(self.platforms) > 1 or len(self.pythons) > 1:
+        # abi3 wheels conflict only when they need a newer CPython than the version-specific ones.
+        newest = max((_cpython(p) for p in self.pythons), default=None)
+        too_new = sorted(p for p in self.abi3 if newest is not None and _cpython(p) > newest)
+        if len(self.platforms) > 1 or len(self.pythons) > 1 or too_new:
             recorder.fail(
                 "python.environment.platform-mixed",
                 subject,
                 tool=TOOL,
-                detail={"platforms": sorted(self.platforms), "pythonTags": sorted(self.pythons)},
+                detail={
+                    "platforms": sorted(self.platforms),
+                    "pythonTags": sorted(self.pythons | set(too_new)),
+                },
             )
         else:
             recorder.passed("python.environment.platform-mixed")

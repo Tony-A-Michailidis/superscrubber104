@@ -42,3 +42,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[${{ matrix.extras }}]"
       - run: pytest --cov --cov-report=term --cov-report=xml
+
+  # superscrubber104 crosses its own airlock: packed by itself, installed with no network,
+  # verified by the copy it installed (examples/self-transfer/README.md).
+  self-transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Ubuntu's AppArmor stops unprivileged user namespaces, which unshare -rn needs.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: bash examples/self-transfer/self-transfer.sh "$RUNNER_TEMP/self-transfer"
+        env:
+          REQUIRE_NO_NETWORK: "1"

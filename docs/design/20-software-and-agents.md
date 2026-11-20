@@ -71,7 +71,7 @@ The `container-image` unit holds every image of an archive or layout, with an `o
 
 * A pinned requirement with hashes resolves only to a distribution whose sha256 is one of them. A distribution with the right name and version but **a different hash is `python.environment.hash-mismatch`**, reported on the distribution, and final.
 * A requirement with no matching distribution is `python.environment.unresolvable`: high when unconditional; low when it has environment markers, which may not apply to the target (`; sys_platform == "win32"`).
-* A wheelhouse with wheels for more than one platform is `python.environment.platform-mixed` (low; usually a mistake, sometimes deliberate).
+* A wheelhouse with wheels for more than one platform is `python.environment.platform-mixed` (low; usually a mistake, sometimes deliberate). A stable-ABI wheel (`cp311-abi3`) runs on that CPython and every later one, so it counts as another Python only when it needs a newer one than the version-specific wheels beside it (`cryptography` ships this way).
 
 A `site-packages` without a lockfile forms an installed-environment unit instead, listing what is installed. Each distribution is a `pkg:pypi` SBOM component.
 

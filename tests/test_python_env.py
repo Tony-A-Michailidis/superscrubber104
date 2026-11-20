@@ -209,6 +209,34 @@ def test_wheels_for_several_platforms(tmp_path: Path) -> None:
     assert mixed.detail["platforms"] == ["linux", "windows"]
 
 
+@pytest.mark.parametrize(
+    ("abi3", "mixed"),
+    [
+        ("cp311", False),  # stable ABI from 3.11 runs on 3.12: cryptography ships this way
+        ("cp312", False),
+        ("cp313", True),  # needs a newer CPython than the rest of the environment
+    ],
+)
+def test_stable_abi_wheels_are_not_another_python(tmp_path: Path, abi3: str, mixed: bool) -> None:
+    write(
+        tmp_path / "d",
+        {
+            "wheels/native-1.0-cp312-cp312-manylinux_2_17_x86_64.whl": wheel_bytes("native", "1.0"),
+            f"wheels/crypto-2.0-{abi3}-abi3-manylinux_2_34_x86_64.whl": wheel_bytes(
+                "crypto", "2.0"
+            ),
+            "app/requirements.txt": "native==1.0\ncrypto==2.0\n",
+        },
+    )
+    found = findings_of(inspect(tmp_path / "d"))
+    assert ("python.environment.platform-mixed" in found) is mixed
+    if mixed:
+        assert found["python.environment.platform-mixed"][0].detail["pythonTags"] == [
+            "cp312",
+            "cp313",
+        ]
+
+
 def test_installed_environment(tmp_path: Path) -> None:
     site = "venv/lib/python3.12/site-packages"
     write(
