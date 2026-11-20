@@ -4,10 +4,6 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
-### Added
-
-- A scale test ([examples/scale/](examples/scale/README.md)): memory stays flat as files grow (a 16 GiB file needs the same 146 MiB as a 1 GiB one) and grows by about 5 KiB per file or archive member.
-
 ## [0.1.0] - 2026-11-20
 
 The first release. superscrubber104 is pre-alpha: every command works end to end and is tested, it has been tried on one real delivery, and it has not yet been used for a real transfer.
@@ -30,6 +26,7 @@ The first release. superscrubber104 is pre-alpha: every command works end to end
 
 - Fails closed: any error inside the tool is recorded as a check error or "not assessed", never an accept, and `tests/test_fail_closed.py` checks every format with values of the wrong type.
 - Crosses its own airlock: [examples/self-transfer/](examples/self-transfer/README.md) packs superscrubber104, installs it on a machine with no network, and verifies the bundle it arrived in. CI runs it on every push.
+- Measured at scale ([examples/scale/](examples/scale/README.md)): a 16 GiB file needs the same memory as a 1 GiB one (146 MiB); memory grows by about 5 KiB per file or archive member.
 - Releases are built reproducibly, so they can be rebuilt byte for byte from the tag, and carry SHA256SUMS ([RELEASING.md](RELEASING.md)).
 
 [Unreleased]: https://github.com/Tony-A-Michailidis/superscrubber104/compare/v0.1.0...HEAD
