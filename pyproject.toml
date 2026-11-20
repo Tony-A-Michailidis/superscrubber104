@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.33.0"]  # exact: releases are rebuilt byte for byte (RELEASING.md)
+requires = ["hatchling==1.33.0"]  # exact: a rebuilt release has the same content (RELEASING.md)
 build-backend = "hatchling.build"
 
 [project]

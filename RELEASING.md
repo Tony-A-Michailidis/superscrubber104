@@ -28,14 +28,24 @@ Download the files from the release page and run `sha256sum --check SHA256SUMS`.
 
 ## Rebuilding a release
 
-The build is reproducible, so anyone with access to the source can check a release:
+The build is reproducible in content, so anyone with access to the source can check a release:
 
 ```console
 $ git clone https://github.com/Tony-A-Michailidis/superscrubber104 && cd superscrubber104
 $ git checkout v0.1.0
 $ python -m venv /tmp/build && /tmp/build/bin/pip install build==1.6.1
 $ SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" /tmp/build/bin/python -m build --outdir /tmp/dist
-$ cd /tmp/dist && sha256sum *
 ```
 
-The hashes should match `SHA256SUMS`. Both build tools are pinned exactly for this reason: `build` here and in the workflow, and the build backend (`hatchling`) in `pyproject.toml`.
+Then compare what is inside, not the archives' own hashes:
+
+```console
+$ for f in superscrubber104-0.1.0-py3-none-any.whl /tmp/dist/superscrubber104-0.1.0-py3-none-any.whl; do
+>   unzip -p "$f" superscrubber104-0.1.0.dist-info/RECORD | sha256sum; done
+$ for f in superscrubber104-0.1.0.tar.gz /tmp/dist/superscrubber104-0.1.0.tar.gz; do
+>   gzip -dc "$f" | sha256sum; done
+```
+
+Each pair should match. The wheel's `RECORD` lists the hash of every file in the wheel (and `pip` checks every file against it on install); the sdist's uncompressed tar holds every file, its name, size, time and permissions.
+
+Why not compare the archives directly: both are compressed, and compression is not the same everywhere. Building v0.1.0 twice on one machine gives identical bytes, but AlmaLinux 10, for example, ships zlib-ng, which compresses the same content differently from the classic zlib on the release runner, so its wheel and sdist have other hashes with the same content. On Windows the sdist also differs in one permission bit (`self-transfer.sh` is not executable there), so compare its tar on Linux or macOS. Both build tools are pinned exactly so that the content stays the same: `build` here and in the workflow, and the build backend (`hatchling`) in `pyproject.toml`.

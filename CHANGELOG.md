@@ -27,7 +27,7 @@ The first release. superscrubber104 is pre-alpha: every command works end to end
 - Fails closed: any error inside the tool is recorded as a check error or "not assessed", never an accept, and `tests/test_fail_closed.py` checks every format with values of the wrong type.
 - Crosses its own airlock: [examples/self-transfer/](examples/self-transfer/README.md) packs superscrubber104, installs it on a machine with no network, and verifies the bundle it arrived in. CI runs it on every push.
 - Measured at scale ([examples/scale/](examples/scale/README.md)): a 16 GiB file needs the same memory as a 1 GiB one (146 MiB); memory grows by about 5 KiB per file or archive member.
-- Releases are built reproducibly, so they can be rebuilt byte for byte from the tag, and carry SHA256SUMS ([RELEASING.md](RELEASING.md)).
+- Releases carry SHA256SUMS and are reproducible in content: rebuilding the tag gives the same files, which anyone can check ([RELEASING.md](RELEASING.md)).
 
 [Unreleased]: https://github.com/Tony-A-Michailidis/superscrubber104/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Tony-A-Michailidis/superscrubber104/releases/tag/v0.1.0

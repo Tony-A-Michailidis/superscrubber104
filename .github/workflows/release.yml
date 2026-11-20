@@ -57,7 +57,7 @@ jobs:
 
           ### Checking this release
 
-          Every file is listed in `SHA256SUMS` (`sha256sum --check SHA256SUMS`). The build is reproducible: building the tagged commit with `build==1.6.1` and `SOURCE_DATE_EPOCH` set to the commit's time gives the same hashes, so a release can be checked without trusting this workflow. See RELEASING.md.
+          Every file is listed in `SHA256SUMS` (`sha256sum --check SHA256SUMS`). The build is reproducible in content: building the tagged commit with `build==1.6.1` and `SOURCE_DATE_EPOCH` set to the commit's time gives the same files, so a release can be checked without trusting this workflow. RELEASING.md shows how to compare them.
           EOF
       - name: Create the release
         env:
