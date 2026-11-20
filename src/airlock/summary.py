@@ -2,7 +2,10 @@
 
 from airlock.core.model import Assessment, Decision, Disposition, Result, Verdict
 
-_RESULT = {Result.NOT_ASSESSED: " (not assessed)", Result.ERROR: " (check error)"}
+# A check that did not run is shown as such, never under the title of what it would have found
+# ("Malware scanner reports a detection" when no scanner ran reads as a detection).
+_NOT_RUN = {Result.NOT_ASSESSED: "not assessed: ", Result.ERROR: "check error: "}
+_WIDTH = 16  # the longest label, NEEDS APPROVAL, and a space
 _NEXT = {
     Verdict.PASSED: "",
     Verdict.NEEDS_APPROVAL: " - approvals are outstanding (airlock approve)",
@@ -17,7 +20,7 @@ def _label(decision: Decision, cleared: bool) -> str:
             return "REFUSE"
         return "OVERRIDE" if cleared else "BLOCK"
     if decision.disposition is Disposition.REQUIRE_APPROVAL:
-        return "APPROVED" if cleared else "APPROVE"
+        return "APPROVED" if cleared else "NEEDS APPROVAL"
     return "WARN" if decision.disposition is Disposition.WARN else "ok"
 
 
@@ -48,24 +51,29 @@ def render(assessment: Assessment, *, verbose: bool = False) -> str:
             continue
         holders = sorted(set(counted.get(finding.id, [])))
         cleared = decision.clearable and len(holders) >= decision.approvals_required
-        note = _RESULT.get(finding.result, "")
-        lines.append(f"{_label(decision, cleared):<9}{finding.rule}{note}  [{finding.id}]")
-        lines.append(f"         {finding.subject.display}: {finding.title}")
-        if finding.not_assessed_reason:
-            lines.append(f"         reason: {finding.not_assessed_reason}")
+        indent = " " * _WIDTH
+        prefix = _NOT_RUN.get(finding.result, "")
+        lines.append(f"{_label(decision, cleared):<{_WIDTH}}{prefix}{finding.rule}  [{finding.id}]")
+        if prefix:
+            why = finding.not_assessed_reason or str(
+                finding.detail.get("error") or "see the assessment"
+            )
+            lines.append(f"{indent}{finding.subject.display}: the check did not run: {why}")
+        else:
+            lines.append(f"{indent}{finding.subject.display}: {finding.title}")
         if isinstance(hint := finding.detail.get("hint"), str):
-            lines.append(f"         hint: {hint}")
+            lines.append(f"{indent}hint: {hint}")
         if decision.waiver:
-            lines.append(f"         waived by policy waiver {decision.waiver}")
+            lines.append(f"{indent}waived by policy waiver {decision.waiver}")
         if decision.clearable:
             who = f" ({', '.join(holders)})" if holders else ""
             lines.append(
-                f"         approvals: {len(holders)} of {decision.approvals_required}{who}"
+                f"{indent}approvals: {len(holders)} of {decision.approvals_required} required{who}"
             )
     for approval in assessment.approvals:
         if not approval.counted:
             lines.append(f"NOT COUNTED approval of [{approval.finding}] by {approval.key_id}")
-            lines.append(f"         {approval.reason}")
+            lines.append(f"{' ' * _WIDTH}{approval.reason}")
     if lines:
         lines.append("")
 

@@ -58,7 +58,7 @@ Nothing is believed because the packing side said so.
 | 5. Request | Conformance to the (signature-covered) transfer request | `request.*` |
 | 6. Custody | The log chains from a signed `packed` event for exactly this bundle | `integrity.custody.broken` |
 | 7. Transfer | Destination is this enclave, source is accepted, bundle is not too old | `transfer.*`, `replay.bundle.expired` |
-| 8. History | Against the ledger: not already accepted, not older than an accepted bundle of the same source and stream, clock has not gone backwards, delta base was accepted, policy change logged | `replay.*`, `delta.base.unknown`, `policy.digest.changed`, `integrity.ledger.broken` |
+| 8. History | Against the ledger: not already accepted (`replay.bundle.already-accepted` when the signed statement is the one accepted before; `replay.bundle.id-reused`, critical, when a different statement carries an accepted bundle id), not older than an accepted bundle of the same source and stream, clock has not gone backwards, delta base was accepted, policy change logged | `replay.*`, `delta.base.unknown`, `policy.digest.changed`, `integrity.ledger.broken` |
 | 9. Decide | This side's policy. Final rules are always `block` | |
 | 10. Approvals | Signed approvals in the custody log are counted against each clearable decision ([§18.5](#185-approvals-and-overrides)) | |
 | 11. Record | Assessment written, including every approval considered; receipt signed and appended to the ledger | |

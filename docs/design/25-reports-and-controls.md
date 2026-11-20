@@ -47,6 +47,8 @@ For each control in the catalogue (and any control a rule maps to that the catal
 | `not-exercised` | it has rules, but none applied to this delivery |
 | `no-rules` | nothing in airlock evidences it |
 
+Each finding carries an action: `REFUSE` (final), `BLOCK`, `OVERRIDE` (a blocker overridden by an approval quorum), `NEEDS APPROVAL` (until its quorum is met), `APPROVED`, `WARN` or `ok`. A check that did not run is shown as `not assessed: <rule>` with its reason, in every format, and never under the title of what it would have found: "Malware scanner reports a detection" next to a scanner that never ran reads as a detection.
+
 **There is no "satisfied".** airlock evidences part of a control for one delivery; whether a control is satisfied is the assessor's judgement for the whole system. The wording in every format says so.
 
 ## 25.4 OSCAL mapping

@@ -96,6 +96,9 @@ class Ledger:
     def accepted_bundle(self, bundle_id: str) -> bool:
         return any(r.bundle_id == bundle_id for r in self.accepted)
 
+    def accepted_receipts(self, bundle_id: str) -> list[Receipt]:
+        return [r for r in self.accepted if r.bundle_id == bundle_id]
+
     def accepted_snapshot(self, manifest_digest: str) -> bool:
         return any(r.manifest_digest == manifest_digest for r in self.accepted)
 

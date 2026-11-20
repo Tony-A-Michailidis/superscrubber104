@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from airlock.core.model import Result
 from airlock.core.serde import format_timestamp
-from airlock.report.model import Report, detail_text
+from airlock.report.model import STANDING, Report, detail_text, rule_label
 
 _VERDICT = {
     "passed": "PASSED",
@@ -77,7 +77,7 @@ def render_markdown(report: Report) -> str:
         )
     out.append("")
 
-    attention = [r for r in report.findings if r.action in ("REFUSE", "BLOCK", "APPROVE")]
+    attention = [r for r in report.findings if r.action in STANDING]
     out += ["## Needs attention", ""]
     if attention:
         out += _table(
@@ -85,7 +85,7 @@ def render_markdown(report: Report) -> str:
             [
                 [
                     r.action,
-                    r.finding.rule,
+                    rule_label(r.finding),
                     r.finding.subject.display,
                     r.finding.severity.value,
                     r.finding.id,

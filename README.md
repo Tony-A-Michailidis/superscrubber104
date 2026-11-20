@@ -50,31 +50,30 @@ And verifies again:
 
 ```console
 $ airlock verify bundle --policy high/policy.yaml --state high/state --out import-2
-REFUSE   integrity.entry.unexpected  [28acb79bd69f8e44]
-         app/patch-notes.txt: Payload contains content that is not in the manifest
-REFUSE   integrity.entry.unexpected  [24ac6f7ab16e6160]
-         models/tiny-chat/training_args.bin: Payload contains content that is not in the manifest
-REFUSE   integrity.hash.mismatch  [1f3451731f1bf6d0]
-         models/tiny-chat/model-00002-of-00002.safetensors: Content does not match the manifest
-REFUSE   replay.bundle.already-accepted  [c501d5f35b1d7013]
-         bundle: This exact bundle was already accepted
-BLOCK    model.pickle.dangerous-import  [d5085f50ae1334e7]
-         models/tiny-chat/training_args.bin: Pickle imports a dangerous callable
-         approvals: 0 of 2
-APPROVE  model.format.code-capable  [04c6860cbcbadba6]
-         models/tiny-chat/training_args.bin: Model or data file can run code when loaded
-         approvals: 0 of 1
-WARN     kb.embedding-model.unrecorded  [e63d460f69e659dc]
-         knowledge-base:rag/docs: Knowledge base does not record which embedding model built it
-WARN     malware.detected (not assessed)  [f6490e189d646738]
-         bundle: Malware scanner reports a detection
-         reason: no malware scanner is configured (plugins.clamav)
+REFUSE          integrity.entry.unexpected  [28acb79bd69f8e44]
+                app/patch-notes.txt: Payload contains content that is not in the manifest
+REFUSE          integrity.entry.unexpected  [24ac6f7ab16e6160]
+                models/tiny-chat/training_args.bin: Payload contains content that is not in the manifest
+REFUSE          integrity.hash.mismatch  [1f3451731f1bf6d0]
+                models/tiny-chat/model-00002-of-00002.safetensors: Content does not match the manifest
+REFUSE          replay.bundle.already-accepted  [c501d5f35b1d7013]
+                bundle: A bundle with this id and signed statement was already accepted
+BLOCK           model.pickle.dangerous-import  [d5085f50ae1334e7]
+                models/tiny-chat/training_args.bin: Pickle imports a dangerous callable
+                approvals: 0 of 2 required
+NEEDS APPROVAL  model.format.code-capable  [04c6860cbcbadba6]
+                models/tiny-chat/training_args.bin: Model or data file can run code when loaded
+                approvals: 0 of 1 required
+WARN            kb.embedding-model.unrecorded  [e63d460f69e659dc]
+                knowledge-base:rag/docs: Knowledge base does not record which embedding model built it
+WARN            not assessed: malware.detected  [f6490e189d646738]
+                bundle: the check did not run: no malware scanner is configured (plugins.clamav)
 ...
-81 of 211 rules exercised, 315 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+82 of 212 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
 verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
 ```
 
-All three are caught, and the ledger also notices the same bundle arriving a second time, altered. The hash mismatch and the unexpected files are refusals that no policy or approval can override. The pickle is found by reading its opcodes, never by loading it. The scanners the demo does not configure are reported as not assessed, not left out.
+All three are caught, and the ledger also notices the same signed bundle arriving a second time. The hash mismatch and the unexpected files are refusals that no policy or approval can override. The pickle is found by reading its opcodes, never by loading it. The scanners the demo does not configure are reported as not assessed, not left out.
 
 Each import also gets its evidence: an HTML report, a CycloneDX SBOM/ML-BOM (the model as a `machine-learning-model` component, the wheel with its purl, hash and licence) and OSCAL assessment results. Every report carries a control matrix:
 

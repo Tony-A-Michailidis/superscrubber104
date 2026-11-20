@@ -62,7 +62,7 @@ def test_sources_and_formats(imported: tuple[Path, Path]) -> None:
             assert render(source, fmt) == render(source, fmt)  # deterministic
     markdown = render(mine, "md")
     assert "**Verdict: NEEDS APPROVAL" in markdown
-    assert "| APPROVE | request.artifact.undeclared | images/app.tar |" in markdown
+    assert "| NEEDS APPROVAL | request.artifact.undeclared | images/app.tar |" in markdown
     assert "## Not assessed" in markdown and "vuln.component.known" in markdown
     report = json.loads(render(mine, "json"))
     assert report["kind"] == "Report" and report["verdict"] == "needs-approval"

@@ -320,7 +320,7 @@ def main(work: Path) -> int:
         print(f"  {what:<16} {'caught' if found else 'MISSED'}: {finding[0]} on {finding[1]}")
     print(f"  clean import accepted (exit {clean}); tampered import refused (exit {tampered})")
     if ("replay.bundle.already-accepted", None) in failed:
-        print("  and the ledger noticed the same bundle id arriving a second time, altered")
+        print("  and the ledger noticed the same signed bundle arriving a second time")
     print(f"  reports: {(work / 'import-1').as_posix()}/ and {(work / 'import-2').as_posix()}/")
     return 0 if ok else 1
 

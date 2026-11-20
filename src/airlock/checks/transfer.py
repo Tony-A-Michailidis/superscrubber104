@@ -8,6 +8,7 @@ from airlock.ledger import Ledger
 _LEDGER_RULES = (
     "replay.clock.regression",
     "replay.bundle.already-accepted",
+    "replay.bundle.id-reused",
     "replay.bundle.out-of-order",
     "policy.digest.changed",
 )
@@ -25,7 +26,11 @@ def check_policy(ctx: Context) -> None:
 
 
 def check_transfer(
-    provenance: Provenance, base: str | None, ledger: Ledger | None, ctx: Context
+    provenance: Provenance,
+    base: str | None,
+    ledger: Ledger | None,
+    ctx: Context,
+    statement_digest: str | None = None,
 ) -> None:
     policy, recorder, subject = ctx.policy, ctx.recorder, Subject.bundle()
 
@@ -128,10 +133,32 @@ def check_transfer(
     else:
         recorder.passed("replay.clock.regression")
 
-    if ledger.accepted_bundle(provenance.bundle_id):
-        recorder.fail("replay.bundle.already-accepted", subject, tool=TOOL)
+    # The same signed statement again is a replay (or a mistake); a different statement under an
+    # accepted bundle id is a different bundle passing itself off as one already accepted.
+    earlier = ledger.accepted_receipts(provenance.bundle_id)
+    same = [r for r in earlier if r.statement_digest == statement_digest]
+    if same:
+        recorder.fail(
+            "replay.bundle.already-accepted",
+            subject,
+            tool=TOOL,
+            detail={"acceptedAt": same[0].verified_at.isoformat(), "statement": "identical"},
+        )
     else:
         recorder.passed("replay.bundle.already-accepted")
+    if earlier and not same:
+        recorder.fail(
+            "replay.bundle.id-reused",
+            subject,
+            tool=TOOL,
+            detail={
+                "acceptedAt": earlier[0].verified_at.isoformat(),
+                "acceptedStatement": earlier[0].statement_digest,
+                "statement": statement_digest,
+            },
+        )
+    else:
+        recorder.passed("replay.bundle.id-reused")
 
     newest = ledger.newest_accepted(provenance.source, provenance.stream)
     if newest is not None and provenance.created_at < newest:

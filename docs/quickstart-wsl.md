@@ -78,7 +78,7 @@ The demo plays both sides of an air gap with the `airlock` command:
 4. **In transit:** someone tampers with the bundle. They change a model shard, add a file and plant a malicious pickle.
 5. **High side:** verifies again, and the bundle is refused.
 
-The full output of a first run is in [examples/demo/sample-output.md](../examples/demo/sample-output.md). It ends like this:
+The full output of a run is in [examples/demo/sample-output.md](../examples/demo/sample-output.md). It ends like this:
 
 ```text
 == Result ==
@@ -86,7 +86,7 @@ The full output of a first run is in [examples/demo/sample-output.md](../example
   undeclared file  caught: integrity.entry.unexpected on app/patch-notes.txt
   pickle payload   caught: model.pickle.dangerous-import on models/tiny-chat/training_args.bin
   clean import accepted (exit 0); tampered import refused (exit 3)
-  and the ledger noticed the same bundle id arriving a second time, altered
+  and the ledger noticed the same signed bundle arriving a second time
 ```
 
 Each import directory under `~/airlock-demo/` holds the evidence:

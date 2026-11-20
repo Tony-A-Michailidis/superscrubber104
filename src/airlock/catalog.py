@@ -148,10 +148,21 @@ TRANSFER = (
     ),
     _rule(
         "replay.bundle.already-accepted",
-        "This exact bundle was already accepted",
+        "A bundle with this id and signed statement was already accepted",
         H,
         ("SI-7", "CM-3"),
-        "Re-importing an accepted bundle is either a mistake or a replay.",
+        "Re-importing an accepted bundle is either a mistake or a replay. The signed statement "
+        "matches the earlier import; whether the content still matches it is the integrity "
+        "rules' finding.",
+        final=True,
+    ),
+    _rule(
+        "replay.bundle.id-reused",
+        "A different bundle reuses the id of one already accepted",
+        C,
+        ("SI-7", "CM-3"),
+        "The signed statement differs from the one accepted under this bundle id: another bundle "
+        "is passing itself off as one already imported.",
         final=True,
     ),
     _rule(

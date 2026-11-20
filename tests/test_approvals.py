@@ -124,9 +124,9 @@ def test_blocker_is_overridden_by_a_quorum_with_justification(site: Site, bundle
     assert one.assessment.summary.verdict is Verdict.BLOCKED
     assert len(records(one, counted=True)) == 2
     text = render(one.assessment)
-    assert "BLOCK    archive.member.path-traversal" in text
-    assert "approvals: 1 of 2 (alice)" in text
-    assert "APPROVED request.artifact.undeclared" in text
+    assert "BLOCK           archive.member.path-traversal" in text
+    assert "approvals: 1 of 2 required (alice)" in text
+    assert "APPROVED        request.artifact.undeclared" in text
 
     # A second key held by the same person does not make a quorum.
     sign_off(site, bundle, "alice-backup", TRAVERSAL, minutes=20)
@@ -137,8 +137,8 @@ def test_blocker_is_overridden_by_a_quorum_with_justification(site: Site, bundle
     final = check(site, bundle)
     assert final.assessment.summary.verdict is Verdict.PASSED
     assert exit_code(final.assessment) == EXIT_OK
-    assert "OVERRIDE archive.member.path-traversal" in render(final.assessment)
-    assert "approvals: 2 of 2 (alice, bob)" in render(final.assessment)
+    assert "OVERRIDE        archive.member.path-traversal" in render(final.assessment)
+    assert "approvals: 2 of 2 required (alice, bob)" in render(final.assessment)
 
     # The override is evidence: who, with which key, and why, in the signed log and the assessment.
     override = [r for r in records(final, counted=True) if r.holder == "bob"]

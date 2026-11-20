@@ -63,8 +63,8 @@ def test_keygen_pack_verify_and_exit_codes(tmp_path: Path) -> None:
     (bundle / "payload" / "extra.bin").write_bytes(b"added")
     code, output = run("verify", bundle, "--pubkey", keys / "pack.pub", "--state", state)
     assert code == 3
-    assert "REFUSE   integrity.hash.mismatch" in output
-    assert "REFUSE   integrity.entry.unexpected" in output
+    assert "REFUSE          integrity.hash.mismatch" in output
+    assert "REFUSE          integrity.entry.unexpected" in output
     assert "verdict: REFUSED" in output
     assert output.isascii()
 
@@ -129,7 +129,9 @@ def test_approve_command_clears_a_finding(tmp_path: Path) -> None:
     code, output = run("verify", bundle, "--policy", policy, "--out", out)
     assert code == 1
     assert "verdict: NEEDS-APPROVAL" in output
-    finding = re.search(r"APPROVE  inventory\.artifact\.unclassified  \[([0-9a-f]{16})\]", output)
+    finding = re.search(
+        r"NEEDS APPROVAL  inventory\.artifact\.unclassified  \[([0-9a-f]{16})\]", output
+    )
     assert finding is not None
     reviewed = ("--assessment", out / "assessment.verify.json", "-f", finding.group(1))
 
@@ -146,6 +148,6 @@ def test_approve_command_clears_a_finding(tmp_path: Path) -> None:
 
     code, output = run("verify", bundle, "--policy", policy)
     assert code == 0, output
-    assert "APPROVED inventory.artifact.unclassified" in output
-    assert "approvals: 1 of 1 (reviewer)" in output
+    assert "APPROVED        inventory.artifact.unclassified" in output
+    assert "approvals: 1 of 1 required (reviewer)" in output
     assert "verdict: PASSED" in output

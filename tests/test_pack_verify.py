@@ -41,6 +41,7 @@ def do_pack(
     policy: Policy | None = None,
     now: datetime = NOW,
     chunk_size: int = 64,
+    bundle_id: str | None = None,
 ) -> PackResult:
     return pack(
         [delivery],
@@ -50,6 +51,7 @@ def do_pack(
         request_path=site.request if request else None,
         now=now,
         chunk_size=chunk_size,
+        bundle_id=bundle_id,
     )
 
 
@@ -339,7 +341,9 @@ def test_replay_and_out_of_order(site: Site, delivery: Path, tmp_path: Path) -> 
     assert first.assessment.summary.verdict is Verdict.PASSED
 
     replayed = do_verify(site, tuesday, state=state, now=NOW + timedelta(days=3))
-    assert "replay.bundle.already-accepted" in failed(replayed.assessment)
+    [again] = failed(replayed.assessment)["replay.bundle.already-accepted"]
+    assert again.detail["statement"] == "identical"
+    assert "replay.bundle.id-reused" not in failed(replayed.assessment)
     assert replayed.assessment.summary.verdict is Verdict.REFUSED
 
     older = do_verify(site, monday, state=state, now=NOW + timedelta(days=4))
@@ -354,6 +358,32 @@ def test_replay_and_out_of_order(site: Site, delivery: Path, tmp_path: Path) -> 
         "refused",
         "refused",
     ]
+
+
+def test_a_different_bundle_reusing_an_accepted_id(
+    site: Site, delivery: Path, tmp_path: Path
+) -> None:
+    state = tmp_path / "state"
+    first = do_pack(site, delivery, tmp_path / "a", bundle_id="1" * 32).bundle
+    (delivery / "extra.txt").write_text("a later change\n")
+    second = do_pack(
+        site, delivery, tmp_path / "b", bundle_id="1" * 32, now=NOW + timedelta(hours=1)
+    ).bundle
+    assert do_verify(site, first, state=state).assessment.summary.verdict is Verdict.PASSED
+    result = do_verify(site, second, state=state, now=NOW + timedelta(hours=2))
+    [reused] = failed(result.assessment)["replay.bundle.id-reused"]
+    assert reused.detail["statement"] != reused.detail["acceptedStatement"]
+    assert "replay.bundle.already-accepted" not in failed(result.assessment)
+    assert result.assessment.summary.verdict is Verdict.REFUSED
+
+
+def test_a_check_that_did_not_run_never_reads_as_a_finding(site: Site, bundle: Path) -> None:
+    from airlock.summary import render
+
+    text = render(do_verify(site, bundle).assessment)
+    assert "not assessed: malware.detected" in text
+    assert "the check did not run: no malware scanner is configured" in text
+    assert "Malware scanner reports a detection" not in text
 
 
 def test_without_state_replay_checks_are_reported_as_not_assessed(site: Site, bundle: Path) -> None:

@@ -212,11 +212,24 @@ def load_source(path: Path) -> Source:
 # --- building -----------------------------------------------------------------------------------
 
 
+# What a finding means for the bundle. NEEDS APPROVAL stands until the quorum is met; only then
+# is it APPROVED.
+NEEDS_APPROVAL = "NEEDS APPROVAL"
+STANDING = ("REFUSE", "BLOCK", NEEDS_APPROVAL)
+_NOT_RUN = {Result.NOT_ASSESSED: "not assessed: ", Result.ERROR: "check error: "}
+
+
+def rule_label(finding: Finding) -> str:
+    """The rule, marked when its check did not run: a policy may block on that, and the row must
+    not read as if the rule had found something."""
+    return _NOT_RUN.get(finding.result, "") + finding.rule
+
+
 def _action(decision_disposition: Disposition, final: bool, cleared: bool) -> str:
     if decision_disposition is Disposition.BLOCK:
         return "REFUSE" if final else ("OVERRIDE" if cleared else "BLOCK")
     if decision_disposition is Disposition.REQUIRE_APPROVAL:
-        return "APPROVED" if cleared else "APPROVE"
+        return "APPROVED" if cleared else NEEDS_APPROVAL
     return "WARN" if decision_disposition is Disposition.WARN else "ok"
 
 
@@ -247,7 +260,7 @@ def _findings(assessment: Assessment) -> list[FindingRow]:
     order = {
         "REFUSE": 0,
         "BLOCK": 1,
-        "APPROVE": 2,
+        NEEDS_APPROVAL: 2,
         "OVERRIDE": 3,
         "APPROVED": 4,
         "WARN": 5,
@@ -276,7 +289,7 @@ def _controls(
         failed = sum(c.failed for c in mapped)
         not_assessed = sum(c.not_assessed for c in mapped)
         errors = sum(c.errors for c in mapped)
-        standing = [r for r in found if r.action in ("REFUSE", "BLOCK", "APPROVE")]
+        standing = [r for r in found if r.action in STANDING]
         noted = [r for r in found if r.finding.result is Result.FAIL]
         if not mapped:
             status = STATUS_NO_RULES

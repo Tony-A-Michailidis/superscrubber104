@@ -449,7 +449,7 @@ class _Verifier:
         check_policy(self.ctx)
         if self.provenance is not None:
             base = self.manifest.base if self.manifest else None
-            check_transfer(self.provenance, base, ledger, self.ctx)
+            check_transfer(self.provenance, base, ledger, self.ctx, self.statement_digest)
         if self.analysis is not None:
             check_rollback(self.analysis.units, ledger, self.ctx)
 

@@ -9,7 +9,7 @@ from html import escape
 
 from airlock.core.model import Result
 from airlock.core.serde import format_timestamp
-from airlock.report.model import Report, detail_text
+from airlock.report.model import STANDING, Report, detail_text, rule_label
 
 _STYLE = """
 :root { --bg: #ffffff; --fg: #1d2330; --muted: #5b6475; --line: #d9dee7; --head: #f3f5f8;
@@ -32,7 +32,7 @@ code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
 .verdict { display: inline-block; padding: 4px 10px; border-radius: 6px; font-weight: 700;
   border: 1px solid; }
 .REFUSE, .refused { color: var(--refuse); } .BLOCK, .blocked, .findings { color: var(--block); }
-.APPROVE, .needs-approval, .not-assessed, .partly-assessed { color: var(--approve); }
+.NEEDS-APPROVAL, .needs-approval, .not-assessed, .partly-assessed { color: var(--approve); }
 .WARN, .noted { color: var(--warn); }
 .ok, .passed, .no-findings, .OVERRIDE, .APPROVED { color: var(--ok); }
 details { margin: 8px 0; } summary { cursor: pointer; font-weight: 600; }
@@ -94,7 +94,7 @@ def render_html(report: Report) -> str:
             f"{t['archiveMembers']} archive members, {t['units']} units, "
             f"{t['components']} SBOM components.</p>"
         )
-    attention = [r for r in report.findings if r.action in ("REFUSE", "BLOCK", "APPROVE")]
+    attention = [r for r in report.findings if r.action in STANDING]
     body.append("<h2>Needs attention</h2>")
     if attention:
         body.append(
@@ -104,13 +104,13 @@ def render_html(report: Report) -> str:
                     _row(
                         [
                             r.action,
-                            r.finding.rule,
+                            rule_label(r.finding),
                             r.finding.subject.display,
                             r.finding.severity.value,
                             detail_text(r.finding.detail),
                             r.finding.id,
                         ],
-                        classes={0: r.action},
+                        classes={0: r.action.replace(" ", "-")},
                     )
                     for r in attention
                 ],
@@ -222,7 +222,7 @@ def render_html(report: Report) -> str:
                         detail_text(r.finding.detail),
                         r.finding.id,
                     ],
-                    classes={0: r.action},
+                    classes={0: r.action.replace(" ", "-")},
                 )
                 for r in rows
             ],
