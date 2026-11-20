@@ -26,7 +26,7 @@ The first release. superscrubber104 is pre-alpha: every command works end to end
 
 - Fails closed: any error inside the tool is recorded as a check error or "not assessed", never an accept, and `tests/test_fail_closed.py` checks every format with values of the wrong type.
 - Crosses its own airlock: [examples/self-transfer/](examples/self-transfer/README.md) packs superscrubber104, installs it on a machine with no network, and verifies the bundle it arrived in. CI runs it on every push.
-- Releases are built reproducibly and carry SHA256SUMS and a signed build-provenance attestation ([RELEASING.md](RELEASING.md)).
+- Releases are built reproducibly, so they can be rebuilt byte for byte from the tag, and carry SHA256SUMS ([RELEASING.md](RELEASING.md)).
 
 [Unreleased]: https://github.com/Tony-A-Michailidis/superscrubber104/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Tony-A-Michailidis/superscrubber104/releases/tag/v0.1.0

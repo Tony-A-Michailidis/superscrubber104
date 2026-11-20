@@ -16,25 +16,19 @@ The [release workflow](.github/workflows/release.yml) then runs the tests again,
 
 * `superscrubber104-X.Y.Z-py3-none-any.whl` and `superscrubber104-X.Y.Z.tar.gz`;
 * `SHA256SUMS` over both;
-* a signed SLSA build-provenance attestation for both, stored in the repository's attestations;
 * the changelog section as release notes.
 
-Releases are built only by the workflow, never on a developer's machine: a local build can pick up untracked files, and it has no provenance.
+Releases are built only by the workflow, never on a developer's machine: a local build can pick up untracked files.
+
+There is no signed build-provenance attestation: GitHub offers those for private repositories only on GitHub Enterprise Cloud. Rebuilding the release, below, is the check instead, and a stronger one: it does not trust the workflow at all.
 
 ## Checking a release
 
-Download the files from the release page, then:
-
-```console
-$ sha256sum --check SHA256SUMS
-$ gh attestation verify superscrubber104-0.1.0-py3-none-any.whl --repo Tony-A-Michailidis/superscrubber104
-```
-
-The attestation proves the wheel was built by this repository's release workflow from the tagged commit. For a disconnected site, run these checks on the connected side, then carry the wheel across as [examples/self-transfer/](examples/self-transfer/README.md) shows.
+Download the files from the release page and run `sha256sum --check SHA256SUMS`. That shows the files are the ones the workflow published. To show they are what the tagged source produces, rebuild them. For a disconnected site, do both on the connected side, then carry the wheel across as [examples/self-transfer/](examples/self-transfer/README.md) shows.
 
 ## Rebuilding a release
 
-The build is reproducible, so a release can be checked without trusting the workflow at all:
+The build is reproducible, so anyone with access to the source can check a release:
 
 ```console
 $ git clone https://github.com/Tony-A-Michailidis/superscrubber104 && cd superscrubber104
