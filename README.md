@@ -17,7 +17,7 @@ AI projects are usually built on connected, unclassified networks and then have 
 - **Inspect without executing.** Pickle payloads, `trust_remote_code`, Keras Lambda layers, install scripts and agent hooks are found by static analysis only.
 - **Prove offline readiness.** Telemetry, auto-downloads, auto-updaters and hard-coded cloud endpoints are flagged.
 - **Two layers of trust.** Our signature proves the bundle was not altered in transit. Upstream signatures and checksums prove the content is genuine.
-- **Evidence-first.** Every check emits a finding mapped to NIST SP 800-53 Rev 5 / ITSG-33 controls, ready to attach to a security assessment and authorization (SA&A) package.
+- **Evidence-first.** Every check emits a finding mapped to NIST SP 800-53 Rev 5 controls, ready to attach to a security assessment and authorization (SA&A) package. A site can load its own control profile, such as ITSG-33, instead.
 
 Integrity and authenticity failures (a hash mismatch, a bad signature, a replay, the wrong enclave) can never be waived or overridden. Policy blockers (a pickle model, remote code, a licence) can be overridden for one bundle, but only by a quorum of approvers with a written justification, recorded as signed evidence.
 
@@ -215,7 +215,7 @@ One line per area; [docs/features.md](docs/features.md) has the detail and each 
 | [Bundles and verification](docs/design/18-bundle-and-verification.md) | every file hashed and signed; re-hashed and re-inspected on arrival; a hash-chained ledger against replay; [volumes and deltas](docs/design/26-volumes-and-deltas.md) |
 | [Containers, Python and npm](docs/design/20-software-and-agents.md) | images verified blob by blob, layers inspected; lockfiles resolved against the packages delivered |
 | [Java, Go, Rust, .NET](docs/design/29-more-ecosystems.md) | Gradle, Go, Cargo and NuGet lockfiles resolved with their hashes; build-time hooks |
-| [Vendor trust](docs/design/27-vendor-trust.md) | RPM and Debian signatures, OpenPGP, publishers' checksum lists, against keys pinned in the policy |
+| [Vendor trust](docs/design/27-vendor-trust.md) | RPM signatures and digests, Debian packages, publishers' checksum lists and detached OpenPGP signatures, against keys pinned in the policy |
 | [Package mirrors](docs/design/28-package-mirrors.md) | dnf, apt, PyPI, npm and Helm repositories as signed chains; stale or rolled-back metadata |
 | [Secrets, executables, documents, scanners](docs/design/21-scanners-and-basics.md) | credentials in every text file; macros and PDF JavaScript; ClamAV, Trivy with CISA KEV, Semgrep and Bandit as pinned plugins |
 | [Infrastructure code](docs/design/30-infrastructure-code.md) | Kubernetes, Compose, Helm, Terraform and Ansible: privileged workloads, unpinned images, unvendored dependencies |
@@ -245,7 +245,7 @@ Neither inspects what is inside the artifacts, applies a site's policy, or recor
 | Signatures and checksums of what they carry | yes | verified again, plus its own bundle signature and replay ledger |
 | SBOM | Zarf generates (Syft); Hauler carries upstream SBOMs | generates (CycloneDX, ML-BOM) from what it inspected |
 | Inspection of content: models, pickles, prompts, secrets, offline readiness | not documented | yes |
-| Policy decision, approvals, evidence mapped to NIST 800-53 / ITSG-33 | not documented | yes |
+| Policy decision, approvals, evidence mapped to NIST 800-53 (or a site's own control profile) | not documented | yes |
 
 airlock opens Zarf packages without running Zarf. It checks:
 * the package's own checksum chain and signature, against keys or Sigstore identities pinned in the policy (a mismatch is final);
