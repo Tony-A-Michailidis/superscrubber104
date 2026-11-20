@@ -290,7 +290,7 @@ $ pre-commit install
 $ pytest
 ```
 
-The test suite blocks all network access. If a test needs a socket, that is a design bug. [CONTRIBUTING.md](CONTRIBUTING.md) has the guardrails and design rules every change keeps to.
+The test suite blocks all network access. If a test needs a socket, that is a design bug. [CONTRIBUTING.md](CONTRIBUTING.md) has the guardrails and design rules every change keeps to. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Licence
 
