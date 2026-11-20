@@ -21,7 +21,7 @@ AI projects are usually built on connected, unclassified networks and then have 
 
 Integrity and authenticity failures (a hash mismatch, a bad signature, a replay, the wrong enclave) can never be waived or overridden. Policy blockers (a pickle model, remote code, a licence) can be overridden for one bundle, but only by a quorum of approvers with a written justification, recorded as signed evidence.
 
-It runs fully offline, has minimal dependencies, and [crosses its own airlock](examples/self-transfer/README.md): it packs itself, installs on a machine with no network, and verifies the bundle it arrived in.
+It runs fully offline, has minimal dependencies, and [crosses its own airlock](examples/self-transfer/README.md): it packs itself, installs on a machine with no network, and verifies the bundle it arrived in. It streams every file, so [a 16 GiB model needs the same memory as a 1 GiB one](examples/scale/README.md) (about 150 MiB).
 
 ## Demo
 

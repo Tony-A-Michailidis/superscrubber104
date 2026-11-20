@@ -4,6 +4,10 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- A scale test ([examples/scale/](examples/scale/README.md)): memory stays flat as files grow (a 16 GiB file needs the same 146 MiB as a 1 GiB one) and grows by about 5 KiB per file or archive member.
+
 ## [0.1.0] - 2026-11-20
 
 The first release. superscrubber104 is pre-alpha: every command works end to end and is tested, it has been tried on one real delivery, and it has not yet been used for a real transfer.
