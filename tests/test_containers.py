@@ -6,7 +6,7 @@ import json
 import tarfile
 from pathlib import Path
 
-from airlock.core.model import ComponentType, Severity, UnitKind, Verdict
+from superscrubber104.core.model import ComponentType, Severity, UnitKind, Verdict
 from tests.model_fixtures import safetensors_bytes
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import (

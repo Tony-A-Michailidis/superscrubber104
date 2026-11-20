@@ -18,7 +18,7 @@ class NetworkAccessError(RuntimeError):
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     def guard(*args: Any, **kwargs: Any) -> NoReturn:
-        raise NetworkAccessError("airlock must not open network connections")
+        raise NetworkAccessError("superscrubber104 must not open network connections")
 
     monkeypatch.setattr(socket, "socket", guard)
     monkeypatch.setattr(socket, "create_connection", guard)

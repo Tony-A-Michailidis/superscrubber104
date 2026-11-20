@@ -1,4 +1,4 @@
-# 11. Behavioural verification (`airlock eval`)
+# 11. Behavioural verification (`superscrubber104 eval`)
 
 Static checks can't prove a model behaves as intended or detect a subtly swapped or backdoored model. Provenance plus behavioural comparison is the practical defence:
 

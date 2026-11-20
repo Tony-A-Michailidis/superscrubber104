@@ -1,7 +1,7 @@
 import pytest
 
-from airlock.core.controls import ControlCatalog
-from airlock.core.rules import FindingFactory, RuleRegistry
+from superscrubber104.core.controls import ControlCatalog
+from superscrubber104.core.rules import FindingFactory, RuleRegistry
 from tests.core.helpers import RULES
 
 

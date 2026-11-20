@@ -1,6 +1,6 @@
 # Quick start: install and run the demo on WSL (AlmaLinux 9 or 10)
 
-This guide installs airlock under the Windows Subsystem for Linux, runs its tests, runs the demo, and then packs and verifies a small delivery of your own. It takes about ten minutes on a connected machine.
+This guide installs superscrubber104 under the Windows Subsystem for Linux, runs its tests, runs the demo, and then packs and verifies a small delivery of your own. It takes about ten minutes on a connected machine.
 
 ## 1. Get AlmaLinux in WSL
 
@@ -15,7 +15,7 @@ Open the AlmaLinux shell. `wsl -l -v` from PowerShell shows which distributions 
 
 ## 2. Install Git and Python
 
-airlock needs Python 3.11 or later.
+superscrubber104 needs Python 3.11 or later.
 
 **AlmaLinux 10:** the system Python is 3.12.
 
@@ -38,23 +38,23 @@ Below, `python3.12` means `python3` on AlmaLinux 10.
 Clone into the Linux filesystem (your home directory), not under `/mnt/c`, which is much slower:
 
 ```bash
-git clone https://github.com/Tony-A-Michailidis/airlock ~/airlock
-cd ~/airlock
+git clone https://github.com/Tony-A-Michailidis/airlock ~/superscrubber104
+cd ~/superscrubber104
 ```
 
-To pick up later changes: `cd ~/airlock && git pull`.
+To pick up later changes: `cd ~/superscrubber104 && git pull`.
 
-## 4. Install airlock
+## 4. Install superscrubber104
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -e ".[dev]"
-airlock --help
+superscrubber104 --help
 ```
 
-Run `source ~/airlock/.venv/bin/activate` in every new shell. `[dev]` adds pytest, ruff and mypy; to run airlock without them, `pip install .` is enough.
+Run `source ~/superscrubber104/.venv/bin/activate` in every new shell. `[dev]` adds pytest, ruff and mypy; to run superscrubber104 without them, `pip install .` is enough.
 
 ## 5. Run the tests
 
@@ -67,10 +67,10 @@ Expect about 735 passed and a few skipped, in under a minute. Two of the skipped
 ## 6. Run the demo
 
 ```bash
-python examples/demo/demo.py ~/airlock-demo
+python examples/demo/demo.py ~/superscrubber104-demo
 ```
 
-The demo plays both sides of an air gap with the `airlock` command:
+The demo plays both sides of an air gap with the `superscrubber104` command:
 
 1. **Keys:** a build pipeline's packing key, pinned in the receiving side's policy.
 2. **Low side:** packs a delivery (a small model, a vendored wheel, an app, an MCP server, a knowledge-base corpus and an evaluation set) into a signed bundle.
@@ -89,7 +89,7 @@ The full output of a run is in [examples/demo/sample-output.md](../examples/demo
   and the ledger noticed the same signed bundle arriving a second time
 ```
 
-Each import directory under `~/airlock-demo/` holds the evidence:
+Each import directory under `~/superscrubber104-demo/` holds the evidence:
 * `report.html`;
 * `sbom.cdx.json` (CycloneDX with an ML-BOM);
 * `oscal.json`;
@@ -98,7 +98,7 @@ Each import directory under `~/airlock-demo/` holds the evidence:
 To open them in Windows:
 
 ```bash
-explorer.exe ~/airlock-demo/import-2
+explorer.exe ~/superscrubber104-demo/import-2
 ```
 
 ## 7. Try it on your own files
@@ -109,19 +109,19 @@ printf 'requests==2.32.3\n' > delivery/app/requirements.txt
 printf 'print("hello")\n'   > delivery/app/main.py
 
 # a signing key for the packing side (it prints a policy snippet that pins it)
-airlock keygen -o keys --name pack --holder build-pipeline
+superscrubber104 keygen -o keys --name pack --holder build-pipeline
 
 # inspect in place, without packing: works on any content, not only models
-airlock model inspect delivery
+superscrubber104 model inspect delivery
 
 # pack into a signed bundle
-airlock pack delivery --key keys/pack.key -o bundle
+superscrubber104 pack delivery --key keys/pack.key -o bundle
 
 # verify as the receiving side, keeping a ledger of imports
-airlock verify bundle --pubkey keys/pack.pub --state high-state --out import-1
+superscrubber104 verify bundle --pubkey keys/pack.pub --state high-state --out import-1
 
 # render the evidence: md, html, json, cyclonedx or oscal
-airlock report import-1 -f html -o import-1/report.html
+superscrubber104 report import-1 -f html -o import-1/report.html
 explorer.exe import-1
 ```
 
@@ -141,16 +141,16 @@ Exit codes are the same for every command:
 | 2 | usage error |
 | 3 | refused: integrity or authenticity failed (never overridable) |
 
-Without `--policy`, the built-in default policy is used. `airlock rules` lists every check, and the same list is in [rules.md](rules.md).
+Without `--policy`, the built-in default policy is used. `superscrubber104 rules` lists every check, and the same list is in [rules.md](rules.md).
 
 ## 8. Optional: zstd, for Zarf packages and Hauler hauls
 
-Zarf and Hauler compress with zstd by default. Python reads zstd from 3.14; before that, airlock's optional `zstd` extra adds the backport of the same module. Without either, such a package is still hashed and recorded, but its contents are reported as "not assessed".
+Zarf and Hauler compress with zstd by default. Python reads zstd from 3.14; before that, superscrubber104's optional `zstd` extra adds the backport of the same module. Without either, such a package is still hashed and recorded, but its contents are reported as "not assessed".
 
 The simplest way, on the Python you already have:
 
 ```bash
-cd ~/airlock
+cd ~/superscrubber104
 pip install -e ".[dev,zstd]"
 pytest            # the two zstd tests now run too
 ```
@@ -161,7 +161,7 @@ Or use Python 3.14 itself. AlmaLinux has no Python 3.14 package; `uv` installs o
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 uv python install 3.14
-cd ~/airlock
+cd ~/superscrubber104
 uv venv -p 3.14 .venv314
 source .venv314/bin/activate
 uv pip install -e ".[dev]"
@@ -170,7 +170,7 @@ pytest            # the two zstd tests now run too
 
 ## 9. Optional: external scanners
 
-ClamAV, Trivy, Semgrep, Bandit, qemu-img and osslsigncode run as optional plugins. Each must be pinned by hash in a policy before airlock will run it. See [scanners.md](scanners.md). On AlmaLinux:
+ClamAV, Trivy, Semgrep, Bandit, qemu-img and osslsigncode run as optional plugins. Each must be pinned by hash in a policy before superscrubber104 will run it. See [scanners.md](scanners.md). On AlmaLinux:
 * ClamAV comes from EPEL (`sudo dnf install -y epel-release && sudo dnf install -y clamav`);
 * qemu-img comes from AppStream (`sudo dnf install -y qemu-img`).
 
@@ -178,7 +178,7 @@ ClamAV, Trivy, Semgrep, Bandit, qemu-img and osslsigncode run as optional plugin
 
 | Symptom | Fix |
 |---|---|
-| `airlock: command not found` | activate the environment: `source ~/airlock/.venv/bin/activate` |
+| `superscrubber104: command not found` | activate the environment: `source ~/superscrubber104/.venv/bin/activate` |
 | pip says `requires a different Python` | on AlmaLinux 9 the venv was made with the system 3.9; recreate it with `python3.12 -m venv .venv` |
 | zstd archives reported "not assessed" | expected before Python 3.14 without the `zstd` extra (step 8) |
 | everything is slow | the clone is under `/mnt/c`; clone into `~` instead (step 3) |

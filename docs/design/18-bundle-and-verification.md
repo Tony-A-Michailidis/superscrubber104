@@ -1,13 +1,13 @@
 # 18. Bundle format, pack and verify
 
-> **Status: implemented** (task 4): `airlock keygen`, `pack`, `verify`, `approve`, `ledger adjust-clock`.
+> **Status: implemented** (task 4): `superscrubber104 keygen`, `pack`, `verify`, `approve`, `ledger adjust-clock`.
 > Builds on the models in [17-core-models.md](17-core-models.md). Workflow context: [§14](12-transfer-workflow-and-cli.md).
 
 ## 18.1 Bundle layout
 
 ```
 bundle/
-  airlock-bundle.json     marker; a pointer only, never trusted
+  superscrubber104-bundle.json     marker; a pointer only, never trusted
   statement.dsse.json     DSSE envelope: in-toto Statement signed by the packer
   manifest.json           integrity inventory                     (subject of the statement)
   analysis.json           the packer's interpretation             (subject; informational)
@@ -24,13 +24,13 @@ The payload is stored as plain files so reviewers can inspect it with ordinary t
 An [in-toto Statement v1](https://in-toto.io/Statement/v1) in a DSSE envelope.
 
 - **Subjects:** the sha256 of each signed file, by name.
-- **Predicate** (`urn:airlock:bundle:v1alpha1`, the `Provenance` model): `bundleId`, `createdAt`, `tool`, `policyDigest` (the packer's), `source`, `destination`, `stream`, `profile`, `requestId`, `extensions`.
+- **Predicate** (`urn:superscrubber104:bundle:v1alpha1`, the `Provenance` model): `bundleId`, `createdAt`, `tool`, `policyDigest` (the packer's), `source`, `destination`, `stream`, `profile`, `requestId`, `extensions`.
 
 The manifest says *what* the content is; the statement says *which transfer* it belongs to. Keeping them apart means identical content always has the same manifest digest (the identity of a snapshot, used for delta bases), while replay, cross-enclave reuse and ordering are judged from the statement.
 
 ## 18.3 Pack
 
-`airlock pack <inputs...> -o bundle/ --key signing.key [--policy p.yaml] [--request req.yaml]`
+`superscrubber104 pack <inputs...> -o bundle/ --key signing.key [--policy p.yaml] [--request req.yaml]`
 
 1. **Plan inputs.** A single directory becomes the bundle root. Several inputs are each placed under their own name, which must be unique.
 2. **Walk** in name order. Links are recorded and never followed. Devices, FIFOs and sockets are recorded and reported.
@@ -45,7 +45,7 @@ A file whose name cannot be a bundle path (backslash, control character, undecod
 
 ## 18.4 Verify
 
-`airlock verify <bundle> --policy p.yaml [--pubkey k.pub] [--state DIR] [--key receipt.key] [--out DIR]`
+`superscrubber104 verify <bundle> --policy p.yaml [--pubkey k.pub] [--state DIR] [--key receipt.key] [--out DIR]`
 
 Nothing is believed because the packing side said so.
 
@@ -75,7 +75,7 @@ Points worth knowing:
 | Code | Verdict | Meaning |
 |---|---|---|
 | 0 | passed | Accepted |
-| 1 | blocked, needs-approval | A policy blocker stands, or approvals are outstanding. Both can be cleared with `airlock approve` |
+| 1 | blocked, needs-approval | A policy blocker stands, or approvals are outstanding. Both can be cleared with `superscrubber104 approve` |
 | 2 | | Usage or configuration error (bad policy, missing key, not a bundle) |
 | 3 | refused | An integrity or authenticity check failed (tampering, bad signature, replay, wrong enclave). Nothing can override it; do not retry, investigate |
 
@@ -86,7 +86,7 @@ Points worth knowing:
 ```
 DIR/ledger.jsonl                      hash-chained log of receipts (signed if --key is given)
 DIR/imports/<time>-<bundle id>/       assessment.verify.json, analysis.verify.json, request.yaml,
-                                      receipt.dsse.json (or receipt.json); airlock report reads it
+                                      receipt.dsse.json (or receipt.json); superscrubber104 report reads it
 ```
 
 The receipt holds identifiers, digests, a verdict and a time, and no free text, so it is safe to send back outbound if policy allows. The custody log stays with the bundle (approvals made on either side are appended to it); the ledger stays on the receiving side. Neither is sent back.
@@ -96,23 +96,23 @@ The receipt holds identifiers, digests, a verdict and a time, and no free text, 
 The rules are in [17 §17.7](17-core-models.md#177-policy). In practice:
 
 ```console
-$ airlock verify bundle/ --policy policy.yaml --out review/
+$ superscrubber104 verify bundle/ --policy policy.yaml --out review/
 BLOCK    model.pickle.dangerous-import  [3f9c0a1b2c3d4e5f]
          models/legacy/weights.pt: Pickle imports a dangerous callable
          approvals: 0 of 2
 verdict: BLOCKED - a policy blocker stands; it can be overridden by an approval quorum
 
-$ airlock approve bundle/ --key keys/alice.key --assessment review/assessment.verify.json \
+$ superscrubber104 approve bundle/ --key keys/alice.key --assessment review/assessment.verify.json \
     -f 3f9c0a1b2c3d4e5f -j "Vendor model, no safetensors build exists. Loaded only in the sandboxed converter."
-$ airlock approve bundle/ --key keys/bob.key   ... (a second person)
+$ superscrubber104 approve bundle/ --key keys/bob.key   ... (a second person)
 
-$ airlock verify bundle/ --policy policy.yaml
+$ superscrubber104 verify bundle/ --policy policy.yaml
 OVERRIDE model.pickle.dangerous-import  [3f9c0a1b2c3d4e5f]
          approvals: 2 of 2 (alice, bob)
 verdict: PASSED
 ```
 
-- `airlock approve` refuses, before signing anything, what could never count: the packer's own key, a final finding, a finding that needs no approval, an empty justification, or an assessment that belongs to a different manifest.
+- `superscrubber104 approve` refuses, before signing anything, what could never count: the packer's own key, a final finding, a finding that needs no approval, an empty justification, or an assessment that belongs to a different manifest.
 - Approvals can be made on the packing side (against the packer's assessment, the default) or on the receiving side (against that side's `assessment.verify.json`). Either way, only the verifying side's policy decides whether they count.
 - An approval that is not counted is listed with the reason (unknown key, wrong role, expired or revoked key, the packer, a different manifest, a finding that has changed, a final finding).
 - If the custody log is damaged, no approval in it is counted.
@@ -131,7 +131,7 @@ To recover:
 - **If the clock was wrong earlier** (it ran fast, imports were recorded with future times, and it has since been corrected), record that:
 
   ```console
-  $ airlock ledger adjust-clock --state /var/lib/airlock --key keys/receipt.key \
+  $ superscrubber104 ledger adjust-clock --state /var/lib/superscrubber104 --key keys/receipt.key \
       --reason "RTC battery replaced; clock ran 3 days fast from 2026-11-01"
   ```
 
@@ -146,7 +146,7 @@ The adjustment does not relax anything else: bundles are still checked for age, 
 Archives are **inspected, never extracted**.
 
 - Member bytes are streamed through a hash. A member is kept only when something must read it again (a nested archive, or a handler that recognised it): in memory up to 1 MiB, otherwise in a private scratch file under a generated name. Every text member is kept, because the secrets scan reads it. **Member names never touch the filesystem**, so path traversal, link tricks and device nodes can be reported but cannot take effect.
-- Format is detected from magic bytes, never from the file name. zip (and everything built on it: wheels, JARs, VSIX, Office documents), tar, and gzip/bzip2/xz streams are read. zstd streams are read on Python 3.14 and later (`compression.zstd`, with the same budget), and before 3.14 with the optional `zstd` extra (`pip install 'airlock[zstd]'`, the `backports.zstd` package), which has the same API; without either they are recognised but not opened, and their member checks are reported as "not assessed" with advice. 7z and RAR are recognised but cannot be opened by the standard library; their member checks are "not assessed".
+- Format is detected from magic bytes, never from the file name. zip (and everything built on it: wheels, JARs, VSIX, Office documents), tar, and gzip/bzip2/xz streams are read. zstd streams are read on Python 3.14 and later (`compression.zstd`, with the same budget), and before 3.14 with the optional `zstd` extra (`pip install 'superscrubber104[zstd]'`, the `backports.zstd` package), which has the same API; without either they are recognised but not opened, and their member checks are reported as "not assessed" with advice. 7z and RAR are recognised but cannot be opened by the standard library; their member checks are "not assessed".
 - **One budget per top-level artifact**, shared by everything nested inside it, counting bytes actually produced rather than sizes declared in headers:
   - `maxRatio`: expanded bytes per byte of the outermost archive (judged only above `ratioMinBytes`, so small, highly compressible files are not false positives)
   - `maxExpandedBytes`, `maxMembers`, `maxDepth` (5 by default: a Zarf package holds image layers, which hold archives of their own)
@@ -169,7 +169,7 @@ Archives are **inspected, never extracted**.
 ## 18.9 Module map
 
 ```
-src/airlock/
+src/superscrubber104/
   cli.py            keygen, pack, verify, approve, ledger adjust-clock
   pack.py           pack()
   verify.py         verify()

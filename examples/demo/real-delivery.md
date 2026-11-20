@@ -1,6 +1,6 @@
 # A real delivery
 
-The demo uses small synthetic files. [real-delivery-report.html](real-delivery-report.html) is the report from a trial on real, public projects: `airlock model inspect` run in place over a delivery of 3.5 GB. GitHub shows HTML as source; download the file and open it in a browser.
+The demo uses small synthetic files. [real-delivery-report.html](real-delivery-report.html) is the report from a trial on real, public projects: `superscrubber104 model inspect` run in place over a delivery of 3.5 GB. GitHub shows HTML as source; download the file and open it in a browser. The report was produced before the project was renamed, so it calls the tool by its earlier working name, `airlock`.
 
 ## What was in it
 
@@ -15,7 +15,7 @@ The demo uses small synthetic files. [real-delivery-report.html](real-delivery-r
 | `models/qwen2.5-0.5b-gguf` | one GGUF file | Hugging Face |
 | `images/python-3.12-slim.tar` | a container image, from `docker save` (Docker 29) | Docker Hub |
 
-## What airlock found
+## What superscrubber104 found
 
 1,800 files, 5,645 archive members and 34 units, inspected in 27 seconds with the default policy and no scanners configured. The verdict is `BLOCKED`, with 19 blockers, each a real reason the delivery could not be used on a disconnected network as it stands:
 
@@ -29,9 +29,9 @@ The demo uses small synthetic files. [real-delivery-report.html](real-delivery-r
 
 The 91 approvals are mostly licences, because the default policy asks for approval of every licence; a site policy lists the ones it accepts. Malware, vulnerability and static-analysis checks are reported as not assessed.
 
-## What the trial changed in airlock
+## What the trial changed in superscrubber104
 
-The first run reported 25 blockers and 147 approvals. Several were airlock's mistakes, not the delivery's, and were fixed:
+The first run reported 25 blockers and 147 approvals. Several were superscrubber104's mistakes, not the delivery's, and were fixed:
 
 * a multi-platform image saved for one platform was called incomplete;
 * coreutils' `sha256sum` binary was taken for a checksum list;

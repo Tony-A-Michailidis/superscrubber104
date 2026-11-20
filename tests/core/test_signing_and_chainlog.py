@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core import chainlog
-from airlock.core.signing import (
+from superscrubber104.core import chainlog
+from superscrubber104.core.signing import (
     Envelope,
     SigningError,
     VerifyKey,

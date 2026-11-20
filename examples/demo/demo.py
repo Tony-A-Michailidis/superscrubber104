@@ -1,4 +1,5 @@
-"""airlock demo: a mixed AI delivery crosses the gap, then someone tampers with it in transit.
+"""superscrubber104 demo: a mixed AI delivery crosses the gap, then someone tampers with it
+in transit.
 
     python examples/demo/demo.py [WORKDIR]
 
@@ -9,7 +10,7 @@
 2. Packs it on the "low side" and verifies it on the "high side": accepted.
 3. Tampers with the bundle as someone with access to the transfer media could: changes bytes in
    one model shard, slips in an undeclared file, and adds a pickle whose payload would run a
-   shell command if anything ever unpickled it (airlock never does).
+   shell command if anything ever unpickled it (superscrubber104 never does).
 4. Verifies again: refused, with all three caught, and renders the evidence as reports.
 
 Everything is synthetic and generated here; nothing is downloaded and nothing is executed. Exit
@@ -122,7 +123,7 @@ def build_delivery(root: Path) -> None:
         ),
         "models/tiny-chat/README.md": (
             "---\nlicense: apache-2.0\npipeline_tag: text-generation\n---\n# Tiny chat\n\n"
-            "## Intended use\n\nThe airlock demo.\n\n## Limitations\n\nIt knows nothing.\n"
+            "## Intended use\n\nThe superscrubber104 demo.\n\n## Limitations\n\nIt knows nothing.\n"
         ),
         "models/tiny-chat/LICENSE": "                                 Apache License\n"
         "                           Version 2.0, January 2004\n",
@@ -158,7 +159,7 @@ def build_delivery(root: Path) -> None:
         "rag/docs/travel.md": "# Travel\n\nBook travel through the travel desk; keep receipts.\n",
         # an evaluation set that crosses with the model
         "eval/smoke.yaml": (
-            "apiVersion: airlock/v1alpha1\nkind: EvalSet\nmetadata: {name: smoke}\nspec:\n"
+            "apiVersion: superscrubber104/v1alpha1\nkind: EvalSet\nmetadata: {name: smoke}\nspec:\n"
             "  model: models/tiny-chat\n  settings: {temperature: 0, seed: 42}\n"
             "  cases:\n    - id: greeting\n      prompt: Say hello.\n"
             "      expect: {contains: hello}\n"
@@ -171,7 +172,7 @@ def build_delivery(root: Path) -> None:
 
 
 REQUEST = f"""\
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: TransferRequest
 metadata: {{id: TR-2026-042, title: Policy assistant release 1.0}}
 spec:
@@ -191,7 +192,8 @@ spec:
 
 def policy(name: str, signer: str = "") -> str:
     return (
-        f"apiVersion: airlock/v1alpha1\nkind: Policy\nmetadata: {{name: {name}, version: '1'}}\n"
+        f"apiVersion: superscrubber104/v1alpha1\nkind: Policy\n"
+        f"metadata: {{name: {name}, version: '1'}}\n"
         + (
             f"identity: {{enclave: {ENCLAVE}, acceptSources: [{SOURCE}]}}\n"
             "transfer: {maxBundleAge: 30d}\n" + signer
@@ -205,11 +207,11 @@ def policy(name: str, signer: str = "") -> str:
 # --- running it ---------------------------------------------------------------------------------
 
 
-def airlock(work: Path, *args: str, show: int = 40) -> tuple[int, str]:
-    """Run the airlock CLI as an operator would, and print what they would see."""
-    print(f"\n$ airlock {' '.join(args)}")
-    proc = subprocess.run(  # noqa: S603 - the demo runs airlock itself
-        [sys.executable, "-m", "airlock", *args],
+def superscrubber104(work: Path, *args: str, show: int = 40) -> tuple[int, str]:
+    """Run the superscrubber104 CLI as an operator would, and print what they would see."""
+    print(f"\n$ superscrubber104 {' '.join(args)}")
+    proc = subprocess.run(  # noqa: S603 - the demo runs superscrubber104 itself
+        [sys.executable, "-m", "superscrubber104", *args],
         cwd=work,
         capture_output=True,
         text=True,
@@ -240,7 +242,7 @@ def main(work: Path) -> int:
     (work / "low" / "policy.yaml").write_text(policy("low-side"), encoding="utf-8")
 
     print("\n== 1. Keys: the build pipeline's packing key ==")
-    _, out = airlock(
+    _, out = superscrubber104(
         work, "keygen", "-o", "keys", "--name", "pack", "--holder", "build-pipeline", show=3
     )
     key_id = re.search(r"key id: (\S+)", out)
@@ -258,21 +260,25 @@ def main(work: Path) -> int:
     (work / "high" / "policy.yaml").write_text(policy("high-side", signer), encoding="utf-8")
 
     print("\n== 2. Low side: pack the delivery ==")
-    packed, _ = airlock(
+    packed, _ = superscrubber104(
         work, "pack", "delivery", "--request", "request.yaml", "--key", "keys/pack.key",
         "--policy", "low/policy.yaml", "-o", "bundle", show=12,
     )  # fmt: skip
 
     print("\n== 3. High side: verify the bundle as it arrived ==")
-    clean, _ = airlock(
+    clean, _ = superscrubber104(
         work, "verify", "bundle", "--policy", "high/policy.yaml", "--state", "high/state",
         "--out", "import-1", show=12,
     )  # fmt: skip
-    airlock(work, "report", "import-1", "--format", "html", "-o", "import-1/report.html", show=2)
-    airlock(
+    superscrubber104(
+        work, "report", "import-1", "--format", "html", "-o", "import-1/report.html", show=2
+    )
+    superscrubber104(
         work, "report", "import-1", "--format", "cyclonedx", "-o", "import-1/sbom.cdx.json", show=2
     )
-    airlock(work, "report", "import-1", "--format", "oscal", "-o", "import-1/oscal.json", show=2)
+    superscrubber104(
+        work, "report", "import-1", "--format", "oscal", "-o", "import-1/oscal.json", show=2
+    )
 
     print("\n== 4. In transit: someone with access to the media tampers with the bundle ==")
     payload = work / "bundle" / "payload"
@@ -289,12 +295,16 @@ def main(work: Path) -> int:
     print("  added models/tiny-chat/training_args.bin, a pickle that would run a shell command")
 
     print("\n== 5. High side: verify the tampered bundle ==")
-    tampered, _ = airlock(
+    tampered, _ = superscrubber104(
         work, "verify", "bundle", "--policy", "high/policy.yaml", "--state", "high/state",
         "--out", "import-2", show=30,
     )  # fmt: skip
-    airlock(work, "report", "import-2", "--format", "md", "-o", "import-2/report.md", show=2)
-    airlock(work, "report", "import-2", "--format", "html", "-o", "import-2/report.html", show=2)
+    superscrubber104(
+        work, "report", "import-2", "--format", "md", "-o", "import-2/report.md", show=2
+    )
+    superscrubber104(
+        work, "report", "import-2", "--format", "html", "-o", "import-2/report.html", show=2
+    )
 
     assessment = json.loads(
         (work / "import-2" / "assessment.verify.json").read_text(encoding="utf-8")
@@ -326,4 +336,4 @@ def main(work: Path) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(Path(sys.argv[1] if len(sys.argv) > 1 else "airlock-demo").resolve()))
+    sys.exit(main(Path(sys.argv[1] if len(sys.argv) > 1 else "superscrubber104-demo").resolve()))

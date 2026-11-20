@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from airlock import bundle as layout
-from airlock.core.errors import ConfigError
-from airlock.core.model import Disposition, Result, Verdict
-from airlock.core.policy import ArchiveLimits, Limits, Policy
-from airlock.core.signing import generate_key
-from airlock.pack import PackResult, pack
-from airlock.session import EXIT_BLOCKED, EXIT_OK, EXIT_REFUSED, exit_code
-from airlock.verify import VerifyResult, verify
+from superscrubber104 import bundle as layout
+from superscrubber104.core.errors import ConfigError
+from superscrubber104.core.model import Disposition, Result, Verdict
+from superscrubber104.core.policy import ArchiveLimits, Limits, Policy
+from superscrubber104.core.signing import generate_key
+from superscrubber104.pack import PackResult, pack
+from superscrubber104.session import EXIT_BLOCKED, EXIT_OK, EXIT_REFUSED, exit_code
+from superscrubber104.verify import VerifyResult, verify
 from tests.helpers import NOW, Site, disposition, failed, make_delivery, make_site, zip_bytes
 
 MIB = 2**20
@@ -106,7 +106,7 @@ def test_pack_then_verify_is_accepted(site: Site, bundle: Path, tmp_path: Path) 
     assert receipt.verifier_key_id == site.receipt_key.key_id
     assert [p.name for p in result.outputs] == [
         "assessment.verify.json",
-        "analysis.verify.json",  # this side's own analysis, for airlock report
+        "analysis.verify.json",  # this side's own analysis, for superscrubber104 report
         "request.yaml",
         "receipt.dsse.json",
     ]
@@ -151,7 +151,7 @@ def test_output_must_be_new_and_outside_the_inputs(
         do_pack(site, delivery, tmp_path / "taken")
     with pytest.raises(ConfigError, match="inside input"):
         do_pack(site, delivery, delivery / "out")
-    with pytest.raises(ConfigError, match="not an airlock bundle"):
+    with pytest.raises(ConfigError, match="not a superscrubber104 bundle"):
         do_verify(site, delivery)
 
 
@@ -378,7 +378,7 @@ def test_a_different_bundle_reusing_an_accepted_id(
 
 
 def test_a_check_that_did_not_run_never_reads_as_a_finding(site: Site, bundle: Path) -> None:
-    from airlock.summary import render
+    from superscrubber104.summary import render
 
     text = render(do_verify(site, bundle).assessment)
     assert "not assessed: malware.detected" in text

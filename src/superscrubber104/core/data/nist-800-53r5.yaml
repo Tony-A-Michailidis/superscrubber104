@@ -1,0 +1,33 @@
+# Starter control catalogue: NIST SP 800-53 Rev. 5 controls that superscrubber104 evidence supports.
+# ITSG-33 security controls align with 800-53, so the same identifiers are used.
+# Titles are from the public NIST SP 800-53 Rev. 5 catalogue. Review every rule-to-control
+# mapping before publishing evidence for an assessment.
+framework: nist-800-53r5
+title: NIST SP 800-53 Rev. 5
+controls:
+  AC-4: Information Flow Enforcement
+  AC-6: Least Privilege
+  AU-10: Non-repudiation
+  CM-2: Baseline Configuration
+  CM-3: Configuration Change Control
+  CM-4: Impact Analyses
+  CM-6: Configuration Settings
+  CM-7: Least Functionality
+  CM-8: System Component Inventory
+  CM-10: Software Usage Restrictions
+  CM-11: User-installed Software
+  IA-5: Authenticator Management
+  MP-5: Media Transport
+  RA-5: Vulnerability Monitoring and Scanning
+  SA-11: Developer Testing and Evaluation
+  SA-22: Unsupported System Components
+  SC-7: Boundary Protection
+  SC-28: Protection of Information at Rest
+  SI-2: Flaw Remediation
+  SI-3: Malicious Code Protection
+  SI-7: Software, Firmware, and Information Integrity
+  SI-10: Information Input Validation
+  SR-3: Supply Chain Controls and Processes
+  SR-4: Provenance
+  SR-10: Inspection of Systems or Components
+  SR-11: Component Authenticity

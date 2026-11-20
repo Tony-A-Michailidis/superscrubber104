@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from airlock.archive import ZSTD, ExpansionLimit, capped
-from airlock.formats import openpgp
-from airlock.formats.deb import DebError, read_deb
-from airlock.formats.golang import ZipHashError, zip_hash
+from superscrubber104.archive import ZSTD, ExpansionLimit, capped
+from superscrubber104.formats import openpgp
+from superscrubber104.formats.deb import DebError, read_deb
+from superscrubber104.formats.golang import ZipHashError, zip_hash
 from tests import vm_fixtures as vm
 from tests.hauler_fixtures import haul, haul_bytes
 from tests.models_helpers import findings_of, inspect

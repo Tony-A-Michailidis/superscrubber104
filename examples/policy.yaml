@@ -1,6 +1,6 @@
 # Example import policy for the receiving side.
 # Full schema: docs/design/17-core-models.md
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: Policy
 metadata:
   name: example-import
@@ -15,7 +15,7 @@ transfer:
   maxBundleAge: 30d            # older bundles are treated as possible replays
   clockTolerance: 10m          # allowance for clock drift on disconnected hosts
 
-# Keys are pinned by hash, so they cannot be shown in a static example. `airlock keygen` prints
+# Keys are pinned by hash, so they cannot be shown in a static example. `superscrubber104 keygen` prints
 # the snippet to paste here:
 #
 # trust:
@@ -103,7 +103,7 @@ allowlists:
   models:
     mode: enforce
     entries:
-      # By identity and revision (asserted), or by unit digest from `airlock model inspect --json`
+      # By identity and revision (asserted), or by unit digest from `superscrubber104 model inspect --json`
       # (pins every file of the package).
       - id: huggingface:example-org/tiny-chat
         revision: 0123456789abcdef0123456789abcdef01234567
@@ -154,7 +154,7 @@ plugins:
     path: tools/bandit/bin/bandit
     binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
 
-# Model runtimes for `airlock eval run` (docs/design/24). airlock never loads a model itself.
+# Model runtimes for `superscrubber104 eval run` (docs/design/24). superscrubber104 never loads a model itself.
 runtimes:
   llama-cpp:
     path: tools/llama.cpp/llama-cli
@@ -172,7 +172,7 @@ runtime:
       reason: vLLM 0.6 wheels are built against torch 2.4 and CUDA 12
 
 freshness:
-  feeds:                          # security feeds for airlock patch plan (docs/design/33)
+  feeds:                          # security feeds for superscrubber104 patch plan (docs/design/33)
     default: 7d
     kev: 2d
   mirrors:                        # repository metadata age (docs/design/28)

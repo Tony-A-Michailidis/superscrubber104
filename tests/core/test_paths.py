@@ -1,6 +1,6 @@
 import pytest
 
-from airlock.core.paths import (
+from superscrubber104.core.paths import (
     NameIssue,
     check_member_name,
     escape_name,

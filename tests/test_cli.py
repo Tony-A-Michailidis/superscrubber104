@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from airlock import __version__
-from airlock.cli import main
+from superscrubber104 import __version__
+from superscrubber104.cli import main
 from tests.helpers import make_delivery
 
 
@@ -73,8 +73,8 @@ def test_keygen_pack_verify_and_exit_codes(tmp_path: Path) -> None:
 def test_encrypted_key_and_pinned_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     delivery = make_delivery(tmp_path / "delivery")
     keys, bundle = tmp_path / "keys", tmp_path / "bundle"
-    monkeypatch.setenv("AIRLOCK_TEST_PASSPHRASE", "correct horse")
-    code, output = run("keygen", "-o", keys, "--passphrase-env", "AIRLOCK_TEST_PASSPHRASE")
+    monkeypatch.setenv("SUPERSCRUBBER104_TEST_PASSPHRASE", "correct horse")
+    code, output = run("keygen", "-o", keys, "--passphrase-env", "SUPERSCRUBBER104_TEST_PASSPHRASE")
     assert code == 0
     snippet = output[output.index("trust:") :]
 
@@ -82,13 +82,15 @@ def test_encrypted_key_and_pinned_policy(tmp_path: Path, monkeypatch: pytest.Mon
     assert code == 2  # the key is encrypted and no passphrase was given
     code, output = run(
         "pack", delivery, "-o", bundle, "--key", keys / "signing.key",
-        "--passphrase-env", "AIRLOCK_TEST_PASSPHRASE",
+        "--passphrase-env", "SUPERSCRUBBER104_TEST_PASSPHRASE",
     )  # fmt: skip
     assert code == 0, output
 
     # The snippet keygen prints is a working trust section.
     policy = keys / "policy.yaml"
-    header = 'apiVersion: airlock/v1alpha1\nkind: Policy\nmetadata: {name: cli, version: "1"}\n'
+    header = (
+        'apiVersion: superscrubber104/v1alpha1\nkind: Policy\nmetadata: {name: cli, version: "1"}\n'
+    )
     policy.write_text(header + snippet, encoding="utf-8")
     code, output = run("verify", bundle, "--policy", policy)
     assert code == 0, output
@@ -119,7 +121,7 @@ def test_approve_command_clears_a_finding(tmp_path: Path) -> None:
     )
     policy = keys / "policy.yaml"
     policy.write_text(
-        'apiVersion: airlock/v1alpha1\nkind: Policy\nmetadata: {name: cli, version: "1"}\n'
+        'apiVersion: superscrubber104/v1alpha1\nkind: Policy\nmetadata: {name: cli, version: "1"}\n'
         "trust:\n  signers:\n" + signers + "rules:\n"
         '  - {rule: inventory.artifact.unclassified, paths: ["docs/**"],'
         " disposition: require-approval}\n",

@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.canonical import sha256_digest
-from airlock.core.errors import ConfigError
-from airlock.core.model import UnitKind, UpstreamRef
-from airlock.core.request import Direction, Profile, load_request, parse_request
+from superscrubber104.core.canonical import sha256_digest
+from superscrubber104.core.errors import ConfigError
+from superscrubber104.core.model import UnitKind, UpstreamRef
+from superscrubber104.core.request import Direction, Profile, load_request, parse_request
 
 EXAMPLE = Path(__file__).parents[2] / "examples" / "request.yaml"
 

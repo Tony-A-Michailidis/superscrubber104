@@ -3,9 +3,9 @@
 import textwrap
 from pathlib import Path
 
-from airlock.core.model import Artifact, Finding, Result, Unit, UnitKind
-from airlock.core.policy import Policy, load_policy
-from airlock.model_inspect import InspectResult, inspect_paths
+from superscrubber104.core.model import Artifact, Finding, Result, Unit, UnitKind
+from superscrubber104.core.policy import Policy, load_policy
+from superscrubber104.model_inspect import InspectResult, inspect_paths
 from tests.helpers import NOW
 
 LICENCES = """\
@@ -18,7 +18,7 @@ licences:
 
 def make_policy(directory: Path, extra: str = "", *, licences: bool = True) -> Policy:
     text = (
-        "apiVersion: airlock/v1alpha1\nkind: Policy\nmetadata: {name: models, version: '1'}\n"
+        "apiVersion: superscrubber104/v1alpha1\nkind: Policy\nmetadata: {name: models, version: '1'}\n"
         + (LICENCES if licences else "")
         + textwrap.dedent(extra)
     )

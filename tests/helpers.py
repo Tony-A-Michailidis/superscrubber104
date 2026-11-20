@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from airlock.core.model import Assessment, Disposition, Finding
-from airlock.core.policy import Policy, load_policy
-from airlock.core.signing import SigningKey, generate_key
+from superscrubber104.core.model import Assessment, Disposition, Finding
+from superscrubber104.core.policy import Policy, load_policy
+from superscrubber104.core.signing import SigningKey, generate_key
 
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 SOURCE = "dev-unclass"
@@ -62,7 +62,7 @@ def make_delivery(root: Path) -> Path:
 
 
 REQUEST = f"""\
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: TransferRequest
 metadata: {{id: TR-TEST-1, title: Test delivery}}
 spec:
@@ -123,7 +123,7 @@ class Site:
                 f"      roles: {roles}\n" + more
             )
         text = (
-            "apiVersion: airlock/v1alpha1\nkind: Policy\n"
+            "apiVersion: superscrubber104/v1alpha1\nkind: Policy\n"
             'metadata: {name: test-import, version: "1"}\n'
             f"identity: {{enclave: {enclave}, acceptSources: [{SOURCE}]}}\n"
             "transfer: {maxBundleAge: 30d}\n"

@@ -4,10 +4,10 @@
 
 | Phase | Module | One-line purpose |
 |---|---|---|
-| 1 (MVP) | **airlock pack / verify** | Prepare *any* project delivery (AI and non-AI) for transfer across an air gap. Inventory, hash, scan, sign, bundle, verify on import. |
+| 1 (MVP) | **superscrubber104 pack / verify** | Prepare *any* project delivery (AI and non-AI) for transfer across an air gap. Inventory, hash, scan, sign, bundle, verify on import. |
 | 1b | **offline readiness** | Prove the delivery will run disconnected and has no egress paths (telemetry, auto-download, cloud endpoints). |
-| 1c | **airlock patch** | Keep disconnected Windows, AlmaLinux and Ubuntu systems patched, with a fast lane for critical, actively exploited vulnerabilities. |
-| 1d | **airlock eval** | Behavioural verification: run a pinned evaluation set on both sides of the gap and compare, to detect model substitution or corruption. |
+| 1c | **superscrubber104 patch** | Keep disconnected Windows, AlmaLinux and Ubuntu systems patched, with a fast lane for critical, actively exploited vulnerabilities. |
+| 1d | **superscrubber104 eval** | Behavioural verification: run a pinned evaluation set on both sides of the gap and compare, to detect model substitution or corruption. |
 | 1→2 | **evidence / controls mapping** | Every check emits evidence mapped to NIST SP 800-53 / ITSG-33 controls; reports attach to an SA&A. |
 | 2 | **controls-as-code for coding agents** | Scan a repo or workstation's agent setup (MCP configs, permissions, hooks, CI). Produce a control-mapped gap report. |
 | 3 | **MCP policy gateway** | Local proxy between an agent and its MCP servers. Allowlists, argument rules, hash-chained audit log, suspicious-output detection. |

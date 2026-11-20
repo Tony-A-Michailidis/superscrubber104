@@ -11,12 +11,12 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from airlock.cli import main
-from airlock.core.errors import ConfigError
-from airlock.core.model import Result
-from airlock.core.signing import generate_key
-from airlock.feeds.readers import load_feed
-from airlock.patch.inventory import (
+from superscrubber104.cli import main
+from superscrubber104.core.errors import ConfigError
+from superscrubber104.core.model import Result
+from superscrubber104.core.signing import generate_key
+from superscrubber104.feeds.readers import load_feed
+from superscrubber104.patch.inventory import (
     InstalledPackage,
     Inventory,
     OsIdentity,
@@ -25,9 +25,9 @@ from airlock.patch.inventory import (
     load,
     sign,
 )
-from airlock.patch.plan import confirm, markdown, plan
-from airlock.scanners.authenticode import Authenticode
-from airlock.scanners.base import Completed
+from superscrubber104.patch.plan import confirm, markdown, plan
+from superscrubber104.scanners.authenticode import Authenticode
+from superscrubber104.scanners.base import Completed
 from tests.helpers import NOW, make_site
 from tests.models_helpers import inspect
 from tests.software_fixtures import write
@@ -341,7 +341,7 @@ def test_confirm_shows_the_gap_closed(tmp_path: Path) -> None:
 def test_patch_cli(tmp_path: Path) -> None:
     site = make_site(tmp_path / "site")
     key_file = tmp_path / "receipt.key"
-    from airlock.core.signing import save_key
+    from superscrubber104.core.signing import save_key
 
     save_key(site.receipt_key, key_file, tmp_path / "receipt.pub", None)
     policy = site.policy("freshness:\n  feeds: {default: 3650d}\n")
@@ -588,7 +588,7 @@ def test_plan_matches_rocky_and_prefers_the_standard_archive(tmp_path: Path) -> 
 
 
 def test_unreadable_feed_is_stale_not_fatal(tmp_path: Path) -> None:
-    from airlock.feeds.readers import load_feeds
+    from superscrubber104.feeds.readers import load_feeds
 
     bad = tmp_path / "broken.xml.gz"
     bad.write_bytes(b"\x1f\x8b not gzip at all")

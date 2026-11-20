@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]  # PEP 639 licence metadata
 build-backend = "hatchling.build"
 
 [project]
-name = "airlock"  # working name; check PyPI for collisions before publishing
+name = "superscrubber104"
 dynamic = ["version"]
 description = "Prepare, inspect, sign and verify AI project deliveries for transfer across an air gap, with control-mapped evidence."
 readme = "README.md"
@@ -46,13 +46,13 @@ dev = [
 zstd = ["backports.zstd>=1.0; python_version < '3.14'"]
 
 [project.scripts]
-airlock = "airlock.cli:main"
+superscrubber104 = "superscrubber104.cli:main"
 
 [tool.hatch.version]
-path = "src/airlock/__init__.py"
+path = "src/superscrubber104/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/airlock"]
+packages = ["src/superscrubber104"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -60,7 +60,7 @@ addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
 
 [tool.coverage.run]
-source = ["airlock"]
+source = ["superscrubber104"]
 branch = true
 
 [tool.coverage.report]

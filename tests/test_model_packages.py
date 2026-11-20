@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from airlock.cli import main
-from airlock.core.model import Disposition, Result, Severity, TrustLevel, UnitKind, Verdict
-from airlock.core.policy import Policy
-from airlock.pack import pack
-from airlock.verify import verify
+from superscrubber104.cli import main
+from superscrubber104.core.model import Disposition, Result, Severity, TrustLevel, UnitKind, Verdict
+from superscrubber104.core.policy import Policy
+from superscrubber104.pack import pack
+from superscrubber104.verify import verify
 from tests.helpers import NOW, make_site
 from tests.model_fixtures import (
     APACHE,
@@ -49,7 +49,7 @@ def test_complete_package_record(tmp_path: Path) -> None:
     assert a["licence"]["expression"] == "Apache-2.0"
     assert a["chatTemplates"][0]["source"] == "tokenizer_config.json#chat_template"
     assert a["modelCard"]["pipelineTag"] == "text-generation"
-    assert a["modelCard"]["intendedUse"] == "Testing airlock."
+    assert a["modelCard"]["intendedUse"] == "Testing superscrubber104."
     assert a["remoteCode"]["required"] is False
     provenance = a["provenance"]
     assert provenance["method"] == "huggingface-download-record"
@@ -62,7 +62,7 @@ def test_complete_package_record(tmp_path: Path) -> None:
     [component] = result.analysis.components
     assert component.purl == f"pkg:huggingface/example-org/tiny-chat@{COMMIT}"
     assert component.licenses[0].expression == "Apache-2.0"
-    assert component.properties["airlock:unit-digest"] == unit.digest
+    assert component.properties["superscrubber104:unit-digest"] == unit.digest
     shard = artifact(result, "model-00001-of-00002.safetensors")
     assert shard.verifications[0].type == "huggingface-download-record"
     assert shard.verifications[0].level is TrustLevel.CHECKSUM

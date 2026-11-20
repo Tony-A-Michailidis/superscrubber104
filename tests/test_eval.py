@@ -8,18 +8,18 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from airlock.cli import main
-from airlock.core.model import Result, Verdict
-from airlock.eval_run import run_eval, write_results
-from airlock.scanners import base
-from airlock.scanners.base import Completed, ScanError
+from superscrubber104.cli import main
+from superscrubber104.core.model import Result, Verdict
+from superscrubber104.eval_run import run_eval, write_results
+from superscrubber104.scanners import base
+from superscrubber104.scanners.base import Completed, ScanError
 from tests.data_fixtures import embedding_model
 from tests.helpers import NOW
 from tests.models_helpers import findings_of, inspect, make_policy
 from tests.software_fixtures import write
 
 EVALSET = """\
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: EvalSet
 metadata: {name: smoke}
 spec:
@@ -203,7 +203,7 @@ def test_eval_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, evalset, policy_yaml = _site(tmp_path)
     policy = tmp_path / "policy.yaml"
     policy.write_text(
-        "apiVersion: airlock/v1alpha1\nkind: Policy\nmetadata: {name: eval, version: '1'}\n"
+        "apiVersion: superscrubber104/v1alpha1\nkind: Policy\nmetadata: {name: eval, version: '1'}\n"
         + policy_yaml,
         encoding="utf-8",
     )

@@ -7,11 +7,11 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from airlock.catalog import ALL, builtin_registry
-from airlock.checks.inventory import check_paths
-from airlock.checks.transfer import check_transfer
-from airlock.cli import main
-from airlock.core.model import (
+from superscrubber104.catalog import ALL, builtin_registry
+from superscrubber104.checks.inventory import check_paths
+from superscrubber104.checks.transfer import check_transfer
+from superscrubber104.cli import main
+from superscrubber104.core.model import (
     Entry,
     EntryType,
     Finding,
@@ -21,10 +21,10 @@ from airlock.core.model import (
     ToolRef,
     Verdict,
 )
-from airlock.core.policy import Limits, Policy
-from airlock.ledger import Ledger
-from airlock.rule_reference import _DOMAINS, rules_markdown
-from airlock.session import Session
+from superscrubber104.core.policy import Limits, Policy
+from superscrubber104.ledger import Ledger
+from superscrubber104.rule_reference import _DOMAINS, rules_markdown
+from superscrubber104.session import Session
 from tests.helpers import NOW
 
 SHA = "a" * 64
@@ -130,7 +130,10 @@ def test_path_checks() -> None:
 
 def test_delta_base_must_be_an_accepted_snapshot(tmp_path: Path) -> None:
     provenance = Provenance(
-        bundle_id="delta-1", created_at=NOW, tool=ToolRef("airlock", "0"), policy_digest=DIGEST
+        bundle_id="delta-1",
+        created_at=NOW,
+        tool=ToolRef("superscrubber104", "0"),
+        policy_digest=DIGEST,
     )
     ledger = Ledger(tmp_path)
 
@@ -166,7 +169,7 @@ def test_delta_base_must_be_an_accepted_snapshot(tmp_path: Path) -> None:
 
 
 def test_rule_reference_is_in_step_with_the_catalogue() -> None:
-    """docs/rules.md is generated: regenerate it with ``airlock rules -o docs/rules.md``."""
+    """docs/rules.md is generated: regenerate it with ``superscrubber104 rules -o docs/rules.md``."""
     document = Path(__file__).parent.parent / "docs" / "rules.md"
     assert document.read_text(encoding="utf-8") == rules_markdown()
     assert {rule.id.split(".")[0] for rule in ALL} <= set(_DOMAINS)  # every section has a name

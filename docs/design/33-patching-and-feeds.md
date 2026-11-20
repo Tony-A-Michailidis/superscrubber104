@@ -4,32 +4,32 @@
 
 ```
 high side                          low side                               high side
-airlock patch inventory  ──────▶   airlock patch plan  ──▶ fetch, pack ──▶ verify, stage
+superscrubber104 patch inventory  ──────▶   superscrubber104 patch plan  ──▶ fetch, pack ──▶ verify, stage
   (signed, names+versions)            (feeds: OSV, updateinfo,                  │
                                        CVRF, KEV)                               ▼
-                                                                 airlock patch inventory
-                                                                 airlock patch confirm
+                                                                 superscrubber104 patch inventory
+                                                                 superscrubber104 patch confirm
 ```
 
 ## 33.1 Inventory (high side)
 
 ```sh
-airlock patch inventory --root / --label web-01 --key keys/receipt.key -o web-01.inventory.json
-airlock patch inventory --windows-hotfixes hotfix.json --windows-product "Windows Server 2022" \
+superscrubber104 patch inventory --root / --label web-01 --key keys/receipt.key -o web-01.inventory.json
+superscrubber104 patch inventory --windows-hotfixes hotfix.json --windows-product "Windows Server 2022" \
     --windows-build 10.0.20348.2700 --label dc-01 --key keys/receipt.key -o dc-01.inventory.json
 ```
 
 Linux hosts are read statically from a root filesystem: `etc/os-release`, the RPM database (`var/lib/rpm/rpmdb.sqlite` or `usr/lib/sysimage/rpm/rpmdb.sqlite`, opened read-only and immutable) or dpkg's `status`. The NVIDIA driver version (`/sys/module/nvidia/version`) and CUDA's `version.json` are added when present. Nothing is executed, so the same command inventories a mounted image or an exported container filesystem.
 
-AlmaLinux 8 and older keep the RPM database in Berkeley DB, which airlock does not read. `patch inventory` says so and names the command to run on the host instead; its output is passed with `--package-list` (also usable on any host, when running the package manager is preferred to reading its database):
+AlmaLinux 8 and older keep the RPM database in Berkeley DB, which superscrubber104 does not read. `patch inventory` says so and names the command to run on the host instead; its output is passed with `--package-list` (also usable on any host, when running the package manager is preferred to reading its database):
 
 ```sh
 rpm -qa --qf '%{NAME} %{EPOCHNUM}:%{VERSION}-%{RELEASE} %{ARCH}\n' > packages.txt        # RPM hosts
 dpkg-query -W -f='${Package} ${Version} ${Architecture} ${source:Package}\n' > packages.txt  # Debian, Ubuntu
-airlock patch inventory --root / --package-list packages.txt --label old-01 --key keys/receipt.key -o old-01.inventory.json
+superscrubber104 patch inventory --root / --package-list packages.txt --label old-01 --key keys/receipt.key -o old-01.inventory.json
 ```
 
-Windows hosts are read from what PowerShell reports, because airlock runs on Linux:
+Windows hosts are read from what PowerShell reports, because superscrubber104 runs on Linux:
 
 ```powershell
 Get-HotFix | Select-Object HotFixID | ConvertTo-Json > hotfix.json
@@ -47,7 +47,7 @@ It holds no host name: the operator gives a label of letters, digits, dots, dash
 
 ## 33.2 Feeds (low side)
 
-Offline snapshots, read by `airlock/feeds/readers.py` into one advisory model (`Advisory`, `Fix`):
+Offline snapshots, read by `superscrubber104/feeds/readers.py` into one advisory model (`Advisory`, `Fix`):
 
 | Feed | Format | Gives |
 |---|---|---|
@@ -61,11 +61,11 @@ Every feed reports when it was built: the newest `modified`, `issued` or `update
 ## 33.3 Plan and confirm
 
 ```sh
-airlock patch plan --inventory web-01.inventory.json --feed updateinfo.xml.gz --feed kev.json \
+superscrubber104 patch plan --inventory web-01.inventory.json --feed updateinfo.xml.gz --feed kev.json \
     --policy policy.yaml -o plan.json --markdown plan.md
-airlock patch plan ... --kev                      # emergency: only advisories with a KEV CVE
-airlock patch plan ... --cve CVE-2026-1111        # emergency: only this CVE
-airlock patch confirm --plan plan.json --inventory web-01.after.json --feed ... # exit 1 while gaps remain
+superscrubber104 patch plan ... --kev                      # emergency: only advisories with a KEV CVE
+superscrubber104 patch plan ... --cve CVE-2026-1111        # emergency: only this CVE
+superscrubber104 patch confirm --plan plan.json --inventory web-01.after.json --feed ... # exit 1 while gaps remain
 ```
 
 * **Matching.** A fix applies when its ecosystem names the host's distribution and release (major version for AlmaLinux and Rocky Linux, exact for Ubuntu). Fixes without one, such as updateinfo, apply as given. An installed package older than the fix, by `rpm` or `dpkg` ordering ([27.3](27-vendor-trust.md), [27.4](27-vendor-trust.md)), is a gap. Architecture-specific fixes only match that architecture (or `noarch`). Ubuntu fixes name source packages and are matched through each installed binary's `Source`.
@@ -111,12 +111,12 @@ A synthetic AlmaLinux 9.4 host against the real errata produced 128 gaps, 13 of 
 
 ## 33.6 Limits
 
-* Dependency closure is resolved on the connected side by the package manager, not by airlock.
+* Dependency closure is resolved on the connected side by the package manager, not by superscrubber104.
 * The plan does not compare the bundle's packages with the inventory. Downgrade protection happens at staging ([34](34-staging.md)).
 * Ubuntu OVAL and Red Hat CSAF/VEX are not read; OSV covers the same advisories.
 * Windows: only the KB model (cumulative updates and supersedence within the documents given). Feature updates, Office click-to-run and driver updates are not planned, and WSUS metadata is not read.
 * Authenticode results are findings only. They do not feed `trust.minimumLevels`, because scanners run after the analysis.
-* The `osslsigncode` and `qemu-img` plugins are tested with stand-ins for the binaries, as every scanner is. Their handling of each tool's real output has **not** been run against the real tools here: check `airlock plugins check` and one known-good and one altered file on your own build before relying on them.
-* Feeds are read as given. `patch plan` does not verify where a feed came from: check its publisher's checksum or signature as for any download, or take `updateinfo.xml` from a mirror whose chain `airlock verify` has checked ([28](28-package-mirrors.md)).
+* The `osslsigncode` and `qemu-img` plugins are tested with stand-ins for the binaries, as every scanner is. Their handling of each tool's real output has **not** been run against the real tools here: check `superscrubber104 plugins check` and one known-good and one altered file on your own build before relying on them.
+* Feeds are read as given. `patch plan` does not verify where a feed came from: check its publisher's checksum or signature as for any download, or take `updateinfo.xml` from a mirror whose chain `superscrubber104 verify` has checked ([28](28-package-mirrors.md)).
 * GPU driver, CUDA and firmware versions are in the inventory, but no advisory feed is matched against them yet.
 * Two versions of the same OS package (same name and architecture) in one delivery: the older ones are recorded as `package.superseded` (info), and both are still staged. A policy can raise that for patch bundles.

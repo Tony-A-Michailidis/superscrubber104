@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from airlock.core.model import Severity, UnitKind, Verdict
+from superscrubber104.core.model import Severity, UnitKind, Verdict
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import npm_tarball, package_lock, sri, write
 

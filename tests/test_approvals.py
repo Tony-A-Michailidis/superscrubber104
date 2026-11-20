@@ -11,19 +11,19 @@ from pathlib import Path
 
 import pytest
 
-from airlock import bundle as layout
-from airlock.approvals import EVENT_APPROVED, approve
-from airlock.core import chainlog
-from airlock.core.errors import ConfigError
-from airlock.core.model import Approval, ApprovalRecord, Assessment, Disposition, Verdict
-from airlock.core.policy import Policy
-from airlock.core.rules import finding_digest
-from airlock.core.serde import from_data, to_data
-from airlock.core.signing import SigningKey, generate_key
-from airlock.pack import pack
-from airlock.session import EXIT_BLOCKED, EXIT_OK, EXIT_REFUSED, exit_code
-from airlock.summary import render
-from airlock.verify import VerifyResult, verify
+from superscrubber104 import bundle as layout
+from superscrubber104.approvals import EVENT_APPROVED, approve
+from superscrubber104.core import chainlog
+from superscrubber104.core.errors import ConfigError
+from superscrubber104.core.model import Approval, ApprovalRecord, Assessment, Disposition, Verdict
+from superscrubber104.core.policy import Policy
+from superscrubber104.core.rules import finding_digest
+from superscrubber104.core.serde import from_data, to_data
+from superscrubber104.core.signing import SigningKey, generate_key
+from superscrubber104.pack import pack
+from superscrubber104.session import EXIT_BLOCKED, EXIT_OK, EXIT_REFUSED, exit_code
+from superscrubber104.summary import render
+from superscrubber104.verify import VerifyResult, verify
 from tests.helpers import NOW, Site, make_delivery, make_site, zip_bytes
 
 TRAVERSAL = "archive.member.path-traversal"  # high -> block: a policy blocker, quorum of 2

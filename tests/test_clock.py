@@ -12,14 +12,14 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from airlock.cli import main
-from airlock.core.model import Disposition, Result, Verdict
-from airlock.core.policy import Policy
-from airlock.ledger import EVENT_CLOCK, Ledger
-from airlock.pack import pack
-from airlock.session import EXIT_OK, EXIT_REFUSED, exit_code
-from airlock.summary import render
-from airlock.verify import VerifyResult, verify
+from superscrubber104.cli import main
+from superscrubber104.core.model import Disposition, Result, Verdict
+from superscrubber104.core.policy import Policy
+from superscrubber104.ledger import EVENT_CLOCK, Ledger
+from superscrubber104.pack import pack
+from superscrubber104.session import EXIT_OK, EXIT_REFUSED, exit_code
+from superscrubber104.summary import render
+from superscrubber104.verify import VerifyResult, verify
 from tests.helpers import NOW, Site, disposition, failed, make_delivery, make_site
 
 DAY = timedelta(days=1)
@@ -63,7 +63,7 @@ def test_regression_is_refused_until_a_signed_adjustment(site: Site, tmp_path: P
     refused = check(site, second, state, NOW + DAY + HOUR)
     [finding] = failed(refused.assessment)["replay.clock.regression"]
     assert finding.result is Result.FAIL
-    assert "airlock ledger adjust-clock" in str(finding.detail["hint"])
+    assert "superscrubber104 ledger adjust-clock" in str(finding.detail["hint"])
     assert disposition(refused.assessment, "replay.clock.regression") is Disposition.BLOCK
     assert exit_code(refused.assessment) == EXIT_REFUSED
     assert "hint: correct the system clock" in render(refused.assessment)

@@ -1,6 +1,6 @@
 # 10. Offline readiness and egress
 
-A delivery that tries to reach the internet behind the gap either breaks (operational risk) or becomes an exfiltration channel (security risk). `airlock offline-check` (also run inside `pack`/`verify`) produces an **offline readiness report**:
+A delivery that tries to reach the internet behind the gap either breaks (operational risk) or becomes an exfiltration channel (security risk). `superscrubber104 offline-check` (also run inside `pack`/`verify`) produces an **offline readiness report**:
 
 - **Auto-download paths:**
   - Hugging Face `from_pretrained` without local paths or offline flags

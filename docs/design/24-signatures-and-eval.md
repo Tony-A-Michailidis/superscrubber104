@@ -1,12 +1,12 @@
 # 24. Model signatures and behavioural verification
 
-> **Status: implemented** (brought forward from 1d at the owner's request). Spec: the provenance item of [§7](05-model-packages.md) (OpenSSF model signing), [§11](09-behavioural-verification.md) (`airlock eval`).
+> **Status: implemented** (brought forward from 1d at the owner's request). Spec: the provenance item of [§7](05-model-packages.md) (OpenSSF model signing), [§11](09-behavioural-verification.md) (`superscrubber104 eval`).
 
 Two ways to know that the model on the high side is the model its publisher released and that it behaves as tested: a cryptographic one (the publisher's signature over every file) and a behavioural one (the same prompts, the same answers).
 
 ## 24.1 Model signatures
 
-[OpenSSF model signing](https://github.com/sigstore/model-transparency) writes a `model.sig` Sigstore bundle next to the model. Its DSSE envelope holds an in-toto statement (`predicateType: https://model_signing/signature/v1.0`) that lists every file with its sha256, plus the paths the signer ignored. `airlock/formats/sigstore.py` verifies it **offline**, using only what the policy pins under `trust.upstream` with a scope matching `model.signature`:
+[OpenSSF model signing](https://github.com/sigstore/model-transparency) writes a `model.sig` Sigstore bundle next to the model. Its DSSE envelope holds an in-toto statement (`predicateType: https://model_signing/signature/v1.0`) that lists every file with its sha256, plus the paths the signer ignored. `superscrubber104/formats/sigstore.py` verifies it **offline**, using only what the policy pins under `trust.upstream` with a scope matching `model.signature`:
 
 | Method | Bundle carries | Policy pins | Verified |
 |---|---|---|---|
@@ -46,12 +46,12 @@ A verified signature adds a `model-signing` verification at trust level `signatu
 
 **Validated against the model-signing project's own published test signatures** (v1.1.0, all three methods). The keyless one was signed through public-good Sigstore and verifies offline against Sigstore's `trusted_root.json`. A copy with one file changed is refused.
 
-## 24.2 Evaluation sets and `airlock eval`
+## 24.2 Evaluation sets and `superscrubber104 eval`
 
 An evaluation set (`kind: EvalSet`) crosses with the model it verifies and is pinned by hash like any other file:
 
 ```yaml
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: EvalSet
 metadata: {name: tiny-chat-smoke}
 spec:
@@ -68,7 +68,7 @@ spec:
       expect: {not-contains: "http"}
 ```
 
-**airlock never loads a model.** A runtime is a program the site configures under `runtimes` in its policy, pinned and pre-flighted like a scanner (doc 21). It runs once per case with an argument list, a private working directory and closed network proxies; its standard output is the answer:
+**superscrubber104 never loads a model.** A runtime is a program the site configures under `runtimes` in its policy, pinned and pre-flighted like a scanner (doc 21). It runs once per case with an argument list, a private working directory and closed network proxies; its standard output is the answer:
 
 ```yaml
 runtimes:
@@ -85,9 +85,9 @@ runtimes:
 
 ```sh
 # low side: run, keep the results, deliver them with the model
-airlock eval run eval/smoke.yaml --model models/tiny-chat --runtime llama-cpp --policy low.yaml -o eval/low-results.json
+superscrubber104 eval run eval/smoke.yaml --model models/tiny-chat --runtime llama-cpp --policy low.yaml -o eval/low-results.json
 # high side: run again and compare
-airlock eval run eval/smoke.yaml --model payload/models/tiny-chat --runtime llama-cpp --policy high.yaml \
+superscrubber104 eval run eval/smoke.yaml --model payload/models/tiny-chat --runtime llama-cpp --policy high.yaml \
     --reference payload/eval/low-results.json --side high -o high-results.json
 ```
 
@@ -110,6 +110,6 @@ Results (`kind: EvalResults`) record the set's sha256, the model's **unit digest
 
 - **Sigstore:** RFC 3161 timestamps without a Rekor entry, signed certificate timestamps (SCTs) and Rekor inclusion proofs against a checkpoint are not verified; the signed entry timestamp from a pinned Rekor key is what establishes the signing time. Trusted-root rotation is the operator's job: carry a current `trusted_root.json` across like any other pinned file.
 - **Certificate method:** revocation (CRL, OCSP) is not checked offline.
-- **Signature coverage** is checked against the package's members (the files airlock assigned to the model package), not against every file in the directory.
+- **Signature coverage** is checked against the package's members (the files superscrubber104 assigned to the model package), not against every file in the directory.
 - **Evaluation** compares text. Similarity is a character-level ratio of whitespace-normalised outputs (`difflib`), not a semantic measure. Determinism depends on the runtime: the same seed and temperature 0 on different GPUs can still differ, which is what the similarity threshold is for. The canaries are only as good as the probes the set contains; a clean run is evidence, not proof, that no backdoor exists.
-- **Runtimes** are the one place a model is executed. Run evaluations on an isolated host; the runtime gets closed proxies but airlock does not sandbox it further.
+- **Runtimes** are the one place a model is executed. Run evaluations on an isolated host; the runtime gets closed proxies but superscrubber104 does not sandbox it further.

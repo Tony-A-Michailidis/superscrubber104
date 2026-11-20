@@ -17,8 +17,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID, ObjectIdentifier
 
-from airlock.core.model import Result, TrustLevel, UnitKind, Verdict
-from airlock.core.signing import pae
+from superscrubber104.core.model import Result, TrustLevel, UnitKind, Verdict
+from superscrubber104.core.signing import pae
 from tests.data_fixtures import embedding_model
 from tests.helpers import NOW
 from tests.models_helpers import findings_of, inspect

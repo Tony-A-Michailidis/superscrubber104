@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Result, TrustLevel, Verdict
-from airlock.formats.golang import hash1, mod_hash, zip_hash
-from airlock.handlers.packages.nuget import normalize_version
+from superscrubber104.core.model import Result, TrustLevel, Verdict
+from superscrubber104.formats.golang import hash1, mod_hash, zip_hash
+from superscrubber104.handlers.packages.nuget import normalize_version
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import write
 

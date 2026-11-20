@@ -1,9 +1,9 @@
 """Shared test data for core tests."""
 
-from airlock.core.model import Severity, ToolRef
-from airlock.core.rules import RuleSpec
+from superscrubber104.core.model import Severity, ToolRef
+from superscrubber104.core.rules import RuleSpec
 
-TOOL = ToolRef("airlock-test", "0")
+TOOL = ToolRef("superscrubber104-test", "0")
 KEY_ID = "ed25519:" + "0123456789abcdef" * 4
 
 RULES = (

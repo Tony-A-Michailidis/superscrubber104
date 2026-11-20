@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Result, Verdict
-from airlock.pack import pack
-from airlock.verify import verify
+from superscrubber104.core.model import Result, Verdict
+from superscrubber104.pack import pack
+from superscrubber104.verify import verify
 from tests.helpers import NOW, make_site
 from tests.models_helpers import findings_of, inspect, make_policy
 from tests.software_fixtures import (

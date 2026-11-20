@@ -1,21 +1,21 @@
 # 34. Staging
 
-> **Status: implemented.** Spec: [§14](12-transfer-workflow-and-cli.md) step 6 (stage), [§16](12-transfer-workflow-and-cli.md) (`airlock stage`), [§11](11-os-patching.md) (patch staging, downgrade protection). Patch planning: [33](33-patching-and-feeds.md).
+> **Status: implemented.** Spec: [§14](12-transfer-workflow-and-cli.md) step 6 (stage), [§16](12-transfer-workflow-and-cli.md) (`superscrubber104 stage`), [§11](11-os-patching.md) (patch staging, downgrade protection). Patch planning: [33](33-patching-and-feeds.md).
 
 ```sh
-airlock verify bundle/ --policy policy.yaml --state /var/lib/airlock --key keys/receipt.key
-airlock stage bundle/ --policy policy.yaml --state /var/lib/airlock --key keys/receipt.key \
+superscrubber104 verify bundle/ --policy policy.yaml --state /var/lib/superscrubber104 --key keys/receipt.key
+superscrubber104 stage bundle/ --policy policy.yaml --state /var/lib/superscrubber104 --key keys/receipt.key \
     --target pypi=/srv/pypi --target models=/srv/models --target dnf=/srv/repos
-airlock patch stage bundle/ --inventory web-01.inventory.json --policy policy.yaml \
-    --state /var/lib/airlock --key keys/receipt.key --target dnf=/srv/repos
+superscrubber104 patch stage bundle/ --inventory web-01.inventory.json --policy policy.yaml \
+    --state /var/lib/superscrubber104 --key keys/receipt.key --target dnf=/srv/repos
 ```
 
 ## 34.1 Only what was accepted, exactly as it was verified
 
-1. The ledger must hold an **accepted receipt for exactly this manifest**, so `airlock verify --state` must have run first. This is checked before anything else.
+1. The ledger must hold an **accepted receipt for exactly this manifest**, so `superscrubber104 verify --state` must have run first. This is checked before anything else.
 2. `stage` verifies the bundle again with this side's policy and keys, **without** touching the ledger. The units it stages therefore come from this side's own analysis, never from the packer's. Multi-volume and delta bundles work as in verify (`--volume`, `--base`).
 3. The bundle is judged **as of the moment it was accepted**. Time alone does not undo an import: a bundle accepted last month can be staged today even though `transfer.maxBundleAge` would now refuse it at the door. A policy that has since changed its mind (a revoked key, a new rule, a removed waiver) does stop it.
-4. Every file is **re-hashed while it is copied**, to a `.airlock-partial` file, and compared with the manifest. It is fsynced and moved into place only if it matches, so a file changed between verification and staging never lands. A partial file left by an interrupted staging is replaced. Destinations are resolved and must stay inside the target directory.
+4. Every file is **re-hashed while it is copied**, to a `.superscrubber104-partial` file, and compared with the manifest. It is fsynced and moved into place only if it matches, so a file changed between verification and staging never lands. A partial file left by an interrupted staging is replaced. Destinations are resolved and must stay inside the target directory.
 5. Existing files are **never overwritten**. An identical file counts as already present; a different one is an error. Staging the same bundle twice is safe.
 6. The **stage report** is written to `<state>/stages/<time>-<bundle>/stage-report.json`, and a `stage` event goes into the ledger, signed with the receipt key (required when the policy pins one). The event records the bundle, the manifest digest, the digest of the report, the outcome and per-target counts.
 7. A staging that **fails part-way** (a full disk, a conflicting file) is recorded too, as `outcome: failed`, with what had already been copied and the reason in the report. Files already in place stay: they are verified content, and running `stage` again completes the job.
@@ -26,7 +26,7 @@ Exit codes: 0 staged; 2 for bad arguments; 3 when staging is refused (not accept
 
 ## 34.2 Targets
 
-airlock writes files and indexes. It never pushes to a registry or calls a service, because there is no network at runtime. Where the receiving tool must finish the job, the report says how.
+superscrubber104 writes files and indexes. It never pushes to a registry or calls a service, because there is no network at runtime. Where the receiving tool must finish the job, the report says how.
 
 | Target | What is staged | Layout | Next step printed |
 |---|---|---|---|
@@ -43,7 +43,7 @@ The stage report (`StageReport`) lists, per target, files copied and already pre
 
 ## 34.3 Patch staging and downgrade protection
 
-`airlock patch stage` is `stage` with one more check, made after verification and before anything is copied. Every RPM or Debian package in the bundle is compared with the host's inventory ([33.1](33-patching-and-feeds.md)). A package older than the installed one would roll a fix back, so staging is refused and the downgrades are listed. The inventory must be signed by a receipt key the policy pins, when it pins any. With `--allow-downgrade "<justification>"` it proceeds, and the justification and the downgrades are kept in the stage report, whose digest is in the ledger.
+`superscrubber104 patch stage` is `stage` with one more check, made after verification and before anything is copied. Every RPM or Debian package in the bundle is compared with the host's inventory ([33.1](33-patching-and-feeds.md)). A package older than the installed one would roll a fix back, so staging is refused and the downgrades are listed. The inventory must be signed by a receipt key the policy pins, when it pins any. With `--allow-downgrade "<justification>"` it proceeds, and the justification and the downgrades are kept in the stage report, whose digest is in the ledger.
 
 ## 34.4 Tests and limits
 

@@ -20,7 +20,7 @@ trust:
       validity: {validUntil: 2032-01-01}        # optional; also `revoked: true`
 ```
 
-A key is used only within its `scope` and its validity dates (`airlock/trust.py`). The archive key of one distribution can't vouch for another's packages, and a key pinned for repositories can't vouch for a loose tool download.
+A key is used only within its `scope` and its validity dates (`superscrubber104/trust.py`). The archive key of one distribution can't vouch for another's packages, and a key pinned for repositories can't vouch for a loose tool download.
 
 | Scope | Used for |
 |---|---|
@@ -33,7 +33,7 @@ A key is used only within its `scope` and its validity dates (`airlock/trust.py`
 
 ## 27.2 OpenPGP reader
 
-`airlock/formats/openpgp.py` reads and verifies OpenPGP (RFC 4880 / RFC 9580 v4) with `cryptography` only:
+`superscrubber104/formats/openpgp.py` reads and verifies OpenPGP (RFC 4880 / RFC 9580 v4) with `cryptography` only:
 
 * Keys: RSA, ECDSA (P-256/384/521), EdDSA (legacy algorithm 22 and Ed25519 algorithm 27), primary keys and subkeys. The fingerprint is computed, never trusted from the file.
 * Signatures: binary (type 0x00) and text (0x01, canonicalised to CRLF without trailing whitespace); detached, armored or binary; clear-signed documents (`InRelease`, Fedora-style `CHECKSUM`) with dash-escaping undone.
@@ -49,7 +49,7 @@ Validated against real AlmaLinux 9 `repomd.xml.asc` and RPMs (RSA 4096) and the 
 
 ## 27.3 RPM packages and databases
 
-`airlock/formats/rpm.py` reads the lead, the signature header and the main header. It never reads the cpio payload, except to hash it.
+`superscrubber104/formats/rpm.py` reads the lead, the signature header and the main header. It never reads the cpio payload, except to hash it.
 
 | Check | Rule | Class |
 |---|---|---|
@@ -60,7 +60,7 @@ Validated against real AlmaLinux 9 `repomd.xml.asc` and RPMs (RSA 4096) and the 
 | Install scriptlets (`%pre`, `%post`, triggers, ...) | `package.maintainer-scripts` (info) | policy |
 | The delivery also holds a newer version of the same package and architecture (RPM or Debian, by `rpm` or `dpkg` version ordering) | `package.superseded` (info) | policy |
 
-**What a signature covers.** A header signature covers the header, and the header records the payload digest, so the two checks together cover the whole package. That only holds when the header records a payload digest and it was checked. Packages built before rpm 4.14 record none: for those, a header signature says nothing about the payload. airlock then verifies the older signature over header and payload if the package has one. If it has none, the file earns **no** verification, and `package.digest-mismatch` is recorded as not assessed with that reason. A verified, fully covered package gets a `signature`-level verification naming the anchor, which the upstream trust check and the reports use like any other.
+**What a signature covers.** A header signature covers the header, and the header records the payload digest, so the two checks together cover the whole package. That only holds when the header records a payload digest and it was checked. Packages built before rpm 4.14 record none: for those, a header signature says nothing about the payload. superscrubber104 then verifies the older signature over header and payload if the package has one. If it has none, the file earns **no** verification, and `package.digest-mismatch` is recorded as not assessed with that reason. A verified, fully covered package gets a `signature`-level verification naming the anchor, which the upstream trust check and the reports use like any other.
 
 A package that cannot be read at all (truncated, damaged header) is **not assessed** for all four rules. It is not refused as altered: unreadable and altered are different findings, and a parser's failure must never be final.
 
@@ -72,15 +72,15 @@ Component: `pkg:rpm/<vendor>/<name>@<version>-<release>?arch=…&epoch=…`, wit
 
 ## 27.4 Debian packages
 
-`airlock/formats/deb.py` reads the `ar` archive and only its `control.tar.{gz,xz,zst}`. It records identity, dependencies and which maintainer scripts the package carries (`package.maintainer-scripts`).
+`superscrubber104/formats/deb.py` reads the `ar` archive and only its `control.tar.{gz,xz,zst}`. It records identity, dependencies and which maintainer scripts the package carries (`package.maintainer-scripts`).
 
 A `.deb` has no signature of its own. Its authenticity comes from the repository: the signed `InRelease` lists the hash of `Packages`, which lists the hash of every `.deb`. That chain is checked by the mirror assembler ([28](28-package-mirrors.md)).
 
-zstd control archives (Ubuntu since 21.10) need Python 3.14's `compression.zstd` or the optional `zstd` extra (`pip install 'airlock[zstd]'`, the `backports.zstd` package). Without either, identity comes from the file name and the scripts check is recorded as **not assessed**, never silently skipped. `deb_vercmp` orders versions exactly as `dpkg` does.
+zstd control archives (Ubuntu since 21.10) need Python 3.14's `compression.zstd` or the optional `zstd` extra (`pip install 'superscrubber104[zstd]'`, the `backports.zstd` package). Without either, identity comes from the file name and the scripts check is recorded as **not assessed**, never silently skipped. `deb_vercmp` orders versions exactly as `dpkg` does.
 
 ## 27.5 Checksum lists and detached signatures
 
-`airlock/handlers/upstream.py` handles any file, not just packages: ISO images, cloud images, drivers, firmware and tools.
+`superscrubber104/handlers/upstream.py` handles any file, not just packages: ISO images, cloud images, drivers, firmware and tools.
 
 * **Checksum lists**: `SHA256SUMS`, `SHA512SUMS`, `MD5SUMS`, `CHECKSUM`, `*-CHECKSUM` (text only: coreutils' `sha256sum` and `md5sum` binaries share the names), and one-line sidecars (`file.iso.sha256`, `lib.jar.sha1`, `file.md5`), which may hold a hash alone. Both GNU (`<hash>  name`) and BSD (`SHA256 (name) = <hash>`) lines are read; the algorithm comes from the line or the hash length. Every listed file present in the delivery is hashed and compared. A difference is `upstream.checksum-mismatch` and final. Listed files that are not shipped are counted, not flagged (vendors list every edition). **MD5** can show a difference, but a match earns no verification: it proves nothing.
 * **The list's signature**: clear-signed, or a sibling `.gpg`/`.asc`/`.sig`, verified with keys pinned for `file.checksums`. A verified list gives each matching file a `signature`-level verification. An unsigned list, or one whose signature cannot be tied to a pinned key, gives `checksum` level, since the list travelled with the content. Only the signed text of a clear-signed list is read.

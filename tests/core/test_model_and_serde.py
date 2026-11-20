@@ -3,9 +3,9 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from airlock.core.canonical import canonical_bytes, digest
-from airlock.core.errors import SerializationError
-from airlock.core.model import (
+from superscrubber104.core.canonical import canonical_bytes, digest
+from superscrubber104.core.errors import SerializationError
+from superscrubber104.core.model import (
     Analysis,
     Artifact,
     ArtifactRef,
@@ -35,8 +35,8 @@ from airlock.core.model import (
     Verification,
     summarize,
 )
-from airlock.core.rules import FindingFactory, Recorder
-from airlock.core.serde import from_data, to_data
+from superscrubber104.core.rules import FindingFactory, Recorder
+from superscrubber104.core.serde import from_data, to_data
 from tests.core.helpers import TOOL
 
 SHA = "a" * 64
@@ -312,7 +312,7 @@ def test_floats_and_naive_timestamps_are_rejected() -> None:
         (lambda d: d["entries"][0].update(size=True), "expected int"),
         (lambda d: d["entries"][0].update(entryType="device"), "not one of"),
         (lambda d: d["entries"][0].update(path="../../x"), "invalid segment"),
-        (lambda d: d.update(apiVersion="airlock/v9"), "apiVersion"),
+        (lambda d: d.update(apiVersion="superscrubber104/v9"), "apiVersion"),
     ],
 )
 def test_strict_decoding(mutate: object, message: str) -> None:

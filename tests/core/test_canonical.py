@@ -1,7 +1,7 @@
 import pytest
 
-from airlock.core.canonical import canonical_bytes, digest, jsonable
-from airlock.core.errors import SerializationError
+from superscrubber104.core.canonical import canonical_bytes, digest, jsonable
+from superscrubber104.core.errors import SerializationError
 
 
 def test_sorted_compact_utf8() -> None:

@@ -2,7 +2,7 @@
 
 > **Status: implemented.** Spec: [§10](10-vm-images.md) (VM images), [§13](13-checks-and-controls.md). Operator guide for the optional `qemu-img` plugin: [docs/scanners.md](../scanners.md).
 
-Disk images are the largest and most opaque things that cross. airlock reads their headers and metadata (`formats/disk.py`, `handlers/vm.py`) and never mounts them or runs anything from them. The format is always taken from the bytes, never from the name.
+Disk images are the largest and most opaque things that cross. superscrubber104 reads their headers and metadata (`formats/disk.py`, `handlers/vm.py`) and never mounts them or runs anything from them. The format is always taken from the bytes, never from the name.
 
 ## 32.1 Formats
 
@@ -26,7 +26,7 @@ A qcow2 named `.img` is normal: cloud images are distributed that way. A name th
 | `vm.image.unclean` | medium | qcow2 dirty or corrupt, VMDK unclean shutdown, VHDX log not replayed, VHD footer checksum wrong or saved state |
 | `vm.image.snapshots` | low | qcow2 internal snapshots: earlier states of the disk, including data deleted since |
 | `vm.image.contents` | not assessed | always: guest filesystems are never mounted. The reason says whether the image is encrypted or simply not inspected. A deep-inspection plugin (libguestfs in an appliance) is where guest packages, users, keys and models would come from (see limits) |
-| `vm.image.check` | medium | the `qemu-img` plugin disagrees with airlock's reading, or `qemu-img check` reports corruption or leaks; not assessed when the plugin is not configured |
+| `vm.image.check` | medium | the `qemu-img` plugin disagrees with superscrubber104's reading, or `qemu-img check` reports corruption or leaks; not assessed when the plugin is not configured |
 
 Each image is a `vm-image` unit with its format, size, dependencies, encryption and partitions, plus the Glance properties when metadata travels with it.
 
@@ -53,7 +53,7 @@ The output of `openstack image show -f json` saved beside the image (`<image>.js
 
 ## 32.5 The qemu-img plugin
 
-Optional and pinned like every scanner. It runs `qemu-img info` and `check` with the format given (`-f`, never probed) and `-U` (no locks), and compares their answers with airlock's. See [docs/scanners.md](../scanners.md).
+Optional and pinned like every scanner. It runs `qemu-img info` and `check` with the format given (`-f`, never probed) and `-U` (no locks), and compares their answers with superscrubber104's. See [docs/scanners.md](../scanners.md).
 
 ## 32.6 Validation, tests and limits
 

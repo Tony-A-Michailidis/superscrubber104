@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from airlock import bundle as layout
-from airlock.cli import main
-from airlock.core.model import Result, Verdict
-from airlock.pack import pack
-from airlock.verify import verify
-from airlock.volumes import check_volume, load_index
+from superscrubber104 import bundle as layout
+from superscrubber104.cli import main
+from superscrubber104.core.model import Result, Verdict
+from superscrubber104.pack import pack
+from superscrubber104.verify import verify
+from superscrubber104.volumes import check_volume, load_index
 from tests.helpers import NOW, Site, make_site
 from tests.models_helpers import make_policy
 from tests.software_fixtures import write

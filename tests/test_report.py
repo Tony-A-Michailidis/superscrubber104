@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from airlock.cli import main
-from airlock.core.controls import ControlCatalog
-from airlock.core.model import Result
-from airlock.pack import pack
-from airlock.report import FORMATS, Source, build_report, load_source, render
-from airlock.report.markdown import cell
-from airlock.report.model import Context
-from airlock.report.oscal import control_id
-from airlock.verify import verify
+from superscrubber104.cli import main
+from superscrubber104.core.controls import ControlCatalog
+from superscrubber104.core.model import Result
+from superscrubber104.pack import pack
+from superscrubber104.report import FORMATS, Source, build_report, load_source, render
+from superscrubber104.report.markdown import cell
+from superscrubber104.report.model import Context
+from superscrubber104.report.oscal import control_id
+from superscrubber104.verify import verify
 from tests.data_fixtures import embedding_model
 from tests.helpers import NOW, make_site
 from tests.models_helpers import inspect, make_policy
@@ -24,7 +24,7 @@ from tests.software_fixtures import docker_archive, wheel_bytes, wheel_name, wri
 
 @pytest.fixture(scope="module")
 def imported(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
-    """A packed bundle and the directory airlock verify wrote for it."""
+    """A packed bundle and the directory superscrubber104 verify wrote for it."""
     tmp = tmp_path_factory.mktemp("report")
     site = make_site(tmp / "site")
     delivery = write(

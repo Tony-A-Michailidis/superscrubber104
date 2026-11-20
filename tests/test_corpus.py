@@ -4,9 +4,9 @@ import json
 import zlib
 from pathlib import Path
 
-from airlock.core.model import Result, UnitKind
-from airlock.pack import pack
-from airlock.verify import verify
+from superscrubber104.core.model import Result, UnitKind
+from superscrubber104.pack import pack
+from superscrubber104.verify import verify
 from tests.data_fixtures import office_zip
 from tests.helpers import ENCLAVE, NOW, SOURCE, make_site
 from tests.models_helpers import findings_of, inspect, make_policy
@@ -102,7 +102,7 @@ def test_request_declares_the_corpus_for_pack_and_verify(tmp_path: Path) -> None
     site = make_site(tmp_path / "site")
     request = tmp_path / "request.yaml"
     request.write_text(
-        "apiVersion: airlock/v1alpha1\nkind: TransferRequest\n"
+        "apiVersion: superscrubber104/v1alpha1\nkind: TransferRequest\n"
         "metadata: {id: TR-KB-1, title: Knowledge base}\n"
         f"spec:\n  purpose: test\n  owner: {{name: Owner}}\n  source: {SOURCE}\n"
         f"  destination: {ENCLAVE}\n  direction: low-to-high\n  stream: kb\n"

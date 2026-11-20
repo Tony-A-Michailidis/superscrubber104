@@ -1,5 +1,5 @@
-"""airlock stage: only accepted bundles, re-hashed on copy, laid out for each receiving tool, and
-recorded in the ledger. Also airlock patch stage's downgrade protection."""
+"""superscrubber104 stage: only accepted bundles, re-hashed on copy, laid out for each receiving tool, and
+recorded in the ledger. Also superscrubber104 patch stage's downgrade protection."""
 
 import gzip
 import json
@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core import chainlog
-from airlock.core.model import Verdict
-from airlock.pack import pack
-from airlock.patch.inventory import InstalledPackage, Inventory, OsIdentity
-from airlock.patch.stage import downgrade_check
-from airlock.stage import StageError, stage
-from airlock.verify import Verified, verify
+from superscrubber104.core import chainlog
+from superscrubber104.core.model import Verdict
+from superscrubber104.pack import pack
+from superscrubber104.patch.inventory import InstalledPackage, Inventory, OsIdentity
+from superscrubber104.patch.stage import downgrade_check
+from superscrubber104.stage import StageError, stage
+from superscrubber104.verify import Verified, verify
 from tests.data_fixtures import embedding_model
 from tests.helpers import NOW, Site, make_site
 from tests.models_helpers import make_policy
@@ -146,7 +146,7 @@ def test_stage_rehashes_on_copy(tmp_path: Path, site: Site) -> None:
     out = tmp_path / "out"
     with pytest.raises(StageError, match="changed after it was verified"):
         _stage(site, bundle, state, {"npm": out}, check=tamper)
-    assert not list(out.rglob("*.tgz")) and not list(out.rglob("*.airlock-partial"))
+    assert not list(out.rglob("*.tgz")) and not list(out.rglob("*.superscrubber104-partial"))
 
 
 def test_stage_never_overwrites(tmp_path: Path, site: Site) -> None:
@@ -199,8 +199,8 @@ def test_patch_stage_downgrade_protection(
 def test_stage_cli(tmp_path: Path, site: Site) -> None:
     from click.testing import CliRunner
 
-    from airlock.cli import main
-    from airlock.core.signing import save_key
+    from superscrubber104.cli import main
+    from superscrubber104.core.signing import save_key
 
     bundle, state = _accepted(tmp_path, site)
     key = tmp_path / "receipt.key"
@@ -254,7 +254,7 @@ def test_stage_judges_the_bundle_as_of_its_acceptance(tmp_path: Path, site: Site
     bundle, state = _accepted(tmp_path, site)
     out = tmp_path / "late"
     out.mkdir()
-    (out / "windows11.0-kb5050001-x64.msu.airlock-partial").write_bytes(b"interrupted")
+    (out / "windows11.0-kb5050001-x64.msu.superscrubber104-partial").write_bytes(b"interrupted")
     months_later = NOW + timedelta(days=200)
     staged = stage(
         bundle,
@@ -266,14 +266,14 @@ def test_stage_judges_the_bundle_as_of_its_acceptance(tmp_path: Path, site: Site
     )
     assert staged.report.staged_at == months_later
     assert (out / "windows11.0-kb5050001-x64.msu").read_bytes() == b"MSCF pretend update"
-    assert not list(out.glob("*.airlock-partial"))
+    assert not list(out.glob("*.superscrubber104-partial"))
 
 
 def test_stage_cli_exit_codes(tmp_path: Path, site: Site) -> None:
     from click.testing import CliRunner
 
-    from airlock.cli import main
-    from airlock.core.signing import save_key
+    from superscrubber104.cli import main
+    from superscrubber104.core.signing import save_key
 
     bundle, state = _accepted(tmp_path, site)
     key = tmp_path / "receipt.key"

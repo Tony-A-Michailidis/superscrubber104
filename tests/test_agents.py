@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Severity
-from airlock.text import scan_text
+from superscrubber104.core.model import Severity
+from superscrubber104.text import scan_text
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import FAKE_TOKEN, write
 

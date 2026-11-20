@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Result, Severity
-from airlock.formats import gguf, safetensors
-from airlock.formats.pickle_scan import classify, scan
+from superscrubber104.core.model import Result, Severity
+from superscrubber104.formats import gguf, safetensors
+from superscrubber104.formats.pickle_scan import classify, scan
 from tests.model_fixtures import (
     keras_zip,
     npy_float_array,

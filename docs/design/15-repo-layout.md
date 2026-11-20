@@ -1,7 +1,7 @@
 # 19. Suggested repo layout
 
 ```
-airlock/
+superscrubber104/
   cli.py
   walker.py          # traversal, safe archive extraction, streaming hashing
   manifest.py  sbom.py  signing.py  policy.py  request.py  custody.py  volumes.py  delta.py

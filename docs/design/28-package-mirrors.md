@@ -14,7 +14,7 @@ Mirrors are the bulk of most recurring transfers, and the easiest place to slip 
 
 ## 28.1 The chain
 
-The mirror handler (`airlock/handlers/mirrors.py`) checks every link where it finds it:
+The mirror handler (`superscrubber104/handlers/mirrors.py`) checks every link where it finds it:
 
 * **Metadata.** The signature is checked against keys pinned for `repo.dnf` or `repo.apt` ([27.1](27-vendor-trust.md)). The outcome is one of verified, `repo.metadata.signature.invalid` (a pinned key that does not hold: final), `repo.metadata.signature.untrusted` (a key nobody pinned) or `repo.metadata.unsigned`. Every index it lists that is in the delivery is hashed and compared: `repo.metadata.digest-mismatch` is final. `Valid-Until` in the past is `repo.metadata.expired`.
 * **Index.** Every package it lists that is in the delivery is compared with the listed hash: `repo.content.digest-mismatch` is final. Large indexes are streamed (AlmaLinux AppStream's `primary.xml` is about 400 MB uncompressed). When `Packages` is shipped in several compressions, one is read; the others are recorded as `sameAs`. Each still has to match `Release`.
@@ -23,7 +23,7 @@ The mirror handler (`airlock/handlers/mirrors.py`) checks every link where it fi
 * **MD5-only indexes.** A listed MD5 can show that a package differs, but a match earns no verification.
 * **Limits.** Indexes are decompressed through a cap (8 GiB expanded). Metadata that does not parse is `repo.metadata.malformed`; the index beside it is then on its own and is reported as `repo.metadata.unlisted`.
 
-The repo-mirror assembler (`airlock/units/repo_mirror.py`) joins the links per root:
+The repo-mirror assembler (`superscrubber104/units/repo_mirror.py`) joins the links per root:
 
 * An index is **chained** when metadata in the same mirror lists it and the hash matched. A dnf or apt index that nothing vouches for is `repo.metadata.unlisted`.
 * A package listed by a chained index under verified metadata gets a `repo-metadata` verification at **signature** level. It names the anchor and signer, so `trust.minimumLevels` can require it, exactly as it can for a signed RPM. Any other listed package whose hash matched gets `repo-index` at **checksum** level. Chained indexes and the metadata file get the signature level too.
@@ -50,7 +50,7 @@ Each metadata file gives a **snapshot**: a repository identity and a time.
     mirrors: { default: 30d, apt: 14d }
   ```
 
-* **Rollback.** Unit attributes carry the snapshots, and so does the receipt (`Receipt.snapshots`). The receiving side's ledger therefore knows the newest snapshot it has accepted for each repository. On `airlock verify --state`, a snapshot older than that is `repo.metadata.rollback` (high): a replayed mirror would undo updates already imported. Without a ledger the check is recorded as not assessed.
+* **Rollback.** Unit attributes carry the snapshots, and so does the receipt (`Receipt.snapshots`). The receiving side's ledger therefore knows the newest snapshot it has accepted for each repository. On `superscrubber104 verify --state`, a snapshot older than that is `repo.metadata.rollback` (high): a replayed mirror would undo updates already imported. Without a ledger the check is recorded as not assessed.
 
 ## 28.3 Unit attributes
 
@@ -69,7 +69,7 @@ Checked against the real AlmaLinux 9 repository (`repomd.xml` and its signature,
 
 ## 28.5 Limits
 
-* Not read: `filelists`, `other`, `modules.yaml` and `updateinfo.xml` (the last is for `airlock patch`). Their hashes are still checked against `repomd.xml`. Also not read: apt `Contents`, `i18n` and `by-hash`.
+* Not read: `filelists`, `other`, `modules.yaml` and `updateinfo.xml` (the last is for `superscrubber104 patch`). Their hashes are still checked against `repomd.xml`. Also not read: apt `Contents`, `i18n` and `by-hash`.
 * `xml:base` in `primary.xml` (packages served from another host) is not followed.
 * zstd-compressed indexes need Python 3.14 or the `zstd` extra. Without either, the index is reported as malformed with the reason given.
 * Conda channels, Maven repositories, Go module proxies, Cargo registries and NuGet feeds are covered with their ecosystems ([29](29-more-ecosystems.md)).

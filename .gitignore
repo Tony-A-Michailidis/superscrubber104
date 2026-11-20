@@ -21,7 +21,7 @@ htmlcov/
 !tests/**/fixtures/**/*.pem
 /bundle/
 /out/
-/airlock-demo/
+/superscrubber104-demo/
 
 # Editors / OS
 .vscode/

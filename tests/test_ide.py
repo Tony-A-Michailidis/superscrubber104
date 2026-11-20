@@ -8,7 +8,7 @@ import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 
-from airlock.core.model import Result
+from superscrubber104.core.model import Result
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import write
 
@@ -84,7 +84,9 @@ def test_vscode_extensions(tmp_path: Path) -> None:
         busy_ref: {"extension": "example.busy", "missing": ["example.absent"]}
     }
     names = {
-        c.name for c in result.analysis.components if c.properties.get("airlock:ide") == "vscode"
+        c.name
+        for c in result.analysis.components
+        if c.properties.get("superscrubber104:ide") == "vscode"
     }
     assert names == {"example.busy", "example.base", "example.quiet"}
 

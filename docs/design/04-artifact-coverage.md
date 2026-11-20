@@ -23,7 +23,7 @@ Each category is a handler with the same interface: `detect()`, `inventory()` (i
 | **RAG and knowledge assets** | Vector DB snapshots (Chroma, Qdrant, Milvus, pgvector dumps, FAISS indexes), knowledge-graph exports (Neo4j dumps, Cypher scripts), document corpora, chunking/ingestion configs | Grouped into a `KnowledgeBase` ([§9](07-knowledge-bases-and-agents.md)): embedding-model consistency, corpus inventory, prompt-injection scan of corpus content, format safety (FAISS/pickle metadata) |
 | **Agent and MCP assets** | MCP servers (source, packages, container images), MCP client configs, agent skills (`SKILL.md` + scripts), agent hooks, slash commands, agent permission settings, system prompts, tool definitions | MCP tool lint, hook/skill script analysis (hooks execute shell), permission breadth, prompt-injection markers; feeds phase 2 |
 | **Datasets** | `.parquet`, `.jsonl`, `.csv`, Arrow, HF `datasets` folders, training/eval sets | Inventory (rows, schema, hash), licence, optional PII and secrets scan, ML-BOM dataset component |
-| **Evaluation assets** | Eval prompt sets, expected outputs, benchmark configs, previous results | Inputs to `airlock eval` ([§11](09-behavioural-verification.md)); pinned by hash |
+| **Evaluation assets** | Eval prompt sets, expected outputs, benchmark configs, previous results | Inputs to `superscrubber104 eval` ([§11](09-behavioural-verification.md)); pinned by hash |
 | **Notebooks** | `.ipynb` | Treated as source; **saved outputs flagged** (may carry data, tokens or paths); option to require stripped outputs |
 
 ## Developer environment and package ecosystems

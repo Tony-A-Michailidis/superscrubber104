@@ -19,7 +19,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa, utils
 
-from airlock.formats.openpgp import canonical_text
+from superscrubber104.formats.openpgp import canonical_text
 
 CREATED = 1_700_000_000  # 2023-11-14, before the tests' NOW
 _HASH = {8: ("sha256", hashes.SHA256), 10: ("sha512", hashes.SHA512), 2: ("sha1", hashes.SHA1)}

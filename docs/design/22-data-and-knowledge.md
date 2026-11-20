@@ -48,7 +48,7 @@ Validated against the public GSM8K test split (1319 rows, two columns, read corr
 | LlamaIndex | `docstore.json`, `index_store.json`, `*vector_store.json`, `graph_store.json` | node texts; the dimension from the first stored vector |
 | LanceDB, Qdrant | `*.lance` tables; `.snapshot` tar files | recognised and grouped; contents not read |
 
-**Corpus scan.** Stored document text goes straight into a model's context when it is retrieved. Chroma documents and LlamaIndex nodes are scanned with the same detector as prompts and tool descriptions (`airlock/text.py`) for instruction overrides, role reassignment, pseudo-markup aimed at the model, concealment, requests for secrets, and invisible characters. Findings name the document id. Up to 500,000 documents or 64 Mi characters are scanned per store; the rest are recorded as not assessed.
+**Corpus scan.** Stored document text goes straight into a model's context when it is retrieved. Chroma documents and LlamaIndex nodes are scanned with the same detector as prompts and tool descriptions (`superscrubber104/text.py`) for instruction overrides, role reassignment, pseudo-markup aimed at the model, concealment, requests for secrets, and invisible characters. Findings name the document id. Up to 500,000 documents or 64 Mi characters are scanned per store; the rest are recorded as not assessed.
 
 **The embedding model link.** Queries must be embedded by the model that built the index. After all units are assembled, `link_knowledge_bases` adds an `embedding-model` requirement to each knowledge base:
 
@@ -72,7 +72,7 @@ contents:
   - {name: policies-corpus, paths: ["rag/docs/**"], unit: knowledge-base}
 ```
 
-`airlock model inspect --corpus 'rag/docs/**'` and `airlock offline-check --corpus ...` do the same without a request. Every document under a corpus path (`.md`, `.txt`, `.html`, `.json`, `.csv`, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.pdf`, `.rtf`, ...), including documents inside archives there, is read the way a retrieval pipeline reads it (`airlock/formats/doctext.py`) and scanned like a vector store's stored text:
+`superscrubber104 model inspect --corpus 'rag/docs/**'` and `superscrubber104 offline-check --corpus ...` do the same without a request. Every document under a corpus path (`.md`, `.txt`, `.html`, `.json`, `.csv`, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.pdf`, `.rtf`, ...), including documents inside archives there, is read the way a retrieval pipeline reads it (`superscrubber104/formats/doctext.py`) and scanned like a vector store's stored text:
 
 | Rule | What |
 |---|---|

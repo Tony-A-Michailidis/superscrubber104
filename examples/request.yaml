@@ -1,5 +1,5 @@
 # Example transfer request: initial delivery of a small local RAG assistant.
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: TransferRequest
 metadata:
   id: TR-2026-0001

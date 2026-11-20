@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Severity
+from superscrubber104.core.model import Severity
 from tests.data_fixtures import REMOTE_TEMPLATE_RELS, elf_bytes, office_zip, pdf_bytes, pe_bytes
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import FAKE_TOKEN, docker_archive, write

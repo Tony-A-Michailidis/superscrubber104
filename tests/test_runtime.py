@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Result, Severity, UnitKind
-from airlock.versions import matches_declared, numeric, satisfies
+from superscrubber104.core.model import Result, Severity, UnitKind
+from superscrubber104.versions import matches_declared, numeric, satisfies
 from tests.data_fixtures import embedding_model
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import docker_archive, wheel_bytes, wheel_name, write
@@ -80,7 +80,7 @@ def test_one_environment_with_two_cuda_majors(tmp_path: Path) -> None:
 
 
 PROFILE = """\
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: RuntimeProfile
 metadata: {name: chat-gpu}
 spec:

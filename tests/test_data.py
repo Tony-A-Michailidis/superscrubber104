@@ -5,7 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from airlock.core.model import ComponentType, Severity, UnitKind
+from superscrubber104.core.model import ComponentType, Severity, UnitKind
 from tests.data_fixtures import (
     chroma_sqlite,
     embedding_model,

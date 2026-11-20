@@ -10,7 +10,7 @@ DEMO = Path(__file__).parent.parent / "examples" / "demo" / "demo.py"
 
 
 def test_readme_demo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    spec = importlib.util.spec_from_file_location("airlock_demo", DEMO)
+    spec = importlib.util.spec_from_file_location("superscrubber104_demo", DEMO)
     assert spec is not None and spec.loader is not None
     demo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(demo)

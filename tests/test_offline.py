@@ -5,8 +5,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from airlock.cli import main
-from airlock.core.model import Finding, Result, Severity
+from superscrubber104.cli import main
+from superscrubber104.core.model import Finding, Result, Severity
 from tests.models_helpers import findings_of, inspect
 from tests.software_fixtures import docker_archive, write
 

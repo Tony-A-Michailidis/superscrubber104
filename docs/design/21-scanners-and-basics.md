@@ -41,7 +41,7 @@ Rule: `document.active-content`. A document that cannot be read is not assessed.
 ## 21.2 Scanner plugins
 
 ```
-src/airlock/scanners/
+src/superscrubber104/scanners/
   base.py      pre-flight (find, hash, pin, version, data age), process runner, Scanner protocol
   clamav.py    clamscan: malware.detected
   trivy.py     trivy image / rootfs / sbom: vuln.component.known
@@ -65,7 +65,7 @@ src/airlock/scanners/
 
 A scanner that fails its pins is a hash mismatch on a tool that decides what crosses: if it could be waved through, a tampered scanner could wave anything through. That makes `plugin.integrity.mismatch` final, under the owner's rule for integrity failures (doc 17 §17.7).
 
-The process runner uses an argument list (no shell), no standard input, a private working directory as `HOME`/`TEMP`, and an environment stripped to the essentials, with every proxy variable pointing at a closed local port (`127.0.0.1:9`). That is defence in depth for the offline-first rule: airlock itself makes no network calls, and a scanner that tries fails at once instead of leaving the enclave.
+The process runner uses an argument list (no shell), no standard input, a private working directory as `HOME`/`TEMP`, and an environment stripped to the essentials, with every proxy variable pointing at a closed local port (`127.0.0.1:9`). That is defence in depth for the offline-first rule: superscrubber104 itself makes no network calls, and a scanner that tries fails at once instead of leaving the enclave.
 
 ### ClamAV
 
@@ -77,7 +77,7 @@ Every finding is placed on the artifact that carries the package:
 
 * each top-level container image (archive or OCI layout) → `trivy image --input`;
 * each top-level root filesystem directory → `trivy rootfs`;
-* every other component airlock identified with a language purl (pypi, npm, maven, golang, cargo, nuget, gem, composer, ...) and not already inside a scanned image or root filesystem → one CycloneDX SBOM → `trivy sbom`, with findings mapped back through `bom-ref` (or purl).
+* every other component superscrubber104 identified with a language purl (pypi, npm, maven, golang, cargo, nuget, gem, composer, ...) and not already inside a scanned image or root filesystem → one CycloneDX SBOM → `trivy sbom`, with findings mapped back through `bom-ref` (or purl).
 
 Always offline: `--skip-db-update --skip-java-db-update --offline-scan --cache-dir <database>`. A root filesystem inside a non-image archive cannot be given to Trivy without unpacking it, so its OS packages are not assessed. Severity is Trivy's; attributes `id`, `severity`, `package`, `ecosystem`, `fixed`, `kev`, `scanner` are there for policy `where` clauses. The finding's subject locator is `package@version`, which keeps waivers stable.
 
@@ -98,7 +98,7 @@ Files go to the tools in batches of 200, so command lines stay within Windows' l
 
 If no malware scanner ran, `malware.detected` is not assessed for the bundle, with the reason "no malware scanner is configured (plugins.clamav)". The same goes for `vuln.component.known`. Defaults make that a warning; `notAssessed: block` on the rule makes scanning mandatory.
 
-`airlock plugins check --policy P` runs the pre-flight only and prints each plugin's state.
+`superscrubber104 plugins check --policy P` runs the pre-flight only and prints each plugin's state.
 
 ## 21.3 Rules
 
@@ -116,7 +116,7 @@ If no malware scanner ran, `malware.detected` is not assessed for the bundle, wi
 
 ## 21.4 Known limits
 
-- **Not run against the real binaries here.** The ClamAV and Trivy plugins are tested with a stand-in process runner that answers as the tools do (argument lists, output formats, exit codes, database layouts as documented). Running a downloaded scanner binary was not possible in the development environment. Check a real installation with `airlock plugins check` and the steps in [docs/scanners.md](../scanners.md#check-the-integration) before relying on it.
+- **Not run against the real binaries here.** The ClamAV and Trivy plugins are tested with a stand-in process runner that answers as the tools do (argument lists, output formats, exit codes, database layouts as documented). Running a downloaded scanner binary was not possible in the development environment. Check a real installation with `superscrubber104 plugins check` and the steps in [docs/scanners.md](../scanners.md#check-the-integration) before relying on it.
 - **Secrets** are found by shape. A credential with no recognisable shape, assigned to an innocuous name, is missed; so is one split across lines or encoded. Git history inside git bundles is not searched (packfiles are compressed objects), and binaries are not searched.
 - **Executables:** Authenticode, codesign and ELF signatures are recorded as present or absent, not verified.
 - **PDF:** streams other than object streams are not inflated, and encrypted PDFs are not decrypted; obfuscated JavaScript inside an ordinary content stream would be missed by the keyword search (ClamAV covers known samples).

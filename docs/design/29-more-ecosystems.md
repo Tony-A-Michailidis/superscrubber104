@@ -2,7 +2,7 @@
 
 > **Status: implemented.** Spec: [§4](04-artifact-coverage.md) (software, language environments), [§3](03-core-concepts.md) (units). Python and npm, which came first, are in [20](20-software-and-agents.md).
 
-For a build or restore on the high side to work, everything the lockfile pins has to be in the delivery, and it has to be exactly what was pinned. Each ecosystem handler reads its lockfiles and its packages. One shared assembler, `airlock/units/locked_env.py`, then decides resolvability and hashes in the same way for all four.
+For a build or restore on the high side to work, everything the lockfile pins has to be in the delivery, and it has to be exactly what was pinned. Each ecosystem handler reads its lockfiles and its packages. One shared assembler, `superscrubber104/units/locked_env.py`, then decides resolvability and hashes in the same way for all four.
 
 ## 29.1 The shared model
 
@@ -59,6 +59,6 @@ Checked against `commons-io 2.16.1` from Maven Central: the jar and pom match th
 ## 29.6 Limits
 
 * `pom.xml` dependency lists are not resolved. Without a lockfile, versions come from parents, BOMs, properties and ranges, which needs a Maven resolver. Use Gradle locking or verification metadata, or ship a resolved repository with checksums.
-* NuGet package signatures and jar signatures are recorded, not verified. Both are CMS/PKCS#7 with vendor certificate chains and timestamps. That verification belongs with Authenticode in `airlock patch` (Windows), where the same machinery is needed.
+* NuGet package signatures and jar signatures are recorded, not verified. Both are CMS/PKCS#7 with vendor certificate chains and timestamps. That verification belongs with Authenticode in `superscrubber104 patch` (Windows), where the same machinery is needed.
 * `go.work`, `replace` directives pointing outside the delivery, and Cargo `[patch]` sections are not interpreted.
 * Conda, Ruby gems, PHP Composer and Swift are not covered yet. Their files are still inventoried, hashed and scanned as unclassified or generic archives.

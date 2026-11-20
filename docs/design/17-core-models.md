@@ -1,6 +1,6 @@
 # 17. Core data models and policy schema
 
-> **Status: implemented** in `src/airlock/core/` (revision 3, 2026-11-10).
+> **Status: implemented** in `src/superscrubber104/core/` (revision 3, 2026-11-10).
 > Revision 1 was reviewed against the brief and found to need structural changes. [§17.12](#1712-review-resolutions) lists each review item and what was done about it.
 > The bundle format and the verification procedure built on these models are in [18-bundle-and-verification.md](18-bundle-and-verification.md).
 
@@ -92,7 +92,7 @@ Approval(manifest_digest, finding, finding_digest, justification)   # what an ap
 ApprovalRecord(finding, key_id, holder, justification, counted, reason)   # what the verifier made of it
 ```
 
-- **Rule registry.** Every check is declared as a `RuleSpec` (id, version, title, severity, controls, rationale, remediation, `final`, tags). A finding can only be created from a registered rule, so no check ships without a control mapping. Built-in rules are in `airlock/catalog.py`.
+- **Rule registry.** Every check is declared as a `RuleSpec` (id, version, title, severity, controls, rationale, remediation, `final`, tags). A finding can only be created from a registered rule, so no check ships without a control mapping. Built-in rules are in `superscrubber104/catalog.py`.
 - **`RuleSpec.final`** marks the integrity and authenticity rules. A FAIL or ERROR of a final rule is always `block`, and the decision is itself marked `final`: no policy rule, default, waiver or approval changes it. The final rules are:
   - `integrity.*`: hash mismatch, missing or unexpected content, bad or missing signature, untrusted key, edited control files, broken custody log or ledger
   - `replay.bundle.*`, `replay.clock.regression`, `delta.base.unknown`: replayed, out-of-order or stale bundles, a clock that has gone backwards, a delta on an unknown base
@@ -109,7 +109,7 @@ ApprovalRecord(finding, key_id, holder, justification, counted, reason)   # what
 ## 17.6 Transfer request
 
 ```yaml
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: TransferRequest
 metadata: { id: TR-2026-0001, title: Initial delivery of example RAG assistant }
 spec:
@@ -144,7 +144,7 @@ spec:
 One document per side. Verify always uses the receiving side's own. A working example is [examples/policy.yaml](../../examples/policy.yaml).
 
 ```yaml
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: Policy
 metadata: { name: enclave-b-import, version: "2026.11.1" }
 
@@ -257,7 +257,7 @@ plugins:                          # optional external scanners; see doc 21 and d
   bandit:
     path: tools/bandit/bin/bandit
 
-runtimes:                         # model runtimes for airlock eval (doc 24); same fields as plugins
+runtimes:                         # model runtimes for superscrubber104 eval (doc 24); same fields as plugins
   llama-cpp:
     path: tools/llama.cpp/llama-cli
     binarySha256: "…"
@@ -303,7 +303,7 @@ The decision records which entry decided it (`rules[3]`, `waivers[0]`, `defaults
 | `block` from a rule with `overridable: false` | No | The site has chosen to make this blocker final |
 | `require-approval` | Yes: an **approval** | `approvals` distinct approvers (default 1), or the deciding rule's `approvals` |
 
-An approval or override is a signed `approved` event in the bundle's custody log, made with `airlock approve`. It counts only if all of these hold:
+An approval or override is a signed `approved` event in the bundle's custody log, made with `superscrubber104 approve`. It counts only if all of these hold:
 
 - It carries a **written justification**, which is part of what is signed.
 - The signer is pinned in the *verifying* side's policy with the `approve` role, within its validity window and not revoked.
@@ -332,7 +332,7 @@ Every approval the verifier looked at is kept in the assessment as an `ApprovalR
 - Ed25519, PKCS#8 and SubjectPublicKeyInfo PEM via `cryptography`. Private keys can be passphrase-encrypted. `Signer` is a protocol (`key_id`, `sign`), so a hardware token can replace a key file later.
 - Key id: `ed25519:<sha256 of the raw public key>`, never truncated.
 - Envelopes are **DSSE**. The bundle statement is an in-toto Statement; receipts are DSSE over the receipt document.
-- **One root of trust:** the receiving side's policy (`trust.signers`). `airlock verify --pubkey` is accepted only when the policy pins no pack signer, and is reported as `trust.signer.unpinned`.
+- **One root of trust:** the receiving side's policy (`trust.signers`). `superscrubber104 verify --pubkey` is accepted only when the policy pins no pack signer, and is reported as `trust.signer.unpinned`.
 - A pinned key is relied on only if it has the right role, is within its validity window, is not revoked, and (for packing) is allowed to sign for the bundle's source.
 - **Rotation** is done by editing `trust` (add the new key, set `validUntil` or `revoked` on the old). That changes the policy digest, and the next import records `policy.digest.changed` in the ledger with both digests.
 
@@ -359,14 +359,14 @@ Scanner:        name, capability, rules, binary_names; version(ready), data(poli
 - A handler that raises is reported as `inventory.handler.error`; the artifact is still recorded.
 - Assemblers work from the claims' facts alone, so units inside archives form like any other. They never reopen artifacts.
 - Checks that need the whole delivery (embedding-model links, offline settings, runtime compatibility, mirror content, extension dependencies) are plain functions called from `analysis.finish`, after every unit exists.
-- External tools implement `Scanner` (`airlock/scanners/base.py`) and run only after its pre-flight ([21](21-scanners-and-basics.md)).
-- Staging targets are functions in `airlock/stage.py` over the content `verify()` hands to its `use` callback ([34](34-staging.md)).
+- External tools implement `Scanner` (`superscrubber104/scanners/base.py`) and run only after its pre-flight ([21](21-scanners-and-basics.md)).
+- Staging targets are functions in `superscrubber104/stage.py` over the content `verify()` hands to its `use` callback ([34](34-staging.md)).
 - The first design also declared `BundleCheck`, `Plugin`, `Lookup` and `Stager` protocols. Nothing came to need them, and they were removed rather than left as unused promises.
 
 ## 17.11 Module map
 
 ```
-src/airlock/core/
+src/superscrubber104/core/
   model.py        enums and every data model above
   policy.py       policy loader, validator, evaluator; licence decisions
   request.py      transfer request loader
@@ -389,7 +389,7 @@ Status: **done** (implemented and tested), **shaped** (the model or schema has t
 | # | Review item | Status | What was done |
 |---|---|---|---|
 | 1 | Manifest mixed integrity with interpretation | done | `Manifest`/`Entry` vs `Analysis`/`Artifact`; policy and request digests moved to the signed statement |
-| 2 | No receiving-side state | done | Ledger of receipts (`airlock/ledger.py`), `verify --state`; signed `Inventory` document is 1c |
+| 2 | No receiving-side state | done | Ledger of receipts (`superscrubber104/ledger.py`), `verify --state`; signed `Inventory` document is 1c |
 | 3 | Signed statement could be replayed | done | `Provenance` (bundle id, time, source, destination, stream); policy `identity` and `transfer.maxBundleAge`; replay, ordering and clock checks |
 | 4 | Units had no relationships, digest or archive roots | done (model) | `Requirement`, `Unit.digest`, `Unit.root: ArtifactRef`; assemblers use them from task 5 |
 | 5 | Hostile names could not be recorded | done | `ArtifactRef.unsafe`, `escape_name`, `check_member_name` |
@@ -402,9 +402,9 @@ Status: **done** (implemented and tested), **shaped** (the model or schema has t
 | 12 | No record of upstream verification | done (model) | `Verification`, `TrustLevel`, `trust.minimum`; handlers fill it from task 5 |
 | 13 | Pinned keys too thin | done | Validity, revocation, holder, sources, fingerprints; full key ids; rotation logged via `policy.digest.changed` |
 | 14 | Policy unsigned; two trust roots | done / deferred | Policy is the single root, `--pubkey` only when nothing is pinned. A signature over the policy is deferred |
-| 15 | Approvals had no model | done | Owner's decision: integrity and authenticity failures are final; policy blockers are overridable by a quorum with a written justification; the packer cannot approve; overrides are signed evidence. `airlock approve`, `count_approvals`, `ApprovalRecord` (§17.7) |
+| 15 | Approvals had no model | done | Owner's decision: integrity and authenticity failures are final; policy blockers are overridable by a quorum with a written justification; the packer cannot approve; overrides are signed evidence. `superscrubber104 approve`, `count_approvals`, `ApprovalRecord` (§17.7) |
 | 16 | Scanner pinning incomplete | done | `path`, `database`, `binarySha256`, `files`, `minVersion`, `maxDbAge`; a mismatch is final (`plugin.integrity.mismatch`); see doc 21 |
-| 17 | Time | done | `Context.now` is a datetime; `replay.clock.regression` with a drift tolerance and a logged recovery path (`airlock ledger adjust-clock`); `replay.clock.skew` as an early warning ([18 §18.6](18-bundle-and-verification.md)) |
+| 17 | Time | done | `Context.now` is a datetime; `replay.clock.regression` with a drift tolerance and a logged recovery path (`superscrubber104 ledger adjust-clock`); `replay.clock.skew` as an early warning ([18 §18.6](18-bundle-and-verification.md)) |
 | 18 | Algorithm agility | done | Digest and key-id grammars accept other algorithms |
 | 19 | Runtime profile inputs | deferred to 1b | `Requirement` can already express "supplied by the high side" |
 | 20 | Patch documents and profiles | shaped / 1c | `profile` and `stream` on the request and statement |

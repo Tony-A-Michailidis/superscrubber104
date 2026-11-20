@@ -11,11 +11,11 @@ from typing import Any
 import pytest
 import yaml
 
-from airlock.archive import ZSTD
-from airlock.core.model import Result, TrustLevel, UnitKind
-from airlock.formats.sigstore import BundleError, parse_bundle
-from airlock.handlers.zarf import normalise_image
-from airlock.model_inspect import InspectResult
+from superscrubber104.archive import ZSTD
+from superscrubber104.core.model import Result, TrustLevel, UnitKind
+from superscrubber104.formats.sigstore import BundleError, parse_bundle
+from superscrubber104.handlers.zarf import normalise_image
+from superscrubber104.model_inspect import InspectResult
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import write
 from tests.zarf_fixtures import (
@@ -291,7 +291,7 @@ def test_stripped_signature_on_a_package_that_says_it_is_signed(tmp_path: Path) 
 
 
 def test_stripped_signature_and_flag_leave_an_unsigned_package(tmp_path: Path) -> None:
-    """Without a pinned minimum trust level, nothing marks this: airlock records it as unsigned,
+    """Without a pinned minimum trust level, nothing marks this: superscrubber104 records it as unsigned,
     with checksum-level trust, so ``trust.minimumLevels`` can require more."""
     members = build(signer=KeySigner())
     del members["zarf.bundle.sig"]

@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.errors import ConfigError
-from airlock.core.model import ArtifactRef, EntryType
-from airlock.hashing import hash_stream
-from airlock.walker import FileView, plan_inputs, scan
+from superscrubber104.core.errors import ConfigError
+from superscrubber104.core.model import ArtifactRef, EntryType
+from superscrubber104.hashing import hash_stream
+from superscrubber104.walker import FileView, plan_inputs, scan
 from tests.helpers import write_tree
 
 MKFIFO = vars(os).get("mkfifo")  # absent on Windows

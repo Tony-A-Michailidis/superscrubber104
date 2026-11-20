@@ -1,0 +1,407 @@
+"""Interpretation of content: run handlers on every artifact and look inside archives.
+
+Archives are inspected, never extracted. Member bytes are streamed through a hash; a member is
+kept only when something needs to read it again (a nested archive, or a handler that recognised
+it): in memory up to 1 MiB, otherwise in a private, sequentially named scratch file. Member names
+never touch the filesystem.
+
+A single budget covers one top-level artifact and everything nested inside it, and counts bytes
+actually produced rather than sizes declared in headers, so decompression bombs stop inspection
+at the policy limit however they are nested.
+"""
+
+import io
+import posixpath
+from collections import Counter
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import IO
+
+from superscrubber104 import __version__
+from superscrubber104.archive import (
+    ARCHIVE_ERRORS,
+    COMPRESSION,
+    UNSUPPORTED,
+    ZSTD_ADVICE,
+    Member,
+    decompress,
+    detect_format,
+    members,
+)
+from superscrubber104.catalog import ARCHIVE_MEMBER_RULES
+from superscrubber104.core.canonical import jsonable
+from superscrubber104.core.interfaces import ArtifactView, Context, Handler
+from superscrubber104.core.model import (
+    UNCLASSIFIED,
+    Artifact,
+    ArtifactRef,
+    Component,
+    EntryType,
+    Severity,
+    Subject,
+    ToolRef,
+    UnitClaim,
+    Verification,
+)
+from superscrubber104.core.paths import NameIssue, check_member_name, link_escapes
+from superscrubber104.core.policy import ArchiveLimits
+from superscrubber104.hashing import hash_stream
+from superscrubber104.walker import BytesView, FileView, HeadView
+
+TOOL = ToolRef("superscrubber104", __version__)
+_ROOTFS_DIRS = frozenset(
+    {"bin", "sbin", "etc", "usr", "lib", "lib64", "var", "opt", "root", "home"}
+)
+_HEAD = 65536
+_IN_MEMORY = 1 << 20  # archive members up to this size are kept in memory, not on disk
+_SUFFIXES = (".gz", ".bz2", ".xz", ".zst")
+
+
+class LimitExceeded(Exception):
+    def __init__(self, limit: str) -> None:
+        super().__init__(limit)
+        self.limit = limit
+        self.where: ArtifactRef | None = None
+
+
+class Budget:
+    """Expansion allowance for one top-level artifact and everything nested in it."""
+
+    def __init__(self, limits: ArchiveLimits, outer_size: int) -> None:
+        self.limits = limits
+        self.outer_size = max(outer_size, 1)
+        self.expanded = 0
+        self.members = 0
+
+    def member(self) -> None:
+        self.members += 1
+        if self.members > self.limits.max_members:
+            raise LimitExceeded("members")
+
+    def consume(self, count: int) -> None:
+        self.expanded += count
+        if self.expanded > self.limits.max_expanded_bytes:
+            raise LimitExceeded("expanded-size")
+        if (
+            self.expanded > self.limits.ratio_min_bytes
+            and self.expanded > self.outer_size * self.limits.max_ratio
+        ):
+            raise LimitExceeded("ratio")
+
+
+class _Prefixed:
+    """Replays bytes already read from a stream, then continues with the stream."""
+
+    def __init__(self, prefix: bytes, stream: IO[bytes]) -> None:
+        self._prefix = prefix
+        self._stream = stream
+
+    def read(self, n: int, /) -> bytes:
+        if self._prefix:
+            data, self._prefix = self._prefix[:n], self._prefix[n:]
+            return data
+        return self._stream.read(n)
+
+
+class _Spill:
+    """A write sink that stays in memory up to ``_IN_MEMORY`` bytes, then moves to a file."""
+
+    def __init__(self, new_file: Callable[[], Path]) -> None:
+        self.memory = io.BytesIO()
+        self.path: Path | None = None
+        self._new_file = new_file
+        self._file: IO[bytes] | None = None
+
+    def write(self, data: bytes) -> int:
+        if self._file is None and self.memory.tell() + len(data) > _IN_MEMORY:
+            self.path = self._new_file()
+            self._file = self.path.open("wb")
+            self._file.write(self.memory.getvalue())
+            self.memory = io.BytesIO()
+        target = self._file if self._file is not None else self.memory
+        return target.write(data)
+
+    def close(self) -> None:
+        if self._file is not None:
+            self._file.close()
+
+    def discard(self) -> None:
+        self.close()
+        if self.path is not None:
+            self.path.unlink(missing_ok=True)
+
+
+class Analyzer:
+    def __init__(self, ctx: Context, handlers: Sequence[Handler], workdir: Path) -> None:
+        self.ctx = ctx
+        self.handlers = tuple(handlers)
+        self.artifacts: list[Artifact] = []
+        self.claims: list[UnitClaim] = []
+        self.components: list[Component] = []
+        self.verifications: dict[ArtifactRef, list[Verification]] = {}
+        self._workdir = workdir
+        self._scratch = 0
+
+    # --- entry points ---------------------------------------------------------------------------
+
+    def analyze(self, view: ArtifactView) -> None:
+        """Analyse one top-level file and everything nested inside it."""
+        budget = Budget(self.ctx.policy.limits.archive, view.size)
+        try:
+            self._analyze(view, 0, budget, top=True)
+        except LimitExceeded as exc:
+            self.ctx.recorder.fail(
+                f"archive.limit.{exc.limit}",
+                Subject.of_artifact(view.ref),
+                tool=TOOL,
+                detail={
+                    "stoppedIn": (exc.where or view.ref).display,
+                    "expandedBytes": budget.expanded,
+                    "members": budget.members,
+                },
+            )
+
+    def record(
+        self, ref: ArtifactRef, entry_type: EntryType, link_target: str | None = None
+    ) -> None:
+        """Record something that is not a regular file (directory, link, special file)."""
+        self.artifacts.append(Artifact(ref, entry_type, link_target=link_target))
+
+    # --- one artifact ---------------------------------------------------------------------------
+
+    def _analyze(
+        self,
+        view: ArtifactView,
+        depth: int,
+        budget: Budget,
+        *,
+        top: bool = False,
+        mode: int | None = None,
+    ) -> None:
+        recorder = self.ctx.recorder
+        subject = Subject.of_artifact(view.ref)
+        found: list[tuple[int, str]] = []
+        tools: list[ToolRef] = []
+        metadata: dict[str, object] = {}
+        media_type: str | None = None
+        for handler in self.handlers:
+            tool = ToolRef(handler.name, handler.version)
+            try:
+                detection = handler.detect(view)
+                if detection is None:
+                    continue
+                inspection = handler.inspect(view, self.ctx)
+            except Exception as exc:  # a handler bug must never hide the artifact itself
+                recorder.error(
+                    "inventory.handler.error",
+                    subject,
+                    tool=tool,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                continue
+            tools.append(tool)
+            if inspection.kind != UNCLASSIFIED:
+                found.append((detection.confidence, inspection.kind))
+            metadata.update(inspection.metadata)
+            media_type = media_type or inspection.media_type
+            self.claims.extend(inspection.claims)
+            self.components.extend(inspection.components)
+            for ref, checks in inspection.verifications.items():
+                self.verifications.setdefault(ref, []).extend(checks)
+            for finding in inspection.findings:
+                recorder.record(finding)
+
+        fmt = detect_format(view.head(_HEAD))
+        kinds = [kind for _, kind in sorted(found, key=lambda item: -item[0])]
+        if fmt:
+            kinds.insert(0, f"archive.{fmt}")
+        self.artifacts.append(
+            Artifact(
+                ref=view.ref,
+                entry_type=EntryType.FILE,
+                size=view.size,
+                kinds=tuple(dict.fromkeys(kinds)) or (UNCLASSIFIED,),
+                hashes={"sha256": view.sha256} if view.sha256 else {},
+                mode=mode,
+                media_type=media_type,
+                handlers=tuple(tools),
+                metadata={key: jsonable(value) for key, value in metadata.items()},
+            )
+        )
+        if top:
+            if kinds:
+                recorder.passed("inventory.artifact.unclassified")
+            else:
+                recorder.fail("inventory.artifact.unclassified", subject, tool=TOOL)
+        if fmt:
+            self._archive(view, fmt, depth, budget)
+
+    # --- archives -------------------------------------------------------------------------------
+
+    def _archive(self, view: ArtifactView, fmt: str, depth: int, budget: Budget) -> None:
+        recorder = self.ctx.recorder
+        subject = Subject.of_artifact(view.ref)
+        if fmt in UNSUPPORTED:
+            recorder.not_assessed(
+                ARCHIVE_MEMBER_RULES,
+                subject,
+                tool=TOOL,
+                reason=f"{fmt} archives cannot be opened; contents were not inspected"
+                + (f" ({ZSTD_ADVICE})" if fmt == "zstd" else ""),
+            )
+            return
+        max_depth = self.ctx.policy.limits.archive.max_depth
+        if depth >= max_depth:
+            recorder.fail("archive.limit.depth", subject, tool=TOOL, detail={"maxDepth": max_depth})
+            return
+        try:
+            with view.open() as stream:
+                if fmt in COMPRESSION:
+                    self._compressed(view, fmt, stream, depth, budget)
+                else:
+                    self._container(view, fmt, stream, depth, budget)
+        except LimitExceeded as exc:
+            exc.where = exc.where or view.ref
+            raise
+        except ARCHIVE_ERRORS as exc:
+            recorder.fail(
+                "archive.format.unreadable",
+                subject,
+                tool=TOOL,
+                detail={"error": f"{type(exc).__name__}: {exc}"},
+            )
+
+    def _compressed(
+        self, view: ArtifactView, fmt: str, stream: IO[bytes], depth: int, budget: Budget
+    ) -> None:
+        """A gzip/bzip2/xz stream: a tar inside is read in place, anything else is one member."""
+        scratch = self._scratch_file()
+        try:
+            with scratch.open("wb") as sink:
+                inner = hash_stream(decompress(fmt, stream), sink=sink, on_bytes=budget.consume)
+            with scratch.open("rb") as expanded:
+                is_tar = detect_format(expanded.read(_HEAD)) == "tar"
+                if is_tar:
+                    expanded.seek(0)
+                    self._container(view, "tar", expanded, depth, budget)
+            if not is_tar:
+                ref = view.ref.child(_inner_name(view.ref))
+                self._analyze(FileView(ref, scratch, inner.size, inner.sha256), depth + 1, budget)
+        finally:
+            scratch.unlink(missing_ok=True)
+
+    def _container(
+        self, view: ArtifactView, fmt: str, stream: IO[bytes], depth: int, budget: Budget
+    ) -> None:
+        recorder = self.ctx.recorder
+        seen: set[str] = set()
+        failed: Counter[str] = Counter()
+        total = 0
+        top_level: set[str] = set()
+        # Decided once the whole archive is seen: whether it is a root filesystem.
+        deferred: list[tuple[str, ArtifactRef, dict[str, str]]] = []
+
+        def fail(rule: str, ref: ArtifactRef, **detail: str) -> None:
+            failed[rule] += 1
+            recorder.fail(rule, Subject.of_artifact(ref), tool=TOOL, detail=dict(detail))
+
+        for member in members(fmt, stream):
+            budget.member()
+            name, issue = check_member_name(member.name)
+            if not name:
+                continue  # the archive's own root directory
+            total += 1
+            top_level.add(name.split("/", 1)[0])
+            ref = view.ref.child(name, unsafe=issue is not None)
+            if issue is NameIssue.TRAVERSAL:
+                fail("archive.member.path-traversal", ref, name=name)
+            elif issue is NameIssue.UNSAFE:
+                fail("archive.member.unsafe-name", ref, name=name)
+            if name in seen:
+                fail("archive.member.duplicate", ref, name=name)
+                continue
+            seen.add(name)
+
+            kind = member.entry_type
+            if kind is EntryType.DIRECTORY:
+                self.artifacts.append(Artifact(ref, kind, mode=member.mode))
+            elif kind in (EntryType.SYMLINK, EntryType.HARDLINK):
+                target = member.link_target or ""
+                if link_escapes(member.name, target, hard=kind is EntryType.HARDLINK):
+                    deferred.append(("archive.member.link-escape", ref, {"target": target}))
+                self.artifacts.append(Artifact(ref, kind, link_target=target, mode=member.mode))
+            elif kind is EntryType.OTHER:
+                fail("archive.member.special-file", ref)
+                self.artifacts.append(Artifact(ref, kind, mode=member.mode))
+            elif member.encrypted or member.open is None:
+                fail("archive.member.encrypted", ref)
+                self.artifacts.append(Artifact(ref, kind, size=member.size, mode=member.mode))
+            else:
+                if member.mode is not None and member.mode & 0o6000:
+                    deferred.append(("archive.member.setuid", ref, {"mode": oct(member.mode)}))
+                self._member(ref, member, depth, budget)
+
+        # In a root filesystem (an image layer, a rootfs tarball) a link target resolves inside
+        # that filesystem, so it cannot escape it, and setuid binaries such as passwd are normal.
+        rootfs = len(top_level & _ROOTFS_DIRS) >= 3
+        for rule, ref, detail in deferred:
+            if rootfs and rule == "archive.member.link-escape":
+                continue
+            failed[rule] += 1
+            recorder.fail(
+                rule,
+                Subject.of_artifact(ref),
+                tool=TOOL,
+                detail=detail | ({"context": "root filesystem"} if rootfs else {}),
+                severity=Severity.LOW if rootfs else None,
+            )
+        for rule in ARCHIVE_MEMBER_RULES:
+            recorder.passed(rule, total - failed[rule])
+
+    def _member(self, ref: ArtifactRef, member: Member, depth: int, budget: Budget) -> None:
+        """Hash one member's bytes; keep a copy only if something will read it again.
+
+        Small members are kept in memory; larger ones spill to a private scratch file.
+        """
+        assert member.open is not None  # noqa: S101
+        sink: _Spill | None = None
+        try:
+            with member.open() as raw:
+                head = raw.read(_HEAD)
+                source = _Prefixed(head, raw)
+                if detect_format(head) is not None or self._recognised(ref, head):
+                    sink = _Spill(self._scratch_file)
+                    content = hash_stream(source, sink=sink, on_bytes=budget.consume)
+                    sink.close()
+                else:
+                    content = hash_stream(source, on_bytes=budget.consume)
+            view: ArtifactView
+            if sink is None:
+                view = HeadView(ref, head, content.size, content.sha256)
+            elif sink.path is None:
+                view = BytesView(ref, sink.memory.getvalue(), content.sha256)
+            else:
+                view = FileView(ref, sink.path, content.size, content.sha256)
+            self._analyze(view, depth + 1, budget, mode=member.mode)
+        finally:
+            if sink is not None:
+                sink.discard()
+
+    def _recognised(self, ref: ArtifactRef, head: bytes) -> bool:
+        probe = HeadView(ref, head, len(head), None)
+        return any(h.detect(probe) for h in self.handlers if UNCLASSIFIED not in h.kinds)
+
+    def _scratch_file(self) -> Path:
+        self._scratch += 1
+        return self._workdir / f"{self._scratch:08d}.bin"
+
+
+def _inner_name(ref: ArtifactRef) -> str:
+    """Name for the single stream inside ``x.gz``: ``x``, or ``data`` if that is not usable."""
+    if ref.unsafe:
+        return "data"
+    name = posixpath.basename((ref.path, *ref.member)[-1])
+    for suffix in _SUFFIXES:
+        if name.lower().endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)]
+    return "data"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Result
+from superscrubber104.core.model import Result
 from tests.data_fixtures import (
     chroma_sqlite,
     elf_bytes,

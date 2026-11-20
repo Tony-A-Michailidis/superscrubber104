@@ -17,4 +17,4 @@ A model crosses as a **complete, self-consistent unit**, never as loose weight f
 - **Provenance:** publisher checksums verified; OpenSSF model-signing (Sigstore-based) signatures verified when present; conversion history recorded (e.g. "converted from PyTorch to safetensors by X with tool Y v Z").
 - **Target compatibility:** the runtime(s) the package is intended for (link to a `RuntimeProfile`).
 
-`airlock model inspect <path>` produces this record standalone. `airlock model convert` is a **stretch goal** (pickle → safetensors in a sandboxed plugin), since conversion itself requires loading the unsafe format.
+`superscrubber104 model inspect <path>` produces this record standalone. `superscrubber104 model convert` is a **stretch goal** (pickle → safetensors in a sandboxed plugin), since conversion itself requires loading the unsafe format.

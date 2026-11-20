@@ -1,8 +1,8 @@
 # Scanners: ClamAV, Trivy, Semgrep, Bandit, qemu-img, osslsigncode and the CISA KEV feed
 
-airlock works without any external scanner. Its own checks cover integrity, model formats, packages, agents, secrets and active content. Two questions need a scanner and a database that changes every day:
+superscrubber104 works without any external scanner. Its own checks cover integrity, model formats, packages, agents, secrets and active content. Two questions need a scanner and a database that changes every day:
 
-| Question | Plugin | What airlock records without it |
+| Question | Plugin | What superscrubber104 records without it |
 |---|---|---|
 | Is there known malware in the delivery? | **ClamAV** (`clamscan`) | `malware.detected`: *not assessed* |
 | Do the packages and images have known vulnerabilities? | **Trivy** | `vuln.component.known`: *not assessed* |
@@ -18,11 +18,11 @@ rules:
     notAssessed: block      # a delivery that was not scanned does not pass
 ```
 
-This guide covers getting each tool, checking that it is genuine, carrying it to the disconnected side, and configuring airlock to use it.
+This guide covers getting each tool, checking that it is genuine, carrying it to the disconnected side, and configuring superscrubber104 to use it.
 
-## How airlock treats a scanner
+## How superscrubber104 treats a scanner
 
-Scanners cross the gap like everything else, and airlock does not trust them either. Before it lets a scanner see any content, airlock:
+Scanners cross the gap like everything else, and superscrubber104 does not trust them either. Before it lets a scanner see any content, superscrubber104:
 
 1. finds the binary at the path the policy gives. Nothing is picked up from `PATH` unless the policy leaves out `path`.
 2. hashes the binary and every pinned database file, and compares them with `binarySha256` and `files`. A mismatch is `plugin.integrity.mismatch`. It is **final**, like a bundle hash mismatch: the scanner does not run, and no approval overrides it.
@@ -34,7 +34,7 @@ When a scanner runs, it gets an argument list (never a shell), no standard input
 
 Every assessment records each plugin's version, binary hash, database version and age, and whether it was pinned. The evidence states which scanner build and database produced each result.
 
-`airlock plugins check --policy policy.yaml` runs steps 1 to 5 and reports the result without scanning anything. Run it after every installation or update.
+`superscrubber104 plugins check --policy policy.yaml` runs steps 1 to 5 and reports the result without scanning anything. Run it after every installation or update.
 
 ## ClamAV
 
@@ -61,7 +61,7 @@ cvd update
 
 `freshclam --datadir ./clamav-db` also works. Either way you end up with a directory of `.cvd` / `.cld` files.
 
-ClamAV checks each CVD's digital signature from Cisco Talos when it loads it. That is the upstream layer of trust. airlock adds the transit layer (your pins and your bundle signature).
+ClamAV checks each CVD's digital signature from Cisco Talos when it loads it. That is the upstream layer of trust. superscrubber104 adds the transit layer (your pins and your bundle signature).
 
 **Your own rules.** ClamAV loads YARA rules (`.yar`, `.yara`) and its own signature formats (`.hdb`, `.ndb`, `.ldb`, ...) from the same directory. Put site rules there and pin them like the CVDs.
 
@@ -72,7 +72,7 @@ plugins:
   clamav:
     required: true
     path: tools/clamav/clamscan          # clamscan.exe on Windows; relative to the policy file
-    database: tools/clamav/db            # always given: airlock never uses the host's own
+    database: tools/clamav/db            # always given: superscrubber104 never uses the host's own
     binarySha256: "…"
     files:
       main.cvd: "…"
@@ -82,14 +82,14 @@ plugins:
     maxDbAge: 7d
 ```
 
-airlock runs, once per delivery:
+superscrubber104 runs, once per delivery:
 
 ```
 clamscan --database=<database> --no-summary --stdout --max-filesize=4000M --max-scansize=4000M
          --alert-exceeds-max=yes --file-list=<list of top-level files> [args...]
 ```
 
-ClamAV looks inside archives itself. A file or archive that exceeds ClamAV's own limits (`Heuristics.Limits.Exceeded.*`) is recorded as *not assessed*, not as clean. Files over 4000 MiB, which ClamAV cannot scan, are recorded the same way. In practice these are large model shards, which airlock's own format parsers check for structure and embedded code.
+ClamAV looks inside archives itself. A file or archive that exceeds ClamAV's own limits (`Heuristics.Limits.Exceeded.*`) is recorded as *not assessed*, not as clean. Files over 4000 MiB, which ClamAV cannot scan, are recorded the same way. In practice these are large model shards, which superscrubber104's own format parsers check for structure and embedded code.
 
 ## Trivy
 
@@ -106,7 +106,7 @@ trivy image --download-db-only --cache-dir ./trivy-cache
 trivy image --download-java-db-only --cache-dir ./trivy-cache   # only if you scan Java
 ```
 
-The result is `trivy-cache/db/trivy.db` and `trivy-cache/db/metadata.json`, plus `trivy-cache/java-db/` if you fetched the Java database. airlock reads the database's age from `metadata.json` (`UpdatedAt`).
+The result is `trivy-cache/db/trivy.db` and `trivy-cache/db/metadata.json`, plus `trivy-cache/java-db/` if you fetched the Java database. superscrubber104 reads the database's age from `metadata.json` (`UpdatedAt`).
 
 ### Configure
 
@@ -125,13 +125,13 @@ plugins:
     timeout: 1h
 ```
 
-What airlock asks Trivy to scan, so that every finding lands on the file that carries the package:
+What superscrubber104 asks Trivy to scan, so that every finding lands on the file that carries the package:
 
 | Content | Command |
 |---|---|
 | Each container image (`docker save` or OCI archive, OCI layout directory) | `trivy image --input <image>` |
 | Each root filesystem that is a directory of the delivery (has `etc/os-release`) | `trivy rootfs <directory>` |
-| Every other package airlock identified (wheels, sdists, installed Python and npm packages, npm tarballs, ...) | `trivy sbom <CycloneDX file airlock writes>` |
+| Every other package superscrubber104 identified (wheels, sdists, installed Python and npm packages, npm tarballs, ...) | `trivy sbom <CycloneDX file superscrubber104 writes>` |
 
 Each command also gets `--cache-dir <database> --skip-db-update --skip-java-db-update --offline-scan --scanners vuln --format json --quiet`. Packages appear in the SBOM only when they are in the delivery. A lockfile entry with no distribution beside it is reported as unresolvable instead (it would need the network on the high side).
 
@@ -149,7 +149,7 @@ rules:
 
 ## CISA Known Exploited Vulnerabilities
 
-The KEV catalogue is a JSON file published by CISA at <https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json>. It is data, not a program: airlock reads it and marks each vulnerability finding `kev=true` or `kev=false` (matching CVE aliases too). Its age is taken from its `dateReleased`.
+The KEV catalogue is a JSON file published by CISA at <https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json>. It is data, not a program: superscrubber104 reads it and marks each vulnerability finding `kev=true` or `kev=false` (matching CVE aliases too). Its age is taken from its `dateReleased`.
 
 ```yaml
 plugins:
@@ -167,7 +167,7 @@ Semgrep is a Python package: `python -m pip install semgrep==<version>` into a d
 
 ### Get the rules (connected side)
 
-airlock only ever gives Semgrep a local rules directory; it never lets it fetch rules from a registry. Pick the rule sets you trust (for example the open-source `semgrep-rules` repository, or your own), copy the `.yml`/`.yaml` files into one directory, and pin every file. A rule file in that directory that the policy does not pin is refused.
+superscrubber104 only ever gives Semgrep a local rules directory; it never lets it fetch rules from a registry. Pick the rule sets you trust (for example the open-source `semgrep-rules` repository, or your own), copy the `.yml`/`.yaml` files into one directory, and pin every file. A rule file in that directory that the policy does not pin is refused.
 
 ### Configure
 
@@ -182,7 +182,7 @@ plugins:
     timeout: 1h
 ```
 
-airlock runs `semgrep scan --config <rules> --json --output <file> --metrics=off --disable-version-check --quiet [args...] <files...>` over the delivery's own top-level source files, scripts, MCP servers, agent hooks and model custom code, in batches. Third-party code under `site-packages`, `node_modules` and virtual environments is left out; the vulnerability scan covers it.
+superscrubber104 runs `semgrep scan --config <rules> --json --output <file> --metrics=off --disable-version-check --quiet [args...] <files...>` over the delivery's own top-level source files, scripts, MCP servers, agent hooks and model custom code, in batches. Third-party code under `site-packages`, `node_modules` and virtual environments is left out; the vulnerability scan covers it.
 
 ## Bandit (static analysis, Python)
 
@@ -197,7 +197,7 @@ plugins:
     args: ["--skip", "B101"]               # optional: your site's choices
 ```
 
-airlock runs `bandit -f json -q -o <file> [args...] <files...>` over the same first-party Python files. Bandit's severity is used, lowered one step when Bandit reports low confidence.
+superscrubber104 runs `bandit -f json -q -o <file> [args...] <files...>` over the same first-party Python files. Bandit's severity is used, lowered one step when Bandit reports low confidence.
 
 Static-analysis findings are `sast.finding` at the severity the tool reports. Many sites treat them as a review item rather than a blocker:
 
@@ -209,7 +209,7 @@ rules:
 
 ## qemu-img (VM disk images)
 
-airlock reads disk headers itself (doc 32). `qemu-img` adds an independent reading and a consistency check. It is optional: without it, `vm.image.check` is recorded as not assessed whenever the delivery holds a disk image.
+superscrubber104 reads disk headers itself (doc 32). `qemu-img` adds an independent reading and a consistency check. It is optional: without it, `vm.image.check` is recorded as not assessed whenever the delivery holds a disk image.
 
 Install the distribution package on the connected side (`qemu-utils` on Ubuntu, `qemu-img` on AlmaLinux) or use a static build. Pin the binary:
 
@@ -221,7 +221,7 @@ plugins:
     minVersion: "7.0"
 ```
 
-For every top-level disk image airlock runs `qemu-img info --output=json -U -f <format> <file>` and, for formats qemu can check (qcow2, VHDX), `qemu-img check --output=json -U -f <format> <file>`. The format is always passed explicitly, so qemu never probes it, which is the format-confusion attack doc 32 guards against. `-U` takes no locks. Neither command writes to the image. Any difference from airlock's reading (virtual size, backing file, dirty or corrupt flags, encryption) or any corruption or leak is `vm.image.check`.
+For every top-level disk image superscrubber104 runs `qemu-img info --output=json -U -f <format> <file>` and, for formats qemu can check (qcow2, VHDX), `qemu-img check --output=json -U -f <format> <file>`. The format is always passed explicitly, so qemu never probes it, which is the format-confusion attack doc 32 guards against. `-U` takes no locks. Neither command writes to the image. Any difference from superscrubber104's reading (virtual size, backing file, dirty or corrupt flags, encryption) or any corruption or leak is `vm.image.check`.
 
 `qemu-img` parses untrusted input, like any scanner. Keep it current and pinned.
 
@@ -238,18 +238,18 @@ plugins:
     files: { roots.pem: "…", tsa-roots.pem: "…" }
 ```
 
-airlock runs `osslsigncode verify -in <file> -CAfile roots.pem [-TSA-CAfile tsa-roots.pem]` on every top-level `.msu`, `.cab`, `.msi`, `.exe`, `.dll`, `.sys`, `.msix`, `.appx` and PE file. A digest mismatch is `authenticode.signature.invalid` (final). A signature that does not chain to your roots is `authenticode.signature.untrusted`. No signature is `authenticode.signature.missing`.
+superscrubber104 runs `osslsigncode verify -in <file> -CAfile roots.pem [-TSA-CAfile tsa-roots.pem]` on every top-level `.msu`, `.cab`, `.msi`, `.exe`, `.dll`, `.sys`, `.msix`, `.appx` and PE file. A digest mismatch is `authenticode.signature.invalid` (final). A signature that does not chain to your roots is `authenticode.signature.untrusted`. No signature is `authenticode.signature.missing`.
 
-Output with no verdict (a crash, a file type it cannot read) is recorded as not assessed. This plugin and `qemu-img` have been tested here with stand-ins for the binaries only: before relying on either, run `airlock plugins check`, then verify one known-good and one deliberately altered file with your pinned build and confirm the findings.
+Output with no verdict (a crash, a file type it cannot read) is recorded as not assessed. This plugin and `qemu-img` have been tested here with stand-ins for the binaries only: before relying on either, run `superscrubber104 plugins check`, then verify one known-good and one deliberately altered file with your pinned build and confirm the findings.
 
 ## Carrying the scanners across
 
-Scanners and their databases are content like any other, so move them with airlock:
+Scanners and their databases are content like any other, so move them with superscrubber104:
 
-1. On the connected side, put the binaries, the ClamAV signature directory, the Trivy cache and the KEV file in one directory, and `airlock pack` it as its own bundle. Its signature and the receiving ledger then record exactly which scanner kit crossed, and when.
-2. On the disconnected side, `airlock verify` the bundle and install its contents where the policy points.
-3. Update the pins in the policy (`airlock plugins check` prints the binary hash; use `sha256sum` or `Get-FileHash` for the database files) and roll the policy out through your normal change process. Policy changes are logged as `policy.digest.changed`.
-4. Run `airlock plugins check --policy policy.yaml`. It should report every plugin as `ready`.
+1. On the connected side, put the binaries, the ClamAV signature directory, the Trivy cache and the KEV file in one directory, and `superscrubber104 pack` it as its own bundle. Its signature and the receiving ledger then record exactly which scanner kit crossed, and when.
+2. On the disconnected side, `superscrubber104 verify` the bundle and install its contents where the policy points.
+3. Update the pins in the policy (`superscrubber104 plugins check` prints the binary hash; use `sha256sum` or `Get-FileHash` for the database files) and roll the policy out through your normal change process. Policy changes are logged as `policy.digest.changed`.
+4. Run `superscrubber104 plugins check --policy policy.yaml`. It should report every plugin as `ready`.
 
 The very first scanner kit is a bootstrap case: verify it by hand, using the publisher's signatures as above, before you trust it to verify anything else.
 
@@ -259,10 +259,10 @@ Databases change daily and binaries change monthly. Choose `maxDbAge` to match h
 
 After configuring, check that each scanner actually reports:
 
-- **ClamAV:** add a site signature for a harmless file to the database directory (an `.hdb` line is `md5:size:name`), pin it, and inspect a directory containing that file. You should get one `malware.detected` finding with your signature's name. Avoid the EICAR test file on workstations: endpoint protection will usually quarantine it before airlock sees it.
+- **ClamAV:** add a site signature for a harmless file to the database directory (an `.hdb` line is `md5:size:name`), pin it, and inspect a directory containing that file. You should get one `malware.detected` finding with your signature's name. Avoid the EICAR test file on workstations: endpoint protection will usually quarantine it before superscrubber104 sees it.
 - **Trivy:** inspect a deliberately old image or wheel (for example a release of a popular library with a published CVE) and check that `vuln.component.known` findings appear on that file.
 
 ```sh
-airlock plugins check --policy policy.yaml
-airlock model inspect ./test-delivery --policy policy.yaml
+superscrubber104 plugins check --policy policy.yaml
+superscrubber104 model inspect ./test-delivery --policy policy.yaml
 ```

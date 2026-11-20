@@ -1,6 +1,6 @@
 # Demo: sample output
 
-What `python examples/demo/demo.py ~/airlock-demo` printed under WSL on AlmaLinux 10 with Python 3.12. The output is unedited, except that the working directory is shown as `/home/user/airlock-demo`. Key ids and some finding ids change from run to run. The rule count changes as rules are added.
+What `python examples/demo/demo.py ~/superscrubber104-demo` printed under WSL on AlmaLinux 10 with Python 3.12. The output is unedited, except that the working directory is shown as `/home/user/superscrubber104-demo`. Key ids and some finding ids change from run to run. The rule count changes as rules are added.
 
 What happens, in brief:
 1. The low side packs a delivery, and the high side accepts it.
@@ -10,20 +10,20 @@ What happens, in brief:
 The hash mismatch and the undeclared files are final, so no policy or approval can override them. The pickle is found by reading its opcodes, never by loading it. Scanners the demo does not configure are reported as not assessed rather than left out. [The quick start](../../docs/quickstart-wsl.md) explains how to run it. For a report on a real delivery of public projects (3.5 GB), see [real-delivery.md](real-delivery.md).
 
 ```text
-Working in /home/user/airlock-demo
+Working in /home/user/superscrubber104-demo
 
 == 1. Keys: the build pipeline's packing key ==
 
-$ airlock keygen -o keys --name pack --holder build-pipeline
-  key id: ed25519:00c143f161be2c23bcfda5a4522cc87d02657b16c2c47780c68ccc6b09ae1018
+$ superscrubber104 keygen -o keys --name pack --holder build-pipeline
+  key id: ed25519:5583e898a8ce840e7537eb055f162ec699f9746035b568717debc665a48fe97b
   
-  To trust this key, add it to the receiving side's policy:
+  To trust this key, add it to the receiving side's policy (publicKey is relative to the policy file):
   ... (9 more lines)
   [exit 0]
 
 == 2. Low side: pack the delivery ==
 
-$ airlock pack delivery --request request.yaml --key keys/pack.key --policy low/policy.yaml -o bundle
+$ superscrubber104 pack delivery --request request.yaml --key keys/pack.key --policy low/policy.yaml -o bundle
   WARN            kb.embedding-model.unrecorded  [e63d460f69e659dc]
                   knowledge-base:rag/docs: Knowledge base does not record which embedding model built it
   WARN            not assessed: malware.detected  [f6490e189d646738]
@@ -35,13 +35,13 @@ $ airlock pack delivery --request request.yaml --key keys/pack.key --policy low/
   
   62 of 212 rules exercised, 255 checks passed; findings: 0 block, 0 need approval, 4 warn, 1 allowed
   verdict: PASSED
-  manifest: sha256:7ede3a432467008d951c1d14d24605ccb08aa6e4f5abe3ead889d812cd10ab9c
+  manifest: sha256:1c8d11df42dc26459e367a9bcf6f60f65f149fe31b2b076b55b4dbd448c61009
   ... (1 more lines)
   [exit 0]
 
 == 3. High side: verify the bundle as it arrived ==
 
-$ airlock verify bundle --policy high/policy.yaml --state high/state --out import-1
+$ superscrubber104 verify bundle --policy high/policy.yaml --state high/state --out import-1
   WARN            kb.embedding-model.unrecorded  [e63d460f69e659dc]
                   knowledge-base:rag/docs: Knowledge base does not record which embedding model built it
   WARN            not assessed: malware.detected  [f6490e189d646738]
@@ -57,15 +57,15 @@ $ airlock verify bundle --policy high/policy.yaml --state high/state --out impor
   ... (3 more lines)
   [exit 0]
 
-$ airlock report import-1 --format html -o import-1/report.html
+$ superscrubber104 report import-1 --format html -o import-1/report.html
   wrote:    import-1/report.html
   [exit 0]
 
-$ airlock report import-1 --format cyclonedx -o import-1/sbom.cdx.json
+$ superscrubber104 report import-1 --format cyclonedx -o import-1/sbom.cdx.json
   wrote:    import-1/sbom.cdx.json
   [exit 0]
 
-$ airlock report import-1 --format oscal -o import-1/oscal.json
+$ superscrubber104 report import-1 --format oscal -o import-1/oscal.json
   wrote:    import-1/oscal.json
   [exit 0]
 
@@ -76,7 +76,7 @@ $ airlock report import-1 --format oscal -o import-1/oscal.json
 
 == 5. High side: verify the tampered bundle ==
 
-$ airlock verify bundle --policy high/policy.yaml --state high/state --out import-2
+$ superscrubber104 verify bundle --policy high/policy.yaml --state high/state --out import-2
   REFUSE          integrity.entry.unexpected  [28acb79bd69f8e44]
                   app/patch-notes.txt: Payload contains content that is not in the manifest
   REFUSE          integrity.entry.unexpected  [24ac6f7ab16e6160]
@@ -108,11 +108,11 @@ $ airlock verify bundle --policy high/policy.yaml --state high/state --out impor
   wrote:    import-2/receipt.json
   [exit 3]
 
-$ airlock report import-2 --format md -o import-2/report.md
+$ superscrubber104 report import-2 --format md -o import-2/report.md
   wrote:    import-2/report.md
   [exit 0]
 
-$ airlock report import-2 --format html -o import-2/report.html
+$ superscrubber104 report import-2 --format html -o import-2/report.html
   wrote:    import-2/report.html
   [exit 0]
 
@@ -122,6 +122,6 @@ $ airlock report import-2 --format html -o import-2/report.html
   pickle payload   caught: model.pickle.dangerous-import on models/tiny-chat/training_args.bin
   clean import accepted (exit 0); tampered import refused (exit 3)
   and the ledger noticed the same signed bundle arriving a second time
-  reports: /home/user/airlock-demo/import-1/ and /home/user/airlock-demo/import-2/
+  reports: /home/user/superscrubber104-demo/import-1/ and /home/user/superscrubber104-demo/import-2/
 ```
 

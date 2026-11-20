@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from airlock.archive import ZSTD
-from airlock.core.model import Result, UnitKind
-from airlock.model_inspect import InspectResult
+from superscrubber104.archive import ZSTD
+from superscrubber104.core.model import Result, UnitKind
+from superscrubber104.model_inspect import InspectResult
 from tests.hauler_fixtures import haul, haul_bytes
 from tests.models_helpers import findings_of, inspect
 from tests.software_fixtures import write
@@ -49,7 +49,7 @@ def test_haul_contents_are_listed_and_checked(tmp_path: Path, name: str, fmt: st
     assert len(unit["signatures"]) == 1 and unit["signaturesVerified"] is False
     (images,) = [u for u in result.analysis.units if u.kind is UnitKind.CONTAINER_IMAGE]
     assert images.root.display == name
-    # The cosign signature is carried but not verified by airlock: recorded, never dropped.
+    # The cosign signature is carried but not verified by superscrubber104: recorded, never dropped.
     (finding,) = found["upstream.signature.untrusted"]
     assert finding.result is Result.NOT_ASSESSED
     assert "cosign" in str(finding.not_assessed_reason)

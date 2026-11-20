@@ -1,12 +1,12 @@
-# airlock
+# superscrubber104
 
 [![CI](https://github.com/Tony-A-Michailidis/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/Tony-A-Michailidis/airlock/actions/workflows/ci.yml)
 
-> **Pre-alpha.** It works end to end, but it is not yet ready for real transfers. `airlock` is a working name.
+> **Pre-alpha.** It works end to end, but it is not yet ready for real transfers.
 
 **Make agentic AI projects accreditable in high-assurance and disconnected environments.**
 
-airlock prepares a complete AI delivery for transfer across an air gap and verifies it on the other side. It inspects everything that crosses, without running any of it, and records control-mapped evidence for the security assessment.
+superscrubber104 prepares a complete AI delivery for transfer across an air gap and verifies it on the other side. It inspects everything that crosses, without running any of it, and records control-mapped evidence for the security assessment.
 
 ## Why
 
@@ -25,7 +25,7 @@ It runs fully offline, has minimal dependencies, and is designed to cross its ow
 
 ## Demo
 
-To install airlock and run the demo yourself, follow the [quick start](docs/quickstart-wsl.md) (WSL on AlmaLinux 9 or 10; the steps work on any Linux with Python 3.11+).
+To install superscrubber104 and run the demo yourself, follow the [quick start](docs/quickstart-wsl.md) (WSL on AlmaLinux 9 or 10; the steps work on any Linux with Python 3.11+).
 
 ```console
 $ python examples/demo/demo.py
@@ -42,7 +42,7 @@ Then it tampers with the bundle, as someone with access to the transfer media co
 And verifies again:
 
 ```console
-$ airlock verify bundle --policy high/policy.yaml --state high/state --out import-2
+$ superscrubber104 verify bundle --policy high/policy.yaml --state high/state --out import-2
 REFUSE          integrity.entry.unexpected  [28acb79bd69f8e44]
                 app/patch-notes.txt: Payload contains content that is not in the manifest
 REFUSE          integrity.entry.unexpected  [24ac6f7ab16e6160]
@@ -82,7 +82,7 @@ The demo exits 0 only when everything happens as described, and the test suite r
 
 ## A real delivery
 
-The demo's files are synthetic. airlock has also been tried on 3.5 GB of real, public projects: the [private-gpt](https://github.com/zylon-ai/private-gpt) RAG application, the [MCP reference servers](https://github.com/modelcontextprotocol/servers) and a client configuration that starts them, three Hugging Face models with every format their repositories publish, a small client with hash-pinned wheels, and the `python:3.12-slim` image. It inspected 1,800 files and 5,645 archive members in 27 seconds and blocked the delivery for 19 reasons, each one real:
+The demo's files are synthetic. superscrubber104 has also been tried on 3.5 GB of real, public projects: the [private-gpt](https://github.com/zylon-ai/private-gpt) RAG application, the [MCP reference servers](https://github.com/modelcontextprotocol/servers) and a client configuration that starts them, three Hugging Face models with every format their repositories publish, a small client with hash-pinned wheels, and the `python:3.12-slim` image. It inspected 1,800 files and 5,645 archive members in 27 seconds and blocked the delivery for 19 reasons, each one real:
 
 | Blockers | Why |
 |---|---|
@@ -92,12 +92,12 @@ The demo's files are synthetic. airlock has also been tried on 3.5 GB of real, p
 | 1 × `model.pickle.unknown-import` | a model's `training_args.bin` is a pickle importing training classes, which inference does not need |
 | 3 × `mcp.server.capability` (shell) | the MCP repository's release scripts start processes |
 
-The first run also reported findings that were airlock's mistakes: a multi-platform image saved for one platform was called incomplete, coreutils' `sha256sum` was taken for a checksum list, an application's `skills` package for agent skills. Each was fixed with a regression test built from the real layout. [The full account](examples/demo/real-delivery.md) and [the report itself](examples/demo/real-delivery-report.html) are in `examples/demo/`.
+The first run also reported findings that were superscrubber104's mistakes: a multi-platform image saved for one platform was called incomplete, coreutils' `sha256sum` was taken for a checksum list, an application's `skills` package for agent skills. Each was fixed with a regression test built from the real layout. [The full account](examples/demo/real-delivery.md) and [the report itself](examples/demo/real-delivery-report.html) are in `examples/demo/`.
 
 One of the models, `HuggingFaceTB/SmolLM2-135M-Instruct` at revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, inspected in place:
 
 ```console
-$ airlock model inspect smollm2-135m
+$ superscrubber104 model inspect smollm2-135m
 model package  .  (LlamaForCausalLM)
   architecture   LlamaForCausalLM, 134.5M parameters
   weights        safetensors, 1 file(s), BF16 x272
@@ -125,13 +125,13 @@ Requires Python 3.11+. From a clone: `pip install -e .` (the [WSL guide](docs/qu
 **1. A key for the packing side.** `keygen` prints the policy snippet that pins it:
 
 ```console
-$ airlock keygen -o keys --name pack --holder build-pipeline
+$ superscrubber104 keygen -o keys --name pack --holder build-pipeline
 ```
 
 **2. The receiving side's policy**, `policy.yaml`, with that snippet pasted in as `trust:`:
 
 ```yaml
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: Policy
 metadata:
   name: high-side
@@ -152,13 +152,13 @@ trust:                         # as printed by keygen
 **3. A transfer request**, `request.yaml`, saying what is meant to cross:
 
 ```yaml
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: TransferRequest
 metadata:
   id: TR-0001
   title: First delivery
 spec:
-  purpose: Try airlock on a small delivery
+  purpose: Try superscrubber104 on a small delivery
   owner: {name: Example Owner, contact: owner@example.org}
   source: dev-unclass
   destination: enclave-b
@@ -171,8 +171,8 @@ spec:
 **4. Pack on one side, verify on the other, render the evidence:**
 
 ```console
-$ airlock pack delivery --request request.yaml --key keys/pack.key -o bundle
-$ airlock verify bundle --policy policy.yaml --state state --out import
+$ superscrubber104 pack delivery --request request.yaml --key keys/pack.key -o bundle
+$ superscrubber104 verify bundle --policy policy.yaml --state state --out import
 WARN            not assessed: malware.detected  [f6490e189d646738]
                 bundle: the check did not run: no malware scanner is configured (plugins.clamav)
 WARN            not assessed: replay.bundle.expired  [0d542c3bfff6f26f]
@@ -180,10 +180,10 @@ WARN            not assessed: replay.bundle.expired  [0d542c3bfff6f26f]
 ...
 32 of 212 rules exercised, 36 checks passed; findings: 0 block, 0 need approval, 4 warn, 0 allowed
 verdict: PASSED
-$ airlock report import -f html -o import/report.html
+$ superscrubber104 report import -f html -o import/report.html
 ```
 
-`--state` keeps the receiving side's ledger, which is how replayed and out-of-order bundles are caught. The full examples, with every policy setting explained, are [examples/policy.yaml](examples/policy.yaml) and [examples/request.yaml](examples/request.yaml). `airlock model inspect DIR` checks content in place, without packing.
+`--state` keeps the receiving side's ledger, which is how replayed and out-of-order bundles are caught. The full examples, with every policy setting explained, are [examples/policy.yaml](examples/policy.yaml) and [examples/request.yaml](examples/request.yaml). `superscrubber104 model inspect DIR` checks content in place, without packing.
 
 Exit codes are the same for every command, so they work as CI gates:
 
@@ -196,11 +196,11 @@ Exit codes are the same for every command, so they work as CI gates:
 
 ## What it checks
 
-One line per area; [docs/features.md](docs/features.md) has the detail and each design document the specification. `airlock rules` lists every check, as does [docs/rules.md](docs/rules.md).
+One line per area; [docs/features.md](docs/features.md) has the detail and each design document the specification. `superscrubber104 rules` lists every check, as does [docs/rules.md](docs/rules.md).
 
 **AI-specific**
 
-| Area | What airlock checks |
+| Area | What superscrubber104 checks |
 |---|---|
 | [Model packages](docs/design/19-model-packages.md) | safetensors, GGUF, pickle formats (read statically, never unpickled), Keras, ONNX, Ollama, adapters; shards, configs, tokenizers, chat templates, `trust_remote_code`, licences, publisher checksums |
 | [Model signatures and evaluation](docs/design/24-signatures-and-eval.md) | OpenSSF model signatures verified offline; a pinned evaluation set run on both sides to catch a swapped model |
@@ -210,7 +210,7 @@ One line per area; [docs/features.md](docs/features.md) has the detail and each 
 
 **Software supply chain**
 
-| Area | What airlock checks |
+| Area | What superscrubber104 checks |
 |---|---|
 | [Bundles and verification](docs/design/18-bundle-and-verification.md) | every file hashed and signed; re-hashed and re-inspected on arrival; a hash-chained ledger against replay; [volumes and deltas](docs/design/26-volumes-and-deltas.md) |
 | [Containers, Python and npm](docs/design/20-software-and-agents.md) | images verified blob by blob, layers inspected; lockfiles resolved against the packages delivered |
@@ -224,22 +224,22 @@ One line per area; [docs/features.md](docs/features.md) has the detail and each 
 
 **Operations and patching**
 
-| Area | What airlock checks |
+| Area | What superscrubber104 checks |
 |---|---|
 | [VM images](docs/design/32-vm-images.md) | qcow2, VMDK, VHD, VHDX, raw and ISO read from their headers, never mounted; OVA manifests and Glance hashes and signatures |
-| [Patching](docs/design/33-patching-and-feeds.md) | `airlock patch`: host inventories matched against offline OSV, dnf, Microsoft CVRF and CISA KEV feeds, then staged and confirmed |
-| [Staging](docs/design/34-staging.md) | `airlock stage`: an accepted bundle placed into local repositories, re-hashed as it is copied, never pushed over the network |
+| [Patching](docs/design/33-patching-and-feeds.md) | `superscrubber104 patch`: host inventories matched against offline OSV, dnf, Microsoft CVRF and CISA KEV feeds, then staged and confirmed |
+| [Staging](docs/design/34-staging.md) | `superscrubber104 stage`: an accepted bundle placed into local repositories, re-hashed as it is copied, never pushed over the network |
 | [Reports and controls](docs/design/25-reports-and-controls.md) | Markdown, HTML, JSON, CycloneDX ML-BOM and OSCAL, with a NIST SP 800-53 control matrix |
 
-## How airlock relates to Zarf and Hauler
+## How superscrubber104 relates to Zarf and Hauler
 
 [Zarf](https://docs.zarf.dev/) and [Hauler](https://docs.hauler.dev/) move Kubernetes content across an air gap and deploy or serve it on the other side. Both check what they carry:
 * Zarf signs each package (keylessly with Sigstore, or with a key), verifies a sha256 checksum chain offline, and generates SBOMs.
 * Hauler verifies cosign signatures before saving and after loading, and keeps upstream SBOMs and attestations.
 
-Neither inspects what is inside the artifacts, applies a site's policy, or records control-mapped evidence. airlock does not move or deploy anything; it decides whether a delivery should cross and records why. The two are used together: build and carry the package with Zarf or Hauler, and pass it through `airlock pack` and `airlock verify` on the way.
+Neither inspects what is inside the artifacts, applies a site's policy, or records control-mapped evidence. superscrubber104 does not move or deploy anything; it decides whether a delivery should cross and records why. The two are used together: build and carry the package with Zarf or Hauler, and pass it through `superscrubber104 pack` and `superscrubber104 verify` on the way.
 
-| | Zarf / Hauler | airlock |
+| | Zarf / Hauler | superscrubber104 |
 |---|---|---|
 | Package, transfer, deploy or serve | yes | carries any files; `stage` writes local repositories, never deploys |
 | Signatures and checksums of what they carry | yes | verified again, plus its own bundle signature and replay ledger |
@@ -247,18 +247,18 @@ Neither inspects what is inside the artifacts, applies a site's policy, or recor
 | Inspection of content: models, pickles, prompts, secrets, offline readiness | not documented | yes |
 | Policy decision, approvals, evidence mapped to NIST 800-53 (or a site's own control profile) | not documented | yes |
 
-airlock opens Zarf packages without running Zarf. It checks:
+superscrubber104 opens Zarf packages without running Zarf. It checks:
 * the package's own checksum chain and signature, against keys or Sigstore identities pinned in the policy (a mismatch is final);
 * the images it carries;
 * the commands and host files that deploying it would run or write.
 
-Everything inside a Zarf package, including models in image layers, goes through the same handlers as any other delivery. zstd-compressed packages, Zarf's default, are read on Python 3.14, or on 3.11 to 3.13 with the optional extra: `pip install 'airlock[zstd]'`.
+Everything inside a Zarf package, including models in image layers, goes through the same handlers as any other delivery. zstd-compressed packages, Zarf's default, are read on Python 3.14, or on 3.11 to 3.13 with the optional extra: `pip install 'superscrubber104[zstd]'`.
 
-Hauler hauls are opened too: their image layout is checked and their images, charts and files are inspected. The cosign signatures they carry are recorded as "not assessed", because airlock does not verify cosign signatures yet. [Doc 35](docs/design/35-zarf-and-hauler.md) has the details, and records with sources what each tool does as of Zarf 1.0 and Hauler 2.1.
+Hauler hauls are opened too: their image layout is checked and their images, charts and files are inspected. The cosign signatures they carry are recorded as "not assessed", because superscrubber104 does not verify cosign signatures yet. [Doc 35](docs/design/35-zarf-and-hauler.md) has the details, and records with sources what each tool does as of Zarf 1.0 and Hauler 2.1.
 
 ## Status and limits
 
-airlock is pre-alpha: every command works end to end and is tested, but it has not yet been used for a real transfer. What it does not do is written down, area by area, at the end of each design document:
+superscrubber104 is pre-alpha: every command works end to end and is tested, but it has not yet been used for a real transfer. What it does not do is written down, area by area, at the end of each design document:
 
 * [bundles and verification](docs/design/18-bundle-and-verification.md) (18.8), [volumes and deltas](docs/design/26-volumes-and-deltas.md) (26.4), [reports](docs/design/25-reports-and-controls.md) (25.6);
 * [model packages](docs/design/19-model-packages.md) (19.5), [signatures and evaluation](docs/design/24-signatures-and-eval.md) (24.3), [data and knowledge](docs/design/22-data-and-knowledge.md) (22.5), [offline readiness](docs/design/23-offline-and-runtime.md) (23.6);

@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Result, TrustLevel, Verdict
-from airlock.formats import openpgp
-from airlock.formats.deb import deb_vercmp
-from airlock.formats.rpm import compare_evr, rpm_vercmp
+from superscrubber104.core.model import Result, TrustLevel, Verdict
+from superscrubber104.formats import openpgp
+from superscrubber104.formats.deb import deb_vercmp
+from superscrubber104.formats.rpm import compare_evr, rpm_vercmp
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import write
 from tests.vendor_fixtures import PGPKey, RPMSpec, deb_bytes, rpm_bytes, rpmdb_bytes

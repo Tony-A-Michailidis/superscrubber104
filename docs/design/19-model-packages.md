@@ -4,7 +4,7 @@
 
 A model crosses as a **complete, self-consistent unit**. Handlers recognise model files and report what they find; the model-package assembler groups those reports into `ModelPackage` units and checks each package as a whole. Everything is static: no file is unpickled, imported, loaded by a framework or executed, and no ML library is a dependency. The test suite fails if anything calls `pickle.load`, `pickle.loads` or `pickle.Unpickler`.
 
-`airlock model inspect <path>` produces the records and findings for any directory or file, in place, without packing. `pack` and `verify` run the same checks; the receiving side re-derives every package from the bytes.
+`superscrubber104 model inspect <path>` produces the records and findings for any directory or file, in place, without packing. `pack` and `verify` run the same checks; the receiving side re-derives every package from the bytes.
 
 ## 19.1 Formats
 
@@ -76,7 +76,7 @@ Each artifact carries `Verification` records with a `TrustLevel`:
 | Policy model allowlist matched by identity and revision | `asserted` |
 | Signature verified against a pinned key | `signature` (OpenSSF model signing, phase 1d) |
 
-`trust.minimum` in the policy sets the floor per kind, e.g. `{"model.*": pinned-checksum}`. The practical way to reach `pinned-checksum` for a model is to approve it once by its unit digest (shown by `airlock model inspect --json` and in every package's SBOM component as `airlock:unit-digest`).
+`trust.minimum` in the policy sets the floor per kind, e.g. `{"model.*": pinned-checksum}`. The practical way to reach `pinned-checksum` for a model is to approve it once by its unit digest (shown by `superscrubber104 model inspect --json` and in every package's SBOM component as `superscrubber104:unit-digest`).
 
 ## 19.3 The record
 

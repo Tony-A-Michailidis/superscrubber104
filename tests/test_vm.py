@@ -13,8 +13,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 
-from airlock.core.model import Result, TrustLevel, Verdict
-from airlock.scanners.base import Completed
+from superscrubber104.core.model import Result, TrustLevel, Verdict
+from superscrubber104.scanners.base import Completed
 from tests.helpers import NOW
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import write
@@ -300,7 +300,7 @@ def test_qemu_img_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config
     [failed] = [f for f in checks if f.result is Result.FAIL]
     assert failed.subject.display == "b.qcow2"
     assert failed.detail["problems"] == [
-        f"virtual size: airlock read {64 * MIB}, qemu-img {32 * MIB}",
+        f"virtual size: superscrubber104 read {64 * MIB}, qemu-img {32 * MIB}",
         "leaks: 3",
     ]
 

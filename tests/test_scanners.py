@@ -1,7 +1,7 @@
 """Scanner plugins: pre-flight trust checks, ClamAV, Trivy and the KEV feed.
 
 The real scanners are not run here. ``FakeTools`` stands in for the process runner and answers
-the way clamscan and trivy do, so these tests pin down what airlock passes to each tool, how it
+the way clamscan and trivy do, so these tests pin down what superscrubber104 passes to each tool, how it
 reads the answers, and everything that happens before a tool is allowed to run.
 """
 
@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import Result, Severity, SubjectKind, Verdict
-from airlock.scanners import base
-from airlock.scanners.base import Completed, ScanError, scrubbed_environment
+from superscrubber104.core.model import Result, Severity, SubjectKind, Verdict
+from superscrubber104.scanners import base
+from superscrubber104.scanners.base import Completed, ScanError, scrubbed_environment
 from tests.helpers import NOW
 from tests.models_helpers import findings_of, inspect
 from tests.software_fixtures import docker_archive, wheel_bytes, wheel_name, write
@@ -403,13 +403,13 @@ def test_trivy_without_a_database_does_not_run(
 def test_plugins_check_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from click.testing import CliRunner
 
-    from airlock.cli import main
+    from superscrubber104.cli import main
 
     tools = FakeTools(monkeypatch)
     tools.handlers["clamscan"] = _clamscan({})
     policy = tmp_path / "policy.yaml"
     policy.write_text(
-        "apiVersion: airlock/v1alpha1\nkind: Policy\nmetadata: {name: site, version: '1'}\n"
+        "apiVersion: superscrubber104/v1alpha1\nkind: Policy\nmetadata: {name: site, version: '1'}\n"
         + _clamav_policy(tmp_path / "tools"),
         encoding="utf-8",
     )
@@ -421,7 +421,7 @@ def test_plugins_check_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_example_policy_configures_every_plugin() -> None:
-    from airlock.core.policy import load_policy
+    from superscrubber104.core.policy import load_policy
 
     policy = load_policy(Path(__file__).parent.parent / "examples" / "policy.yaml")
     assert set(policy.plugins) == {"clamav", "trivy", "kev", "semgrep", "bandit"}

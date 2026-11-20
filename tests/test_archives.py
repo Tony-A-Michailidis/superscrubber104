@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from airlock.analyzer import Analyzer
-from airlock.archive import detect_format
-from airlock.core.interfaces import ArtifactView, Context, Detection, Handler, Inspection
-from airlock.core.model import Artifact, ArtifactRef, EntryType, Finding, Result
-from airlock.core.policy import ArchiveLimits, Limits, Policy
-from airlock.handlers.generic import GenericHandler, sniff_media_type
-from airlock.session import Session
-from airlock.walker import FileView
+from superscrubber104.analyzer import Analyzer
+from superscrubber104.archive import detect_format
+from superscrubber104.core.interfaces import ArtifactView, Context, Detection, Handler, Inspection
+from superscrubber104.core.model import Artifact, ArtifactRef, EntryType, Finding, Result
+from superscrubber104.core.policy import ArchiveLimits, Limits, Policy
+from superscrubber104.handlers.generic import GenericHandler, sniff_media_type
+from superscrubber104.session import Session
+from superscrubber104.walker import FileView
 from tests.helpers import NOW, tar_bytes, zip_bytes
 
 MIB = 2**20

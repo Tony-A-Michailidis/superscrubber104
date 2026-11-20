@@ -2,7 +2,7 @@
 
 > **Status: research done; Zarf packages are inspected (§35.5); Hauler hauls are inspected without verifying their cosign signatures (§35.6).** Facts below are from the projects' own documentation, release notes and source code, and from one real Zarf package examined offline (§35.2 and §35.5). Sources are in §35.8. Where a source was secondary or a fact could not be confirmed, that is said.
 
-Zarf and Rancher Government Hauler are open-source tools for moving content into disconnected environments. They overlap with airlock's transport side. Their job is to move content and deploy it. airlock's job is to inspect content, decide by policy whether it may cross, and record evidence of why. This document records what they do as of November 2026, so that airlock can work with them rather than duplicate them, and describes how airlock inspects their packages.
+Zarf and Rancher Government Hauler are open-source tools for moving content into disconnected environments. They overlap with superscrubber104's transport side. Their job is to move content and deploy it. superscrubber104's job is to inspect content, decide by policy whether it may cross, and record evidence of why. This document records what they do as of November 2026, so that superscrubber104 can work with them rather than duplicate them, and describes how superscrubber104 inspects their packages.
 
 ## 35.1 Zarf (1.0)
 
@@ -40,7 +40,7 @@ sboms.tar                Syft JSON per image and per component with files
 documentation.tar        attachments
 ```
 
-What was checked, using airlock's existing primitives in a throwaway script:
+What was checked, using superscrubber104's existing primitives in a throwaway script:
 
 * `aggregateChecksum` equals the sha256 of `checksums.txt`. All 35 listed files match; no file is unlisted except `zarf.yaml` and `zarf.bundle.sig`, which `build.provenanceFiles` names as added after the checksums were made.
 * The signature verifies over the exact bytes of `zarf.yaml`. The bundle's certificate chains to a Fulcio CA in Sigstore's public trusted root. The Rekor signed entry timestamp verifies with the pinned log key. The `hashedrekord` log entry records this artifact hash and this signature. The certificate was valid at the logged time. Its identity is `https://github.com/zarf-dev/zarf/.github/workflows/release.yml@refs/tags/v1.0.1`, issued by `https://token.actions.githubusercontent.com`.
@@ -71,21 +71,21 @@ No public haul was found to examine. The format above is from the docs, release 
 
 ## 35.4 Overlap and difference
 
-Both tools overlap with airlock, and in places do more than it does:
+Both tools overlap with superscrubber104, and in places do more than it does:
 
-* **Integrity and signing.** Zarf's checksum chain and Hauler's per-artifact cosign checks overlap with airlock's bundle signature. Zarf's offline keyless verification is close to what airlock does for model signatures.
-* **Splitting and deltas.** Zarf split packages and differential packages, and Hauler's chunked hauls, overlap with airlock's multi-volume and delta bundles.
-* **Delivery.** Both deploy or serve content; `airlock stage` only writes files and indexes.
-* **SBOM and scanning.** Zarf generates SBOMs, and Grype on them gives a vulnerability gate, much as airlock's Trivy plugin does.
+* **Integrity and signing.** Zarf's checksum chain and Hauler's per-artifact cosign checks overlap with superscrubber104's bundle signature. Zarf's offline keyless verification is close to what superscrubber104 does for model signatures.
+* **Splitting and deltas.** Zarf split packages and differential packages, and Hauler's chunked hauls, overlap with superscrubber104's multi-volume and delta bundles.
+* **Delivery.** Both deploy or serve content; `superscrubber104 stage` only writes files and indexes.
+* **SBOM and scanning.** Zarf generates SBOMs, and Grype on them gives a vulnerability gate, much as superscrubber104's Trivy plugin does.
 
-What airlock adds, which neither documents:
+What superscrubber104 adds, which neither documents:
 
 * **Inspection of what is inside.** Model formats read without loading them, pickle opcodes, `trust_remote_code`, chat templates, embedding-model consistency, injected instructions in corpora and agent configuration, secrets, active content in documents, offline readiness.
 * **An independent decision on the receiving side.** Re-hashing and re-inspecting with the receiving side's own policy and keys. Integrity rules that nothing can override. Approval quorums with written justifications. A replay ledger.
 * **Evidence for an assessment.** Every check mapped to NIST SP 800-53 / ITSG-33 controls, rendered as OSCAL and CycloneDX, with checks that could not run recorded as not assessed.
 * **Content beyond Kubernetes.** VM images, OS patch planning, IDE extensions, bare-metal GPU stacks. (Zarf also places host files and runs host actions; its centre is still a Kubernetes cluster.)
 
-They are complementary: Zarf or Hauler builds and moves the package, and airlock inspects it before it is allowed to cross and again on arrival. The useful work for airlock is to read their packages as well as it reads anything else.
+They are complementary: Zarf or Hauler builds and moves the package, and superscrubber104 inspects it before it is allowed to cross and again on arrival. The useful work for superscrubber104 is to read their packages as well as it reads anything else.
 
 ## 35.5 Zarf packages (as built)
 
@@ -93,7 +93,7 @@ They are complementary: Zarf or Hauler builds and moves the package, and airlock
 
 ### Two changes in the core
 
-1. **zstd.** On Python 3.14 and later, zstd joins gzip, bzip2 and xz in the archive walker (`compression.zstd`, standard library, under the same expansion budget). Before 3.14, the optional `zstd` extra (`pip install 'airlock[zstd]'`, the `backports.zstd` package) provides the same module. Without either, a zstd archive is still recorded with its contents **not assessed**. The reason recorded says to use 3.14 or the extra, or to build the package with `metadata.uncompressed: true` or decompress it before packing. Zarf's checksums cover the members, not the compressed archive, so a decompressed package is still fully verifiable. The core has no new dependency.
+1. **zstd.** On Python 3.14 and later, zstd joins gzip, bzip2 and xz in the archive walker (`compression.zstd`, standard library, under the same expansion budget). Before 3.14, the optional `zstd` extra (`pip install 'superscrubber104[zstd]'`, the `backports.zstd` package) provides the same module. Without either, a zstd archive is still recorded with its contents **not assessed**. The reason recorded says to use 3.14 or the extra, or to build the package with `metadata.uncompressed: true` or decompress it before packing. Zarf's checksums cover the members, not the compressed archive, so a decompressed package is still fully verifiable. The core has no new dependency.
 2. **Images in an OCI layout inside an archive.** The container handler's layout checks run over any store (`containers.MemoryStore`, `inspect_store`), not just a directory or an image tar:
    * index to manifests to configs and layers;
    * every digest equal to its name;
@@ -157,7 +157,7 @@ Then, in order:
     * per-component images, charts, manifests, repositories and file counts;
     * host files, action counts, `onCreate` commands, and the differential base.
 
-    Zarf's own SBOMs are recorded as present. They are the builder's claim; airlock's SBOM is built from what it inspected.
+    Zarf's own SBOMs are recorded as present. They are the builder's claim; superscrubber104's SBOM is built from what it inspected.
 
 **Not built:** split packages (`.partNNN`), packages pulled from OCI registries, running anything Zarf would run, and checking a package against a live cluster.
 
@@ -204,7 +204,7 @@ With an identity the policy does not accept, the signature is `untrusted` (not `
   * a blob that differs is `container.layer.digest-mismatch`, and one that is missing is `container.image.incomplete`, both existing rules; the mismatch is final;
   * images get the usual image checks.
 * **What each entry is.** Each manifest is classified from its media types and Hauler's `kind` annotation as an image, a Helm chart, a file (named from its layer's `org.opencontainers.image.title`), a signature, an attestation or an SBOM. Only images get image checks, so a chart or a signature is never reported as "runs as root". This change is in the container handler and applies to any OCI layout (doc 20).
-* **Signatures.** When a haul carries cosign signatures or attestations, `upstream.signature.invalid` and `.untrusted` are recorded as **not assessed**. The reason says that airlock does not verify cosign signatures yet, and that Hauler verifies them when it saves and loads. The unit says `signaturesVerified: false`.
+* **Signatures.** When a haul carries cosign signatures or attestations, `upstream.signature.invalid` and `.untrusted` are recorded as **not assessed**. The reason says that superscrubber104 does not verify cosign signatures yet, and that Hauler verifies them when it saves and loads. The unit says `signaturesVerified: false`.
 * **Contents.** The archive walk inspects every blob:
   * image layers, so models in images reach the model handlers;
   * chart archives;
@@ -232,7 +232,7 @@ The owner's answers to the questions this document raised:
 
 1. **Unlisted files in a Zarf package** are final, signed or not: content nobody vouched for.
 2. **Actions** are medium (require approval) always, whoever signed the package.
-3. **zstd before Python 3.14** stays not assessed, with advice. Revised after review: the optional `zstd` extra (`pip install 'airlock[zstd]'`, the `backports.zstd` package) reads it, as an optional extra; the core still has no dependency for it. The real `zarf-init-amd64-v1.0.1.tar.zst` reads the same on 3.12 with the extra as on 3.14 (35 of 35 checksums, the image complete).
+3. **zstd before Python 3.14** stays not assessed, with advice. Revised after review: the optional `zstd` extra (`pip install 'superscrubber104[zstd]'`, the `backports.zstd` package) reads it, as an optional extra; the core still has no dependency for it. The real `zarf-init-amd64-v1.0.1.tar.zst` reads the same on 3.12 with the extra as on 3.14 (35 of 35 checksums, the image complete).
 4. **Archive depth:** the default `maxDepth` is 5 globally.
 5. **More real samples:** no Zarf or Hauler binary is run to build them. v1beta1, key-signed, differential and split packages are covered by synthetic fixtures only, built from the published Go types. A published sample of each should be checked when one is found.
 6. **Scope:** Zarf first, Hauler after.

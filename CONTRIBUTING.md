@@ -1,12 +1,12 @@
 # Contributing
 
-airlock decides whether a delivery may cross into a disconnected network, so its own rules matter as much as its features. This page lists them: the guardrails that are never relaxed, the design rules that are easy to break by accident, and how changes are checked.
+superscrubber104 decides whether a delivery may cross into a disconnected network, so its own rules matter as much as its features. This page lists them: the guardrails that are never relaxed, the design rules that are easy to break by accident, and how changes are checked.
 
 ## Guardrails
 
 - **Public sources only.** Examples, fixtures and documentation are generic. Nothing comes from any employer, client or other non-public environment.
-- **Offline first.** No network calls at runtime, ever. airlock must be vendorable as a bundle of wheels, so that it can cross its own airlock.
-- **Never execute what you inspect.** No unpickling, no importing model code, no running install scripts, no mounting images on the host. Static inspection only. The one exception is `airlock eval`, which runs a model through a runtime the policy pins and pre-flights like a scanner.
+- **Offline first.** No network calls at runtime, ever. superscrubber104 must be vendorable as a bundle of wheels, so that it can cross its own airlock.
+- **Never execute what you inspect.** No unpickling, no importing model code, no running install scripts, no mounting images on the host. Static inspection only. The one exception is `superscrubber104 eval`, which runs a model through a runtime the policy pins and pre-flights like a scanner.
 - **Trust nothing that crosses, including the scanners.** Scanner binaries, rule packs, vulnerability databases and keys are pinned, verified artifacts too.
 - **Never silently drop anything.** An unrecognised file is still inventoried, hashed, signed, scanned and recorded as "unclassified". A check that could not run is reported as "not assessed", never omitted.
 - **AI-aware, not AI-only.** Nothing is built that only works for AI files.
@@ -35,9 +35,9 @@ airlock decides whether a delivery may cross into a disconnected network, so its
 - `resolve()` does not reach into archives. A check that needs neighbouring files records "not assessed" for nested artifacts; it never skips them or reports their neighbours as missing.
 - Archive member names never become filesystem paths. Name members with `core.paths.check_member_name`; hostile names are recorded with `ArtifactRef(..., unsafe=True)`.
 - A handler that decompresses anything reads it through `archive.capped` and catches `archive.ARCHIVE_ERRORS`. Untrusted input must never raise out of a handler or expand without a limit.
-- Model content is never unpickled, imported or loaded. Use the static readers in `airlock/formats/`; tests patch `pickle.load*` to fail.
-- Model-facing text (prompts, templates, tool descriptions) is scanned with `airlock/text.py`.
-- External scanners live in `airlock/scanners/` and run only after the pre-flight in `base.py`: found, hashed against their pins, version and database age checked. A pin mismatch is final.
+- Model content is never unpickled, imported or loaded. Use the static readers in `superscrubber104/formats/`; tests patch `pickle.load*` to fail.
+- Model-facing text (prompts, templates, tool descriptions) is scanned with `superscrubber104/text.py`.
+- External scanners live in `superscrubber104/scanners/` and run only after the pre-flight in `base.py`: found, hashed against their pins, version and database age checked. A pin mismatch is final.
 
 **Commands**
 
@@ -60,7 +60,7 @@ $ mypy
 $ pytest
 ```
 
-- After adding or changing a rule, regenerate the reference with `airlock rules -o docs/rules.md`; a test compares the two.
+- After adding or changing a rule, regenerate the reference with `superscrubber104 rules -o docs/rules.md`; a test compares the two.
 - Documents 17 onwards in `docs/design/` describe what is built. Keep them in step with the code, including their "known limits". Documents 01 to 16 are the original brief and stay as written.
 - Every sample of output in the README and the demo's sample output comes from a real run. Re-run and replace them when output changes.
 - One commit per completed change, with tests and documentation in the same commit.

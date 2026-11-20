@@ -1,9 +1,15 @@
 import pytest
 
-from airlock.core.controls import ControlCatalog, ControlMapping, ControlOverride
-from airlock.core.errors import RuleError
-from airlock.core.model import Result, Severity, Subject
-from airlock.core.rules import FindingFactory, Recorder, RuleRegistry, RuleSpec, finding_digest
+from superscrubber104.core.controls import ControlCatalog, ControlMapping, ControlOverride
+from superscrubber104.core.errors import RuleError
+from superscrubber104.core.model import Result, Severity, Subject
+from superscrubber104.core.rules import (
+    FindingFactory,
+    Recorder,
+    RuleRegistry,
+    RuleSpec,
+    finding_digest,
+)
 from tests.core.helpers import RULES, TOOL
 
 SUBJECT = Subject.of_path("models/x.pt")

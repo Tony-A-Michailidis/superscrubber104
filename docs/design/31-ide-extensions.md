@@ -29,7 +29,7 @@ allowlists:
   jetbrains: { mode: report, file: allow/jetbrains.txt, sha256: "…" }
 ```
 
-Each extension becomes an SBOM component (type application, the publisher as supplier, with `airlock:ide` and the VS Code engine range as properties). There is no purl type for editor extensions, so none is invented.
+Each extension becomes an SBOM component (type application, the publisher as supplier, with `superscrubber104:ide` and the VS Code engine range as properties). There is no purl type for editor extensions, so none is invented.
 
 Metadata kept per extension: engine range or build range, activation events, entry points (`main`, `browser`), dependencies and packs, proposed APIs, telemetry, and whether it declares support for untrusted workspaces.
 

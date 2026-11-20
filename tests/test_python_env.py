@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.model import ComponentType, Severity, UnitKind, Verdict
-from airlock.handlers.packages.python import canon_name, canon_version, parse_wheel_name
+from superscrubber104.core.model import ComponentType, Severity, UnitKind, Verdict
+from superscrubber104.handlers.packages.python import canon_name, canon_version, parse_wheel_name
 from tests.models_helpers import findings_of, inspect
 from tests.software_fixtures import wheel_bytes, wheel_name, write
 

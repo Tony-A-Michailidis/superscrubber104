@@ -6,7 +6,7 @@ A delivery that tries to reach the internet behind the gap either breaks (an ope
 
 ## 23.1 Offline readiness
 
-`airlock offline-check <paths>` prints the report; `pack`, `verify` and `model inspect` record the same findings. Every finding carries an `impact` attribute: `will-break`, `egress-risk` or `informational`. Where a setting fixes it, the finding also carries that `fix`, and the command collects the fixes into a **recommended high-side configuration** (environment variables and editor settings).
+`superscrubber104 offline-check <paths>` prints the report; `pack`, `verify` and `model inspect` record the same findings. Every finding carries an `impact` attribute: `will-break`, `egress-risk` or `informational`. Where a setting fixes it, the finding also carries that `fix`, and the command collects the fixes into a **recommended high-side configuration** (environment variables and editor settings).
 
 ### What is read
 
@@ -25,7 +25,7 @@ The delivery's **own** code and configuration: source, notebooks, shell scripts 
 | `offline.endpoint.external` | informational | external hosts named in code and configuration, one finding per file (local, private, example and XML-namespace hosts excluded) |
 | `offline.network.public-service` | informational | public DNS resolvers and NTP pools |
 
-A setting counts wherever it is made: a `.env` file, a manifest, a Dockerfile `ENV`, `os.environ` in code, a library's own switch in code (`analytics_enabled=False`, `anonymized_telemetry=False`, `gatherUsageStats = false`, `wandb.init(mode="offline")`), or a delivered image's environment. The decisions that need the whole delivery (is that model delivered? that image? is that setting made anywhere?) are made by `airlock/checks/offline.py` after every file has been read.
+A setting counts wherever it is made: a `.env` file, a manifest, a Dockerfile `ENV`, `os.environ` in code, a library's own switch in code (`analytics_enabled=False`, `anonymized_telemetry=False`, `gatherUsageStats = false`, `wandb.init(mode="offline")`), or a delivered image's environment. The decisions that need the whole delivery (is that model delivered? that image? is that setting made anywhere?) are made by `superscrubber104/checks/offline.py` after every file has been read.
 
 ### Policy
 
@@ -59,7 +59,7 @@ When models and an inference stack cross without a runtime profile, `runtime.pro
 A `RuntimeProfile` file crosses with the models and declares what they were tested on:
 
 ```yaml
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: RuntimeProfile
 metadata: {name: chat-gpu}
 spec:

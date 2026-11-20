@@ -2,7 +2,7 @@
 
 > **Status: implemented.** Spec: [§4](04-artifact-coverage.md) (infrastructure code, containers), [§13](13-checks-and-controls.md) (checks and controls). Image references against the delivery are the offline check's ([23](23-offline-and-runtime.md)).
 
-Infrastructure code is what will run with the most privilege on the high side. The handler (`airlock/handlers/iac.py`) answers three questions for each file. What will this workload be allowed to do to its host? Is every image named exactly? What will deploying it try to fetch?
+Infrastructure code is what will run with the most privilege on the high side. The handler (`superscrubber104/handlers/iac.py`) answers three questions for each file. What will this workload be allowed to do to its host? Is every image named exactly? What will deploying it try to fetch?
 
 | File | Recognised by | Checked |
 |---|---|---|

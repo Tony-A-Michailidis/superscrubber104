@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from airlock.core.errors import ConfigError
-from airlock.core.model import (
+from superscrubber104.core.errors import ConfigError
+from superscrubber104.core.model import (
     ArtifactRef,
     Disposition,
     Result,
@@ -16,7 +16,7 @@ from airlock.core.model import (
     Unit,
     UnitKind,
 )
-from airlock.core.policy import (
+from superscrubber104.core.policy import (
     AllowlistMode,
     KeyRole,
     LicencePolicy,
@@ -25,14 +25,14 @@ from airlock.core.policy import (
     evaluate,
     load_policy,
 )
-from airlock.core.rules import FindingFactory, RuleRegistry
-from airlock.core.signing import generate_key
+from superscrubber104.core.rules import FindingFactory, RuleRegistry
+from superscrubber104.core.signing import generate_key
 from tests.core.helpers import KEY_ID, TOOL
 
 EXAMPLES = Path(__file__).parents[2] / "examples"
 TODAY = date(2026, 11, 10)
 HEADER = """\
-apiVersion: airlock/v1alpha1
+apiVersion: superscrubber104/v1alpha1
 kind: Policy
 metadata: {name: test, version: "1"}
 """
@@ -243,10 +243,10 @@ def test_invalid_policies(tmp_path: Path, body: str, message: str) -> None:
 def test_wrong_kind_and_version(tmp_path: Path) -> None:
     path = tmp_path / "p.yaml"
     meta = "metadata: {name: a, version: b}\n"
-    path.write_text("apiVersion: airlock/v1alpha1\nkind: Request\n" + meta)
+    path.write_text("apiVersion: superscrubber104/v1alpha1\nkind: Request\n" + meta)
     with pytest.raises(ConfigError, match="kind"):
         load_policy(path)
-    path.write_text("apiVersion: airlock/v2\nkind: Policy\n" + meta)
+    path.write_text("apiVersion: superscrubber104/v2\nkind: Policy\n" + meta)
     with pytest.raises(ConfigError, match="apiVersion"):
         load_policy(path)
 

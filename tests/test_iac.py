@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from airlock.core.model import Result, Verdict
-from airlock.core.yamlio import load_untrusted_yaml
-from airlock.formats.golang import zip_hash
+from superscrubber104.core.model import Result, Verdict
+from superscrubber104.core.yamlio import load_untrusted_yaml
+from superscrubber104.formats.golang import zip_hash
 from tests.models_helpers import artifact, findings_of, inspect
 from tests.software_fixtures import write
 

@@ -12,7 +12,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from airlock.formats.gguf import GGML_TYPES
+from superscrubber104.formats.gguf import GGML_TYPES
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 TEMPLATE = (
@@ -358,7 +358,7 @@ def hf_package(
     if card_licence is not None:
         files["README.md"] = (
             f"---\nlicense: {card_licence}\npipeline_tag: text-generation\nlanguage: [en]\n---\n"
-            "# Tiny chat\n\n## Intended use\n\nTesting airlock.\n\n## Limitations\n\nNone useful.\n"
+            "# Tiny chat\n\n## Intended use\n\nTesting superscrubber104.\n\n## Limitations\n\nNone useful.\n"
         )
     write(root, files)
     if download_records:
