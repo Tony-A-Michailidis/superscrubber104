@@ -242,7 +242,7 @@ Neither inspects what is inside the artifacts, applies a site's policy, or recor
 | | Zarf / Hauler | superscrubber104 |
 |---|---|---|
 | Package, transfer, deploy or serve | yes | carries any files; `stage` writes local repositories, never deploys |
-| Signatures and checksums of what they carry | yes | verified again, plus its own bundle signature and replay ledger |
+| Signatures and checksums of what they carry | yes | Zarf's checksums and signature verified again; Hauler's cosign signatures not yet (recorded as not assessed); plus its own bundle signature and replay ledger |
 | SBOM | Zarf generates (Syft); Hauler carries upstream SBOMs | generates (CycloneDX, ML-BOM) from what it inspected |
 | Inspection of content: models, pickles, prompts, secrets, offline readiness | not documented | yes |
 | Policy decision, approvals, evidence mapped to NIST 800-53 (or a site's own control profile) | not documented | yes |
