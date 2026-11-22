@@ -150,6 +150,8 @@ Then, in order:
    Every image a component names must appear in the index's `org.opencontainers.image.ref.name` annotations, after normalisation: `library/registry:3.1.1` becomes `docker.io/library/registry:3.1.1`. A missing image is `zarf.package.incomplete`, unless the package is differential (see 8).
 6. **Component files.** A `files` entry with a recorded sha256 is compared with the one file stored under `<component>/files/<index>/`. A mismatch is `zarf.package.checksum-mismatch` (final), and a missing file or component tar is `zarf.package.incomplete`.
 
+   Everything else a component declares must be in its tar too, at the paths Zarf writes (checked against the 1.0.1 init package, whose charts, values files and manifests all match): `charts/<chart>-<version>.tgz`, `values/<chart>-<version>-<n>` for each values file, `manifests/<manifest>-<n>.yaml` for each manifest file and `kustomization-<manifest>-<n>.yaml` for each kustomization, something under `repos/` when there are git repositories, and `data/<n>/` for each data injection. Anything absent is `zarf.package.incomplete`. Data injections, which copy files into running pods at deploy time, are also listed per component in the evidence (source, namespace, selector, container, path).
+
    Entries with `extractPath`, or whose source was a directory, are not compared: their recorded checksum is of something else. A component tar that cannot be read leaves the comparison not assessed.
 
    Files placed outside `###ZARF_TEMP###` are listed under `zarf.component.host-files` (low), with target, executable flag and symlinks.
@@ -163,7 +165,7 @@ Then, in order:
     * members: the package, its definition, checksums, signature, component tars, image index, SBOMs and documentation;
     * name, version, kind, architecture, schema and the Zarf version that built it;
     * the checksum summary and the signature outcome;
-    * per-component images, charts, manifests, repositories and file counts;
+    * per-component images, charts, manifests, repositories, data injections and file counts;
     * host files, action counts, `onCreate` commands, and the differential base.
 
     Zarf's own SBOMs are recorded as present. They are the builder's claim; superscrubber104's SBOM is built from what it inspected.

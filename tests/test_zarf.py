@@ -438,3 +438,46 @@ def test_the_expansion_allowance_follows_the_archive_limits() -> None:
     assert limits.allowance(1000) == 16 << 20  # small artifacts: the ratio is not judged
     assert limits.allowance(1 << 20) == 200 << 20  # the ratio
     assert limits.allowance(100 << 20) == 1 << 30  # never above the size limit
+
+
+def test_declared_charts_manifests_repos_and_data_must_be_present(tmp_path: Path) -> None:
+    document = definition()
+    component = document["components"][0]
+    component["charts"] = [
+        {"name": "web", "version": "1.2.0", "valuesFiles": ["a.yaml", "b.yaml"], "url": "x"}
+    ]
+    component["manifests"].append({"name": "extra", "kustomizations": ["k/"]})
+    component["repos"] = ["https://git.example.org/app.git"]
+    component["dataInjections"] = [
+        {
+            "source": "models/",
+            "target": {"namespace": "ai", "selector": "app=llm", "container": "srv", "path": "/m"},
+        }
+    ]
+    present = {"app/charts/web-1.2.0.tgz": b"chart", "app/values/web-1.2.0-0": b"a: 1"}
+    result = _run(tmp_path, build(document, parts=components(files=present)))
+    (incomplete,) = _failed(result, "zarf.package.incomplete")
+    assert incomplete["missing"] == [
+        "components/app.tar: values file 1 of chart web",
+        "components/app.tar: manifest extra kustomization 0",
+        "components/app.tar: git repositories",
+        "components/app.tar: data injection 0",
+    ]
+    (summary,) = _unit(result)["components"]
+    assert summary["dataInjections"] == [
+        {
+            "source": "models/",
+            "namespace": "ai",
+            "selector": "app=llm",
+            "container": "srv",
+            "path": "/m",
+        }
+    ]
+
+
+def test_complete_declared_content_passes(tmp_path: Path) -> None:
+    document = definition()
+    document["components"][0]["charts"] = [{"name": "web", "version": "1.2.0", "url": "x"}]
+    present = {"app/charts/web-1.2.0.tgz": b"chart"}
+    result = _run(tmp_path, build(document, parts=components(files=present)))
+    assert "zarf.package.incomplete" not in findings_of(result)

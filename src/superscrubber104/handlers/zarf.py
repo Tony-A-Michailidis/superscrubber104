@@ -590,6 +590,20 @@ class _Package:
                     mismatched.append(
                         {"file": f"{tar}: {path}", "expected": recorded, "actual": actual}
                     )
+        for component in self.components:
+            name = str(component.get("name"))
+            tar = f"components/{name}.tar"
+            expected = _declared_content(component, name)
+            files = self.contents.components.get(tar)
+            if not expected or tar in self.contents.unreadable_components:
+                continue
+            if files is None:
+                if not _list(component.get("files")):  # already reported with its files
+                    missing.append(f"{tar} (charts, manifests, repositories or data)")
+                continue
+            for label, prefix, suffix in expected:
+                if not any(p.startswith(prefix) and p.endswith(suffix) for p in files):
+                    missing.append(f"{tar}: {label}")
         if mismatched:
             self.ctx.recorder.fail(
                 "zarf.package.checksum-mismatch",
@@ -608,6 +622,60 @@ class _Package:
                 + "; ".join(f"{k}: {v}" for k, v in sorted(unreadable.items()))[:500],
             )
         return host, missing, checked
+
+
+def _declared_content(component: dict[str, Any], name: str) -> list[tuple[str, str, str]]:
+    """(label, path prefix, path suffix) of what a component's tar must hold besides its files.
+
+    Paths as Zarf writes them, checked against Zarf 1.0.1's init package (doc 35):
+    ``<c>/charts/<chart>-<version>.tgz``, ``<c>/values/<chart>-<version>-<n>``,
+    ``<c>/manifests/<manifest>-<n>.yaml`` (``kustomization-<manifest>-<n>.yaml``),
+    ``<c>/repos/...`` and ``<c>/data/<n>/...``. Without a version, any version matches.
+    """
+    out: list[tuple[str, str, str]] = []
+    for chart in _list(component.get("charts")):
+        chart = _map(chart)
+        chart_name = _text(chart.get("name"))
+        if not chart_name:
+            continue
+        version = next(
+            (
+                str(v)
+                for v in (
+                    chart.get("version"),
+                    _map(chart.get("helm")).get("version"),
+                    _map(chart.get("oci")).get("version"),
+                )
+                if isinstance(v, str | int) and str(v)
+            ),
+            None,
+        )
+        stem = f"{chart_name}-{version}" if version else f"{chart_name}-"
+        out.append((f"chart {chart_name} {version or ''}".strip(), f"{name}/charts/{stem}", ".tgz"))
+        for index, _ in enumerate(_list(chart.get("valuesFiles"))):
+            out.append(
+                (
+                    f"values file {index} of chart {chart_name}",
+                    f"{name}/values/{stem}",
+                    f"-{index}",
+                )
+            )
+    for manifest in _list(component.get("manifests")):
+        manifest = _map(manifest)
+        manifest_name = _text(manifest.get("name"))
+        if not manifest_name:
+            continue
+        for index, _ in enumerate(_list(manifest.get("files"))):
+            path = f"{name}/manifests/{manifest_name}-{index}.yaml"
+            out.append((f"manifest {manifest_name} file {index}", path, ""))
+        for index, _ in enumerate(_list(manifest.get("kustomizations"))):
+            path = f"{name}/manifests/kustomization-{manifest_name}-{index}.yaml"
+            out.append((f"manifest {manifest_name} kustomization {index}", path, ""))
+    if _list(component.get("repos")) or _list(component.get("repositories")):
+        out.append(("git repositories", f"{name}/repos/", ""))
+    for index, _ in enumerate(_list(component.get("dataInjections"))):
+        out.append((f"data injection {index}", f"{name}/data/{index}/", ""))
+    return out
 
 
 def _unit_claims(package: _Package, summary: dict[str, object]) -> tuple[UnitClaim, ...]:
@@ -838,4 +906,17 @@ def _component_summary(component: dict[str, Any]) -> dict[str, object]:
         "manifests": manifests,
         "repositories": repositories,
         "files": len(_list(component.get("files"))),
+        # files Zarf copies into running pods at deploy time, past the image review
+        "dataInjections": [_injection(d) for d in _list(component.get("dataInjections"))][:50],
+    }
+
+
+def _injection(entry: object) -> dict[str, object]:
+    target = _map(_map(entry).get("target"))
+    return {
+        "source": str(_map(entry).get("source") or "")[:300],
+        "namespace": str(target.get("namespace") or "")[:100],
+        "selector": str(target.get("selector") or "")[:200],
+        "container": str(target.get("container") or "")[:100],
+        "path": str(target.get("path") or "")[:300],
     }
