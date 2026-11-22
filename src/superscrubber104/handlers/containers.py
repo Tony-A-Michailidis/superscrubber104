@@ -52,6 +52,16 @@ _HAULER_KINDS = {
     "dev.hauler/sboms": "sbom",
     "dev.hauler/referrers": "referrer",
 }
+# Layer media types that are not a filesystem: signatures, attestations, SBOMs, charts, files.
+_NOT_FILESYSTEM = (
+    "cosign.simplesigning",
+    "dsse.envelope",
+    "in-toto",
+    "spdx",
+    "cyclonedx",
+    "helm.chart",
+    "application/vnd.content.hauler.file",
+)
 _DOCUMENT_LIMIT = 4 << 20  # a JSON blob a memory store keeps (index, manifest, config)
 _DOCUMENTS_TOTAL = 64 << 20
 # Hauler's default haul names; such a tar is read by the Hauler handler, not as an image archive.
@@ -225,22 +235,30 @@ def _l(value: object) -> list[Any]:
 
 
 def _artifact_kind(annotations: dict[str, Any], document: Any) -> str:
-    """What an OCI manifest holds. Only images get image checks (user, environment, start)."""
+    """What an OCI manifest holds. Only images get image checks (user, environment, start).
+
+    Decided by content first: an image config with any filesystem layer is an image, whatever
+    its annotations and tag say. Nothing authenticates a Hauler ``kind`` annotation or a ``.sig``
+    tag, so they may only name manifests whose layers are all of a known non-filesystem type;
+    otherwise a real image could be labelled a signature and skip its image checks.
+    """
     if not isinstance(document, dict):
         return "artifact"
-    if annotations.get("kind") in _HAULER_KINDS:
-        return _HAULER_KINDS[annotations["kind"]]
     config = document.get("config")
-    media = str(
-        (config.get("mediaType") if isinstance(config, dict) else None)
-        or document.get("artifactType")
-        or ""
-    )
-    layers = [
+    config_media = str((config.get("mediaType") if isinstance(config, dict) else None) or "")
+    layer_media = [
         str(layer.get("mediaType") or "")
         for layer in _l(document.get("layers"))
         if isinstance(layer, dict)
     ]
+    if (not config_media or config_media in _IMAGE_CONFIGS) and any(
+        not any(marker in m for marker in _NOT_FILESYSTEM) for m in layer_media
+    ):
+        return "image"
+    if annotations.get("kind") in _HAULER_KINDS:
+        return _HAULER_KINDS[annotations["kind"]]
+    media = config_media or str(document.get("artifactType") or "")
+    layers = layer_media
     reference = str(annotations.get("org.opencontainers.image.ref.name") or "")
     if "helm" in media or any("helm.chart" in m for m in layers):
         return "helm-chart"

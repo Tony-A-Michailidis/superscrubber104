@@ -114,3 +114,43 @@ def test_a_second_copy_of_a_blob_is_a_final_conflict(tmp_path: Path) -> None:
     (conflict,) = findings_of(result)["package.member.conflicting-copies"]
     assert conflict.detail["files"][0]["file"] == blob
     assert result.assessment.summary.verdict.value == "refused"
+
+
+@pytest.mark.parametrize(
+    ("kind", "reference"),
+    [
+        ("dev.hauler/sigs", "docker.io/example/app:latest"),  # Hauler's kind annotation
+        ("dev.hauler/image", "docker.io/example/app:sha256-0123.sig"),  # a cosign-style tag
+        ("dev.hauler/atts", "docker.io/example/app:sha256-0123.att"),
+    ],
+)
+def test_labels_cannot_turn_an_image_into_a_signature(
+    tmp_path: Path, kind: str, reference: str
+) -> None:
+    """Nothing authenticates annotations or tags; an image with filesystem layers is an image."""
+    import gzip
+    import json
+
+    from tests.hauler_fixtures import Layout
+    from tests.zarf_fixtures import sha, tar
+
+    layer = tar({"app/run.sh": b"#!/bin/sh\nexec server\n"})
+    config = json.dumps(
+        {  # runs as root: an image check that must not be skipped
+            "architecture": "amd64",
+            "os": "linux",
+            "config": {},
+            "rootfs": {"type": "layers", "diff_ids": [f"sha256:{sha(layer)}"]},
+        }
+    ).encode()
+    layout = Layout()
+    layout.add(
+        reference,
+        (config, "application/vnd.oci.image.config.v1+json"),
+        [(gzip.compress(layer, mtime=0), "application/vnd.oci.image.layer.v1.tar+gzip", {})],
+        kind=kind,
+    )
+    result = _run(tmp_path, layout.members(), "haul.tar", "tar")
+    assert "container.user.root" in findings_of(result)
+    assert [u.kind for u in result.analysis.units].count(UnitKind.CONTAINER_IMAGE) == 1
+    assert _unit(result)["signatures"] == [] and _unit(result)["attestations"] == []
