@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import replace
 
-from superscrubber104.analyzer import TOOL, Analyzer
+from superscrubber104.analyzer import RUNTIME, Analyzer
 from superscrubber104.checks.evals import check_evals
 from superscrubber104.checks.offline import check_offline
 from superscrubber104.checks.provenance import check_upstream_trust
@@ -63,4 +63,4 @@ def finish(analyzer: Analyzer, assemblers: Sequence[UnitAssembler]) -> Analysis:
     check_superseded(analyzer.artifacts, ctx)
     check_renamed_packages(analyzer.artifacts, ctx)
     check_upstream_trust(artifacts, ctx)
-    return Analysis.create(TOOL, artifacts, units, components)
+    return Analysis.create(RUNTIME, artifacts, units, components)

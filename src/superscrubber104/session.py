@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from superscrubber104.analyzer import TOOL
+from superscrubber104.analyzer import RUNTIME
 from superscrubber104.catalog import builtin_registry
 from superscrubber104.core.controls import ControlMapping
 from superscrubber104.core.interfaces import Context
@@ -76,7 +76,7 @@ class Session:
         if approvals is not None:
             approved, records = approvals(findings, decisions)
         return Assessment(
-            tool=TOOL,
+            tool=RUNTIME,
             stage=stage,
             started_at=self.ctx.now,
             finished_at=max(utc_now(), self.ctx.now),

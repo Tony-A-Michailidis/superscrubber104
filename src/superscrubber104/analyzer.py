@@ -11,6 +11,7 @@ at the policy limit however they are nested.
 """
 
 import io
+import platform
 import posixpath
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -22,6 +23,7 @@ from superscrubber104.archive import (
     ARCHIVE_ERRORS,
     COMPRESSION,
     UNSUPPORTED,
+    ZSTD,
     ZSTD_ADVICE,
     Member,
     decompress,
@@ -49,6 +51,14 @@ from superscrubber104.hashing import hash_stream
 from superscrubber104.walker import BytesView, FileView, HeadView
 
 TOOL = ToolRef("superscrubber104", __version__)
+# Once per analysis and assessment, not per finding: what the result may depend on besides the
+# version. zstd support depends on the interpreter, so the same version can read more on one
+# host than another.
+RUNTIME = ToolRef(
+    "superscrubber104",
+    __version__,
+    {"python": platform.python_version(), "zstd": "yes" if ZSTD else "no"},
+)
 _ROOTFS_DIRS = frozenset(
     {"bin", "sbin", "etc", "usr", "lib", "lib64", "var", "opt", "root", "home"}
 )
