@@ -38,7 +38,7 @@ from superscrubber104 import bundle as layout
 from superscrubber104.core import chainlog
 from superscrubber104.core.canonical import sha256_digest
 from superscrubber104.core.errors import ConfigError, Superscrubber104Error
-from superscrubber104.core.model import API_VERSION, Artifact, ArtifactRef, UnitKind, Verdict
+from superscrubber104.core.model import API_VERSION, Artifact, ArtifactRef, Unit, UnitKind, Verdict
 from superscrubber104.core.policy import KeyRole, Policy
 from superscrubber104.core.signing import Signer, VerifyKey
 from superscrubber104.handlers.common import relative_to
@@ -300,9 +300,36 @@ stage_apt = _repo_stager(
 )
 
 
+def _carrier(s: _Stager, unit: Unit) -> str | None:
+    """Why an image cannot be copied on its own: it is inside a package, haul or archive."""
+    tops = {a.ref.path: a for a in s.verified.analysis.artifacts if not a.ref.nested}
+    top = tops.get(unit.root.path)
+    kinds = set(top.kinds) if top else set()
+    where = unit.root.path
+    if "zarf.package" in kinds:
+        return (
+            f"{unit.name} is inside the Zarf package {where}: push it with "
+            f"`zarf package mirror-resources {where} --registry-url <registry>`"
+        )
+    if "hauler.haul" in kinds:
+        return (
+            f"{unit.name} is inside the Hauler haul {where}: `hauler store load --filename "
+            f"{where}`, then `hauler store copy registry://<registry>`"
+        )
+    if unit.root.nested:
+        return (
+            f"{unit.name} is inside the archive {where}: deliver the image as its own archive "
+            "(docker save or an OCI layout) to stage it"
+        )
+    return None
+
+
 def stage_oci(s: _Stager) -> None:
     for unit in s.verified.analysis.units:
         if unit.kind is not UnitKind.CONTAINER_IMAGE:
+            continue
+        if (why := _carrier(s, unit)) is not None:
+            s.report.notes.append(why)  # copying the whole carrier would give skopeo nothing
             continue
         name = _safe(unit.name)
         paths = sorted({_top(m.artifact) for m in unit.members})

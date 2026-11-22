@@ -287,3 +287,61 @@ def test_stage_cli_exit_codes(tmp_path: Path, site: Site) -> None:
     assert never.exit_code == 3 and "refused: this bundle has not been accepted" in never.output
     done = CliRunner().invoke(main, ["stage", str(bundle), "--state", str(state), *common])
     assert done.exit_code == 0 and "report: " in done.output
+
+
+def test_images_inside_a_haul_or_an_archive_are_not_copied_whole(
+    tmp_path: Path, site: Site
+) -> None:
+    """Copying the carrier would put a whole haul where skopeo expects an image."""
+    import io
+    import zipfile
+
+    from tests.hauler_fixtures import haul, haul_bytes
+
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as archive:
+        archive.writestr("app.tar", docker_archive())
+    delivery = write(
+        tmp_path / "delivery",
+        {
+            "images/app.tar": docker_archive(),
+            "hauls/haul.tar.gz": haul_bytes(haul(), "gzip"),
+            "bundles/images.zip": zipped.getvalue(),
+        },
+    )
+    request = tmp_path / "request.yaml"
+    request.write_text(
+        site.request.read_text(encoding="utf-8").split("  contents:")[0]
+        + '  contents:\n    - {name: all, paths: ["**"]}\n',
+        encoding="utf-8",
+    )
+    lenient = LENIENT + "  error: warn\n"
+    bundle = pack(
+        [delivery],
+        tmp_path / "bundle",
+        signer=site.pack_key,
+        policy=make_policy(tmp_path / "low", lenient),
+        request_path=request,
+        now=NOW,
+    ).bundle
+    state = tmp_path / "state"
+    result = verify(
+        bundle, policy=site.policy(lenient), now=NOW, state=state, receipt_signer=site.receipt_key
+    )
+    assert result.assessment.summary.verdict is Verdict.PASSED
+    out = tmp_path / "high" / "oci"
+    report = stage(
+        bundle,
+        policy=site.policy(lenient),
+        state=state,
+        targets={"oci": out},
+        now=LATER,
+        signer=site.receipt_key,
+    ).report
+    staged = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    assert not any(p.endswith(("haul.tar.gz", "images.zip")) for p in staged)
+    (oci,) = report.targets
+    assert oci.copied == 1  # the docker save archive, which is an image on its own
+    notes = " ".join(oci.notes)
+    assert "hauler store load --filename hauls/haul.tar.gz" in notes
+    assert "inside the archive bundles/images.zip" in notes

@@ -36,7 +36,7 @@ superscrubber104 writes files and indexes. It never pushes to a registry or call
 | `npm` | npm tarballs | Verdaccio storage: `<name>/<name>-<version>.tgz` plus a packument with `shasum` and `integrity`, merged with existing versions | point Verdaccio's storage here |
 | `dnf` | dnf mirror units **as they came**, so vendor `repomd.xml` and its signature are kept; loose RPMs | each mirror at its path in the delivery (two mirrors both named `os` cannot collide), `local/Packages/` | `createrepo_c --update`, then sign with the site key |
 | `apt` | apt mirror units as they came (`InRelease` kept); loose debs | each mirror at its path in the delivery, `local/pool/` | build the index with reprepro or aptly, signed with the site key |
-| `oci` | container-image units | `<image>/…` (the archive or OCI layout) | `skopeo copy … docker://<registry>/<image>` |
+| `oci` | container-image units that are their own archive or layout | `<image>/…` (the archive or OCI layout) | `skopeo copy … docker://<registry>/<image>`. An image inside a Zarf package, a Hauler haul or another archive is not copied (the whole carrier would give skopeo nothing); the report says how to push it: `zarf package mirror-resources`, `hauler store load` and `hauler store copy`, or deliver the image on its own |
 | `windows` | `.msu`, `.cab`, `.msi`, `.exe`, `.msix`, `.appx` | flat | import into WSUS, or deploy from the share |
 
 The stage report (`StageReport`) lists, per target, files copied and already present, the items staged and the notes, and why staging stopped if it did. It is kept under the state directory and its digest is in the ledger.
