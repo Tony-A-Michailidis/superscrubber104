@@ -4,6 +4,23 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- `superscrubber104 request init` writes a transfer request to edit, from the delivery if given; `request show` validates one and lists the files it does not declare.
+- Zarf completeness covers every part of a component: charts, values files, manifests, kustomizations, git repositories and data injections, which are also listed in the evidence.
+- `trust.minimum` can require signed Zarf packages (`zarf.package: signature`).
+- The analysis and the assessment record the Python version and whether zstd could be read.
+
+### Fixed
+
+- Only the first copy of a duplicated archive member was inspected; every copy is now. Zarf packages and Hauler hauls holding two different copies of one file get `package.member.conflicting-copies` (critical, final).
+- A label (Hauler's `kind` annotation, a `.sig` tag) could turn a real image into a "signature" and switch off its image checks. Content now decides.
+- Zarf and Hauler decompression honours the archive ratio limit, not only the 500 GiB size limit.
+- A renamed Zarf package or haul was walked as a plain archive with no record of the missing package checks; they are now recorded as not assessed, with the name to give it.
+- An empty `checksums.txt` or `zarf.yaml` got the wrong reason; trust could miss a member with an escaped name; symlinks of a file in Zarf's temporary directory were not listed as host files.
+- `stage` copied a whole Zarf package or haul into the `oci` target for an image inside it; it now says how to push such images instead.
+- The source may not import `socket`, `ssl` or any other network module (ruff).
+
 ## [0.1.0] - 2026-11-20
 
 The first release. superscrubber104 is pre-alpha: every command works end to end and is tested, it has been tried on one real delivery, and it has not yet been used for a real transfer.

@@ -15,7 +15,7 @@ Working in /home/user/superscrubber104-demo
 == 1. Keys: the build pipeline's packing key ==
 
 $ superscrubber104 keygen -o keys --name pack --holder build-pipeline
-  key id: ed25519:5583e898a8ce840e7537eb055f162ec699f9746035b568717debc665a48fe97b
+  key id: ed25519:abefe889b042dcb57215c281fa2cedb8052e3b1c17a83c3f163d88e6cd9b0015
   
   To trust this key, add it to the receiving side's policy (publicKey is relative to the policy file):
   ... (9 more lines)
@@ -33,7 +33,7 @@ $ superscrubber104 pack delivery --request request.yaml --key keys/pack.key --po
   WARN            not assessed: vuln.component.known  [0cd93b81a6d98aa3]
                   bundle: the check did not run: no vulnerability scanner is configured (plugins.trivy)
   
-  62 of 212 rules exercised, 255 checks passed; findings: 0 block, 0 need approval, 4 warn, 1 allowed
+  62 of 213 rules exercised, 255 checks passed; findings: 0 block, 0 need approval, 4 warn, 1 allowed
   verdict: PASSED
   manifest: sha256:1c8d11df42dc26459e367a9bcf6f60f65f149fe31b2b076b55b4dbd448c61009
   ... (1 more lines)
@@ -51,7 +51,7 @@ $ superscrubber104 verify bundle --policy high/policy.yaml --state high/state --
   WARN            not assessed: vuln.component.known  [0cd93b81a6d98aa3]
                   bundle: the check did not run: no vulnerability scanner is configured (plugins.trivy)
   
-  78 of 212 rules exercised, 314 checks passed; findings: 0 block, 0 need approval, 4 warn, 1 allowed
+  78 of 213 rules exercised, 314 checks passed; findings: 0 block, 0 need approval, 4 warn, 1 allowed
   verdict: PASSED
   wrote:    import-1/assessment.verify.json
   ... (3 more lines)
@@ -100,7 +100,7 @@ $ superscrubber104 verify bundle --policy high/policy.yaml --state high/state --
   WARN            not assessed: vuln.component.known  [0cd93b81a6d98aa3]
                   bundle: the check did not run: no vulnerability scanner is configured (plugins.trivy)
   
-  82 of 212 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+  82 of 213 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
   verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
   wrote:    import-2/assessment.verify.json
   wrote:    import-2/analysis.verify.json

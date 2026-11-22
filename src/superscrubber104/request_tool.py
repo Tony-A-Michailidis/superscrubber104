@@ -25,6 +25,10 @@ def _q(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _files_word(count: int) -> str:
+    return f"{count} file" if count == 1 else f"{count} files"
+
+
 def _files(root: Path) -> list[str]:
     """Every file under ``root``, as a delivery-relative POSIX path. Links are not followed."""
     out = []
@@ -128,9 +132,8 @@ def show(request: TransferRequest, delivery: Path | None = None) -> Shown:
     files = _files(delivery) if delivery is not None else None
     for entry in request.contents:
         unit = f"  unit {entry.unit.value}" if entry.unit else ""
-        covered = (
-            f"  [{sum(1 for f in files if entry.covers(f))} files]" if files is not None else ""
-        )
+        count = sum(1 for f in files if entry.covers(f)) if files is not None else None
+        covered = f"  [{_files_word(count)}]" if count is not None else ""
         lines.append(f"  {entry.name}{unit}{covered}")
         lines.append(f"    paths    {', '.join(entry.paths)}")
         if entry.upstream:
@@ -139,7 +142,7 @@ def show(request: TransferRequest, delivery: Path | None = None) -> Shown:
             lines.append(f"    upstream {up.type}: {where}")
     undeclared = [f for f in files if not request.entries_for(f)] if files is not None else []
     if files is not None:
-        lines += ["", f"delivery  {len(files)} files, {len(undeclared)} not declared"]
+        lines += ["", f"delivery  {_files_word(len(files))}, {len(undeclared)} not declared"]
         lines += [f"  undeclared: {f}" for f in undeclared[:_UNDECLARED_SHOWN]]
         if len(undeclared) > _UNDECLARED_SHOWN:
             lines.append(f"  ... and {len(undeclared) - _UNDECLARED_SHOWN} more")

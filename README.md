@@ -62,7 +62,7 @@ WARN            kb.embedding-model.unrecorded  [e63d460f69e659dc]
 WARN            not assessed: malware.detected  [f6490e189d646738]
                 bundle: the check did not run: no malware scanner is configured (plugins.clamav)
 ...
-82 of 212 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+82 of 213 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
 verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
 ```
 
@@ -112,7 +112,7 @@ BLOCK           model.pickle.unknown-import  [3f930721fb6da0fb]
                 hint: add trusted classes to the policy's 'pickle-globals' allowlist
                 approvals: 0 of 2 required
 ...
-32 of 212 rules exercised, 252 checks passed; findings: 1 block, 10 need approval, 2 warn, 35 allowed
+32 of 213 rules exercised, 252 checks passed; findings: 1 block, 10 need approval, 2 warn, 35 allowed
 verdict: BLOCKED - a policy blocker stands; it can be overridden by an approval quorum
 ```
 
@@ -185,7 +185,7 @@ WARN            not assessed: malware.detected  [f6490e189d646738]
 WARN            not assessed: replay.bundle.expired  [0d542c3bfff6f26f]
                 bundle: the check did not run: the policy does not set transfer.maxBundleAge
 ...
-32 of 212 rules exercised, 36 checks passed; findings: 0 block, 0 need approval, 4 warn, 0 allowed
+32 of 213 rules exercised, 36 checks passed; findings: 0 block, 0 need approval, 4 warn, 0 allowed
 verdict: PASSED
 $ superscrubber104 report import -f html -o import/report.html
 ```
