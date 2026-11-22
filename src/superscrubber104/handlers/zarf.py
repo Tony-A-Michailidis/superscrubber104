@@ -207,7 +207,7 @@ def _open(view: ArtifactView, ctx: Context) -> Iterator[IO[bytes]]:
     """The package's tar stream: as is, or decompressed within the expansion limit."""
     with view.open() as raw:
         if detect_format(view.head(512)) == "zstd":
-            limit = ctx.policy.limits.archive.max_expanded_bytes
+            limit = ctx.policy.limits.archive.allowance(view.size)  # ratio and size
             with decompress("zstd", raw) as expanded:
                 yield capped(expanded, limit)
         else:

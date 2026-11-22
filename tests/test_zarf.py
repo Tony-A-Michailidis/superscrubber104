@@ -417,3 +417,24 @@ def test_a_minimum_trust_level_can_be_required_of_packages(tmp_path: Path, signe
         assert [v.level for v in package.verifications] == [TrustLevel.CHECKSUM]
         (finding,) = _failed(result, "trust.upstream.insufficient")
         assert (finding["required"], finding["established"]) == ("signature", "checksum")
+
+
+@pytest.mark.skipif(not ZSTD, reason="zstd needs 3.14 or the backport")
+def test_a_compression_bomb_stops_at_the_ratio(tmp_path: Path) -> None:
+    members = build()
+    members["components/filler.bin"] = bytes(40 << 20)  # 40 MiB of zeros: a tiny zstd frame
+    data = package_bytes(members, zstd=True)
+    assert len(data) * 200 < 40 << 20
+    root = write(tmp_path / "d", {NAME + ".zst": data})
+    (gap,) = findings_of(inspect(root))["zarf.package.checksum-mismatch"]
+    assert gap.result is Result.NOT_ASSESSED
+    assert "cannot be read" in str(gap.not_assessed_reason)
+
+
+def test_the_expansion_allowance_follows_the_archive_limits() -> None:
+    from superscrubber104.core.policy import ArchiveLimits
+
+    limits = ArchiveLimits(max_ratio=200, ratio_min_bytes=16 << 20, max_expanded_bytes=1 << 30)
+    assert limits.allowance(1000) == 16 << 20  # small artifacts: the ratio is not judged
+    assert limits.allowance(1 << 20) == 200 << 20  # the ratio
+    assert limits.allowance(100 << 20) == 1 << 30  # never above the size limit

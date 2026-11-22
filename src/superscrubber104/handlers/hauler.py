@@ -61,7 +61,7 @@ def _open(view: ArtifactView, ctx: Context) -> Iterator[IO[bytes]]:
     with view.open() as raw:
         if fmt in ("zstd", "gzip"):
             with decompress(fmt, raw) as expanded:
-                yield capped(expanded, ctx.policy.limits.archive.max_expanded_bytes)
+                yield capped(expanded, ctx.policy.limits.archive.allowance(view.size))
         else:
             yield raw
 

@@ -283,6 +283,13 @@ class ArchiveLimits:
     ratio_min_bytes: int = 16 * 2**20  # the ratio is only judged once this much has expanded
     max_expanded_bytes: int = 500 * 2**30
 
+    def allowance(self, compressed_size: int) -> int:
+        """Bytes a handler may expand from an artifact of ``compressed_size`` bytes: the ratio
+        (judged only above ``ratio_min_bytes``), never more than ``max_expanded_bytes``. The same
+        rule as the analyzer's own archive walk."""
+        by_ratio = max(self.ratio_min_bytes, max(compressed_size, 1) * self.max_ratio)
+        return min(self.max_expanded_bytes, by_ratio)
+
 
 @dataclass(frozen=True, slots=True)
 class Limits:

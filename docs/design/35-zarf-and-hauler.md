@@ -106,7 +106,7 @@ The default `limits.archive.maxDepth` rose from 4 to 5. A package holds image la
 
 **Recognised** by name (`zarf-package-*.tar[.zst]`, `zarf-init-*.tar[.zst]`), with a tar or zstd header. It is a Zarf package only if `zarf.yaml` is in it; otherwise it is left to the other handlers.
 
-**One streaming pass** over the archive, decompressed through `archive.capped` within `maxExpandedBytes`:
+**One streaming pass** over the archive, decompressed through `archive.capped` within the archive limits: `maxRatio` (judged above `ratioMinBytes`) and `maxExpandedBytes`, the same rule as the archive walk. A package that would expand further is not assessed:
 * hashes every member, and every file inside each `components/<name>.tar`, with sha256;
 * keeps only `zarf.yaml`, `checksums.txt` and `zarf.bundle.sig` (up to 16 MiB each), plus the image index, manifests and configs (JSON blobs up to 4 MiB, 64 MiB in all).
 
@@ -206,7 +206,7 @@ With an identity the policy does not accept, the signature is `untrusted` (not `
 
 **Recognised** by Hauler's default name (`haul*.tar`, `haul*.tar.gz`, `haul*.tar.zst`), with a tar, gzip or zstd header. It is treated as a haul only if `oci-layout` and `index.json` are at its root. A haul with another name is walked as an ordinary archive, without the layout checks. Such a tar is not also read as a `docker save` archive by the container handler.
 
-**One streaming pass**, decompressed through `archive.capped` within `maxExpandedBytes`, hashes every member and keeps the small JSON documents (`containers.MemoryStore`). Then:
+**One streaming pass**, decompressed through `archive.capped` within the archive limits: `maxRatio` (judged above `ratioMinBytes`) and `maxExpandedBytes`, the same rule as the archive walk. A package that would expand further is not assessed, hashes every member and keeps the small JSON documents (`containers.MemoryStore`). Then:
 
 * **Layout.** The container checks run over the whole layout:
   * every blob hashes to its name, and every referenced blob is present;

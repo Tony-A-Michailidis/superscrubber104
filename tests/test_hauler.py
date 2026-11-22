@@ -154,3 +154,23 @@ def test_labels_cannot_turn_an_image_into_a_signature(
     assert "container.user.root" in findings_of(result)
     assert [u.kind for u in result.analysis.units].count(UnitKind.CONTAINER_IMAGE) == 1
     assert _unit(result)["signatures"] == [] and _unit(result)["attestations"] == []
+
+
+def test_a_compression_bomb_stops_at_the_ratio_not_at_500_gib(tmp_path: Path) -> None:
+    """The handler decompresses the haul itself, so it applies the archive limits' ratio too."""
+    import gzip
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, data in [("oci-layout", b"{}"), ("blobs/sha256/" + "0" * 64, bytes(40 << 20))]:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    bomb = gzip.compress(buffer.getvalue(), mtime=0)
+    assert len(bomb) * 200 < 40 << 20  # far beyond the 200:1 ratio
+    result = inspect(write(tmp_path / "d", {"haul.tar.gz": bomb}))
+    (gap,) = findings_of(result)["container.layer.digest-mismatch"]
+    assert gap.result is Result.NOT_ASSESSED
+    assert "cannot be read" in str(gap.not_assessed_reason)
