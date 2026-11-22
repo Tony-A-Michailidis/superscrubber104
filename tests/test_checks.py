@@ -98,6 +98,8 @@ def test_integrity_and_authenticity_rules_are_final_and_nothing_else_is() -> Non
         "zarf.package.checksum-mismatch",  # against the package's own checksums
         "zarf.package.incomplete",
         "zarf.package.unlisted",  # owner's decision: nobody vouched for it
+        # a signed package holding two different copies of a file: which was signed is unknown
+        "package.member.conflicting-copies",
     }
     assert all(r.rationale for r in registry)
 

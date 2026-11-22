@@ -230,7 +230,31 @@ def test_duplicate_members(tmp_path: Path) -> None:
         archive.writestr("config.json", b'{"safe": true}')
         archive.writestr("config.json", b'{"safe": false}')
     out = analyze(tmp_path, buffer.getvalue(), "d.zip")
-    assert out.one("archive.member.duplicate").subject.display == "d.zip!/config.json"
+    # Both copies are inventoried; the second under its own unsafe reference, name kept.
+    copy = "d.zip!/%00copy-2/config.json"
+    assert out.one("archive.member.duplicate").subject.display == copy
+    assert (
+        out.artifacts["d.zip!/config.json"].sha256 == hashlib.sha256(b'{"safe": true}').hexdigest()
+    )
+    assert out.artifacts[copy].sha256 == hashlib.sha256(b'{"safe": false}').hexdigest()
+    assert out.artifacts[copy].ref.unsafe and not out.artifacts["d.zip!/config.json"].ref.unsafe
+
+
+def test_a_later_duplicate_is_inspected_like_any_member(tmp_path: Path) -> None:
+    """The copy that extraction keeps is the last; a check of the first alone would miss it."""
+    from tests.models_helpers import findings_of, inspect
+    from tests.software_fixtures import write
+
+    # Raw opcodes of a pickle that calls os.system: never unpickled by anything here.
+    evil = b"\x80\x02cos\nsystem\nq\x00X\x04\x00\x00\x00echoq\x01\x85q\x02Rq\x03."
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive, warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        archive.writestr("model/weights.pkl", b"\x80\x02K\x01.")  # the integer 1
+        archive.writestr("model/weights.pkl", evil)
+    found = findings_of(inspect(write(tmp_path / "d", {"m.zip": buffer.getvalue()})))
+    [dangerous] = found["model.pickle.dangerous-import"]
+    assert dangerous.subject.display == "m.zip!/model/%00copy-2/weights.pkl"
 
 
 def test_encrypted_members_are_reported(tmp_path: Path) -> None:

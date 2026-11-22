@@ -43,7 +43,7 @@ from superscrubber104.core.model import (
     UnitClaim,
     Verification,
 )
-from superscrubber104.core.paths import NameIssue, check_member_name, link_escapes
+from superscrubber104.core.paths import NameIssue, check_member_name, copy_name, link_escapes
 from superscrubber104.core.policy import ArchiveLimits
 from superscrubber104.hashing import hash_stream
 from superscrubber104.walker import BytesView, FileView, HeadView
@@ -295,6 +295,7 @@ class Analyzer:
     ) -> None:
         recorder = self.ctx.recorder
         seen: set[str] = set()
+        copies: Counter[str] = Counter()
         failed: Counter[str] = Counter()
         total = 0
         top_level: set[str] = set()
@@ -318,8 +319,13 @@ class Analyzer:
             elif issue is NameIssue.UNSAFE:
                 fail("archive.member.unsafe-name", ref, name=name)
             if name in seen:
+                # Every copy is inspected: extraction keeps the last, so a check of the first
+                # alone would miss what is actually used. A later copy gets its own unsafe
+                # reference (never a filesystem path), with the file name kept so that handlers
+                # still recognise it: models/a/%00copy-2/config.json.
+                copies[name] += 1
+                ref = view.ref.child(copy_name(name, copies[name] + 1), unsafe=True)
                 fail("archive.member.duplicate", ref, name=name)
-                continue
             seen.add(name)
 
             kind = member.entry_type

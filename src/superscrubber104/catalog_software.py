@@ -664,6 +664,17 @@ ZARF = (
         final=True,
     ),
     _rule(
+        "package.member.conflicting-copies",
+        "Package holds two different copies of one file",
+        C,
+        ("SI-7", "SR-11"),
+        "A Zarf package or Hauler haul holds the same path more than once, with different "
+        "content. Its checksums and signature vouch for one copy, extraction keeps the last, "
+        "so what would be deployed cannot be told from what was signed. Treated as tampering: "
+        "the copies' content is still inspected, but nothing in the package is trusted.",
+        final=True,
+    ),
+    _rule(
         "zarf.component.actions",
         "Zarf component runs commands on the deploying host",
         M,

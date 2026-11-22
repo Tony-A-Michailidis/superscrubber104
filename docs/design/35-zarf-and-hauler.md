@@ -120,6 +120,7 @@ Then, in order:
    * Any other schema, or a definition that cannot be read, makes every Zarf rule **not assessed**, never a failure.
 2. **Checksum chain.** These are records that travelled with the content, so all are **final**.
    * `zarf.package.checksum-mismatch`: the sha256 of `checksums.txt` differs from the aggregate checksum, or a listed file differs from its line. A duplicated member name counts if any copy differs.
+   * `package.member.conflicting-copies` (critical, final): the package holds one path twice with different content, `zarf.yaml` included. Its signature and checksums vouch for one copy, extraction keeps the last, so nothing in the package is given a trust level. The components of every copy of `zarf.yaml` are still checked, so deploy actions hidden in a second copy are reported. Hauler hauls get the same rule for any path in their layout.
    * `zarf.package.incomplete`: a listed file is absent, or the definition has an aggregate checksum but there is no `checksums.txt`.
    * `zarf.package.unlisted` (high): a file is neither listed nor among the provenance files (`zarf.yaml`, `checksums.txt`, `zarf.bundle.sig`, and whatever `build.provenanceFiles` names, which the signature covers).
    * A package with no `checksums.txt` and no aggregate checksum has these rules recorded as not assessed.

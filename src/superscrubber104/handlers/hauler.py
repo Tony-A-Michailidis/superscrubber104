@@ -37,11 +37,20 @@ from superscrubber104.core.interfaces import ArtifactView, Context, Detection, I
 from superscrubber104.core.model import Subject, ToolRef, UnitClaim, UnitKind
 from superscrubber104.core.paths import check_member_name
 from superscrubber104.handlers.common import name_of
-from superscrubber104.handlers.containers import HAUL_NAME, MemoryStore, inspect_store
+from superscrubber104.handlers.containers import (
+    HAUL_NAME,
+    MemoryStore,
+    inspect_store,
+    report_conflicts,
+)
 
 TOOL = ToolRef("superscrubber104.hauler", __version__)
 KIND = "hauler.haul"
-LAYOUT_RULES = ("container.image.incomplete", "container.layer.digest-mismatch")
+LAYOUT_RULES = (
+    "container.image.incomplete",
+    "container.layer.digest-mismatch",
+    "package.member.conflicting-copies",
+)
 SIGNATURE_RULES = ("upstream.signature.invalid", "upstream.signature.untrusted")
 
 
@@ -100,6 +109,7 @@ class HaulHandler:
             return Inspection(kind=KIND, metadata={"hauler": {"readable": False}})
         if not (store.exists("index.json") and store.exists("oci-layout")):
             return Inspection(kind="unclassified")  # named like a haul, but not an OCI layout
+        report_conflicts(ctx, subject, store.digests, store.conflicts, TOOL)
         try:
             layout = inspect_store(store, ctx, artifact, KIND, root=artifact.ref)
         except (ValueError, KeyError, TypeError, RecursionError) as exc:

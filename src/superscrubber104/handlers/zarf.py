@@ -61,7 +61,7 @@ from superscrubber104.core.yamlio import load_untrusted_yaml
 from superscrubber104.formats.sigstore import BundleError, DigestMismatch, Outcome, parse_bundle
 from superscrubber104.handlers.ai.signature import verify_bundle
 from superscrubber104.handlers.common import name_of
-from superscrubber104.handlers.containers import MemoryStore, inspect_store
+from superscrubber104.handlers.containers import MemoryStore, inspect_store, report_conflicts
 from superscrubber104.walker import BytesView
 
 TOOL = ToolRef("superscrubber104.zarf", __version__)
@@ -75,6 +75,7 @@ RULES = (
     "zarf.component.actions",
     "zarf.component.host-files",
     "zarf.package.differential",
+    "package.member.conflicting-copies",
     "upstream.signature.invalid",
     "upstream.signature.untrusted",
 )
@@ -116,6 +117,8 @@ class _Contents:
     sizes: dict[str, int] = field(default_factory=dict)
     duplicates: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
     control: dict[str, bytes] = field(default_factory=dict)
+    # later copies of control files (zarf.yaml held twice): every copy is checked
+    control_copies: dict[str, list[bytes]] = field(default_factory=lambda: defaultdict(list))
     oversized: list[str] = field(default_factory=list)
     documents: dict[str, bytes] = field(default_factory=dict)  # images/, small JSON only
     # component tar -> inner file name -> (sha256, size, mode)
@@ -188,6 +191,8 @@ def _read(stream: IO[bytes]) -> _Contents:
                 sha, size, _ = _hash(handle)
             if name in contents.digests:
                 contents.duplicates[name].append(sha)
+                if kept and name in _CONTROL:
+                    contents.control_copies[name].append(kept)
                 continue
             contents.digests[name], contents.sizes[name] = sha, size
             if kept and name in _CONTROL:
@@ -297,6 +302,8 @@ class _Package:
     ctx: Context
     contents: _Contents
     definition: dict[str, Any]
+    # other copies of zarf.yaml in the same package: their components are checked too
+    other_definitions: list[dict[str, Any]] = field(default_factory=list)
     findings_subject: Subject = field(init=False)
     missing: list[str] = field(default_factory=list)
     verifications: dict[ArtifactRef, tuple[Verification, ...]] = field(default_factory=dict)
@@ -319,7 +326,13 @@ class _Package:
 
     @property
     def components(self) -> list[dict[str, Any]]:
-        return [c for c in _list(self.definition.get("components")) if isinstance(c, dict)]
+        """The components of every copy of zarf.yaml: which one Zarf would use is unknowable."""
+        return [
+            c
+            for definition in (self.definition, *self.other_definitions)
+            for c in _list(definition.get("components"))
+            if isinstance(c, dict)
+        ]
 
     @property
     def differential(self) -> dict[str, object] | None:
@@ -676,12 +689,26 @@ class ZarfPackageHandler:
                 reason=f"unknown Zarf package schema {str(schema)[:80]}",
             )
             return Inspection(kind=KIND, metadata={"zarf": {"schema": str(schema)[:80]}})
-        return _check(_Package(artifact, ctx, contents, definition))
+        others = []
+        for copy in contents.control_copies.get("zarf.yaml", []):
+            try:
+                other = load_untrusted_yaml(copy.decode("utf-8"))
+            except (yaml.YAMLError, UnicodeDecodeError, ValueError, RecursionError):
+                continue  # the conflict itself is reported; an unreadable copy adds nothing
+            if isinstance(other, dict):
+                others.append(other)
+        return _check(_Package(artifact, ctx, contents, definition, others))
 
 
 def _check(package: _Package) -> Inspection:
     ctx, subject = package.ctx, package.findings_subject
     recorder = ctx.recorder
+    contents = package.contents
+    later = {
+        name: [s for s in shas if s != contents.digests[name]]
+        for name, shas in contents.duplicates.items()
+    }
+    conflicted = report_conflicts(ctx, subject, contents.digests, later, TOOL)
     chained, vouched = package.checksums()
     outcome = package.signature()
     inspection, absent_images = package.images()
@@ -739,7 +766,9 @@ def _check(package: _Package) -> Inspection:
         recorder.passed("zarf.package.differential")
 
     # Trust: a verified signature over zarf.yaml reaches every file the checksum chain binds.
-    verified = outcome is not None and outcome.status == "verified"
+    verified = outcome is not None and outcome.status == "verified" and not conflicted
+    if conflicted:
+        chained = False  # which copy the signature and checksums vouch for cannot be told
     if verified and outcome is not None:
         signed = Verification(
             outcome.method, TrustLevel.SIGNATURE, Result.PASS, outcome.signer, outcome.anchor

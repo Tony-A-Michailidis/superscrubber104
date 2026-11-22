@@ -59,6 +59,18 @@ def escape_name(raw: str) -> str:
     return "".join(chr(b) if b in _KEEP else f"%{b:02X}" for b in data) or "%"
 
 
+def copy_name(name: str, copy: int) -> str:
+    """Name for the ``copy``-th copy (2, 3, ...) of a member name an archive holds more than once.
+
+    ``models/a/config.json`` gives ``models/a/%00copy-2/config.json``: the file name is kept so
+    that handlers still recognise the file, and ``%00`` cannot come from a decoded name (a NUL
+    is never a valid name character). Only ever used on an unsafe reference.
+    """
+    head, _, base = name.rpartition("/")
+    marker = f"%00copy-{copy}"
+    return f"{head}/{marker}/{base}" if head else f"{marker}/{base}"
+
+
 class NameIssue(StrEnum):
     TRAVERSAL = "traversal"  # would land outside the extraction directory
     UNSAFE = "unsafe"  # not representable as a bundle path

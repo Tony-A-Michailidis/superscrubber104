@@ -95,3 +95,22 @@ def test_zstd_haul_is_not_assessed_without_zstd(tmp_path: Path) -> None:
     (finding,) = findings_of(inspect(root))["container.layer.digest-mismatch"]
     assert finding.result is Result.NOT_ASSESSED
     assert "Python 3.14" in str(finding.not_assessed_reason)
+
+
+def test_a_second_copy_of_a_blob_is_a_final_conflict(tmp_path: Path) -> None:
+    """The layout's digest check reads the first copy; extraction would keep the second."""
+    import io
+    import tarfile
+
+    members = haul()
+    blob = next(n for n in members if n.startswith("blobs/sha256/"))
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, data in [*members.items(), (blob, b"something else entirely")]:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    result = inspect(write(tmp_path / "d", {"haul.tar": buffer.getvalue()}))
+    (conflict,) = findings_of(result)["package.member.conflicting-copies"]
+    assert conflict.detail["files"][0]["file"] == blob
+    assert result.assessment.summary.verdict.value == "refused"

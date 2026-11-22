@@ -152,7 +152,7 @@ Archives are **inspected, never extracted**.
   - `maxExpandedBytes`, `maxMembers`, `maxDepth` (5 by default: a Zarf package holds image layers, which hold archives of their own)
 
   When a limit trips, inspection of that artifact stops and `archive.limit.*` is reported on the top-level artifact, with the nested archive where it stopped.
-- **Member checks:** path traversal (`..`, absolute paths, drive letters, with either separator), unsafe names, links pointing outside the archive, devices and FIFOs, setuid/setgid bits, encrypted members, duplicate names (tools disagree on which copy wins), corrupt or truncated archives.
+- **Member checks:** path traversal (`..`, absolute paths, drive letters, with either separator), unsafe names, links pointing outside the archive, devices and FIFOs, setuid/setgid bits, encrypted members, duplicate names (tools disagree on which copy wins), corrupt or truncated archives. Every copy of a duplicated member is inspected, not only the first: a later copy is recorded under its own unsafe reference with the file name kept (`models/a/%00copy-2/config.json`), so a handler still recognises it and its findings land on that copy.
 - Members are recorded in the analysis with their own hashes under references such as `vendor/lib.zip!/lib/a.py`. Hostile names are recorded escaped and flagged `unsafe`.
 
 ## 18.8 Known limits (stated honestly)
