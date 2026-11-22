@@ -5,7 +5,7 @@ superscrubber104 decides whether a delivery may cross into a disconnected networ
 ## Guardrails
 
 - **Public sources only.** Examples, fixtures and documentation are generic. Nothing comes from any employer, client or other non-public environment.
-- **Offline first.** No network calls at runtime, ever. superscrubber104 must be vendorable as a bundle of wheels, so that it can cross its own airlock.
+- **Offline first.** No network calls at runtime, ever. superscrubber104 must be vendorable as a bundle of wheels, so that it can cross its own airlock. Ruff bans every network module in the source (`socket`, `ssl`, `urllib.request`, `http.client` and the client libraries); only `urllib.parse` is used, to read URLs, never to open them.
 - **Never execute what you inspect.** No unpickling, no importing model code, no running install scripts, no mounting images on the host. Static inspection only. The one exception is `superscrubber104 eval`, which runs a model through a runtime the policy pins and pre-flights like a scanner.
 - **Trust nothing that crosses, including the scanners.** Scanner binaries, rule packs, vulnerability databases and keys are pinned, verified artifacts too.
 - **Never silently drop anything.** An unrecognised file is still inventoried, hashed, signed, scanned and recorded as "unclassified". A check that could not run is reported as "not assessed", never omitted.
