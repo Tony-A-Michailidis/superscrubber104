@@ -138,6 +138,7 @@ spec:
 - The request is written on the packing side, so the receiving side treats it as a claim. Whether an approver's signature counts is decided only by keys pinned in the receiving side's policy.
 - A path may be declared by several content entries (`entries_for` returns all of them).
 - `request.artifact.undeclared` and `request.content.missing` report the two directions of mismatch. Checking that a declared `unit` actually formed arrives with the unit assemblers (task 5).
+- `superscrubber104 request init -o FILE [--from DELIVERY]` writes a commented skeleton that loads (it is parsed before it is written, and never overwrites a file). From a delivery it declares one entry per top-level directory and one for the top-level files. It adds no `unit` lines: each is a claim that `pack` checks, so the operator writes them. `superscrubber104 request show FILE [--delivery DIR]` validates a request and prints it; with a delivery it counts what each entry covers and lists files no entry declares. Exit codes: 0 valid and covered, 1 undeclared files (unless `allowUndeclared`), 2 not a valid request.
 
 ## 17.7 Policy
 

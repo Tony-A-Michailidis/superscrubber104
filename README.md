@@ -168,6 +168,13 @@ spec:
       paths: ["app/**"]
 ```
 
+Or let superscrubber104 write one from the delivery, then check what it covers:
+
+```console
+$ superscrubber104 request init -o request.yaml --from delivery --source dev-unclass --destination enclave-b
+$ superscrubber104 request show request.yaml --delivery delivery
+```
+
 **4. Pack on one side, verify on the other, render the evidence:**
 
 ```console

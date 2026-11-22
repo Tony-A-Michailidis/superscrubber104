@@ -17,6 +17,7 @@ from superscrubber104.bundle import encode
 from superscrubber104.core.errors import ConfigError, Superscrubber104Error
 from superscrubber104.core.model import Analysis, Stage, Verdict
 from superscrubber104.core.policy import KeyRole, Policy, load_policy
+from superscrubber104.core.request import load_request
 from superscrubber104.core.serde import from_data, to_data
 from superscrubber104.core.signing import (
     SigningKey,
@@ -50,6 +51,8 @@ from superscrubber104.patch.plan import plan as make_patch_plan
 from superscrubber104.patch.stage import downgrade_check
 from superscrubber104.report import FORMATS, load_source
 from superscrubber104.report import render as render_report
+from superscrubber104.request_tool import show as show_request
+from superscrubber104.request_tool import skeleton as request_skeleton
 from superscrubber104.rule_reference import rules_data, rules_markdown
 from superscrubber104.scanners import run_scanners
 from superscrubber104.session import (
@@ -498,6 +501,72 @@ def offline_check(
     if summary.verdict is Verdict.REFUSED:
         sys.exit(EXIT_REFUSED)
     sys.exit(EXIT_OK if summary.verdict is Verdict.PASSED else EXIT_BLOCKED)
+
+
+@main.group()
+def request() -> None:
+    """Transfer requests: what is meant to cross, and who answers for it."""
+
+
+@request.command("init")
+@click.option("-o", "--out", required=True, type=click.Path(dir_okay=False, path_type=Path))
+@click.option(
+    "--from",
+    "delivery",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="The delivery: one content entry per top-level directory, one for the top files.",
+)
+@click.option("--id", "request_id", default="TR-0001", show_default=True)
+@click.option("--title", default="Describe this delivery", show_default=True)
+@click.option("--source", default="low-side", show_default=True, help="Sending network.")
+@click.option("--destination", default="high-side", show_default=True, help="Receiving enclave.")
+@click.option("--stream", default="default", show_default=True)
+@click.option("--owner", default="Delivery owner", show_default=True)
+@_reports_errors
+def request_init(
+    out: Path,
+    delivery: Path | None,
+    request_id: str,
+    title: str,
+    source: str,
+    destination: str,
+    stream: str,
+    owner: str,
+) -> None:
+    """Write a transfer request to edit. Never overwrites a file."""
+    if out.exists():
+        raise ConfigError(f"{out} exists; choose another name or remove it first")
+    text = request_skeleton(
+        delivery=delivery,
+        request_id=request_id,
+        title=title,
+        source=source,
+        destination=destination,
+        stream=stream,
+        owner=owner,
+    )
+    out.write_text(text, encoding="utf-8")
+    click.echo(f"wrote:    {out}")
+    click.echo("Edit the purpose, owner and contents, then check it: superscrubber104 request show")
+
+
+@request.command("show")
+@click.argument("path", type=_FILE)
+@click.option(
+    "--delivery",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Also show what each entry covers here, and what no entry declares.",
+)
+@_reports_errors
+def request_show(path: Path, delivery: Path | None) -> None:
+    """Check a transfer request and print it.
+
+    Exit codes: 0 valid (and, with --delivery, every file declared or undeclared files allowed);
+    1 files that no entry declares; 2 not a valid request.
+    """
+    shown = show_request(load_request(path), delivery)
+    click.echo(shown.text)
+    sys.exit(EXIT_BLOCKED if shown.undeclared else EXIT_OK)
 
 
 @main.group()
