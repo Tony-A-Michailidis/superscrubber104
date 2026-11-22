@@ -481,3 +481,40 @@ def test_complete_declared_content_passes(tmp_path: Path) -> None:
     present = {"app/charts/web-1.2.0.tgz": b"chart"}
     result = _run(tmp_path, build(document, parts=components(files=present)))
     assert "zarf.package.incomplete" not in findings_of(result)
+
+
+def test_an_empty_checksum_list_is_a_mismatch_not_a_missing_file(tmp_path: Path) -> None:
+    members = build()
+    members["checksums.txt"] = b""
+    result = _run(tmp_path, members)
+    (mismatch,) = _failed(result, "zarf.package.checksum-mismatch")
+    assert mismatch["files"][0]["file"] == "checksums.txt"
+    assert mismatch["files"][0]["actual"] == sha(b"")
+    assert "zarf.package.incomplete" not in findings_of(result)
+
+
+def test_an_empty_definition_is_called_empty(tmp_path: Path) -> None:
+    members = build()
+    members["zarf.yaml"] = b""
+    (gap,) = findings_of(_run(tmp_path, members))["zarf.component.actions"]
+    assert gap.result is Result.NOT_ASSESSED
+    assert "zarf.yaml is empty" in str(gap.not_assessed_reason)
+
+
+def test_trust_reaches_a_member_with_an_escaped_name(tmp_path: Path) -> None:
+    """The checksum chain vouches for it; the trust must land on the reference the walk made."""
+    members = build()
+    members["docs" + chr(0x5C) + "notes.txt"] = b"a name with a backslash"
+    relist(members)
+    result = _run(tmp_path, members)
+    member = artifact(result, f"{NAME}!/docs%5Cnotes.txt")
+    assert member.ref.unsafe
+    assert [v.level for v in member.verifications] == [TrustLevel.CHECKSUM]
+
+
+def test_symlinks_of_a_temporary_file_are_host_paths(tmp_path: Path) -> None:
+    document = definition()
+    document["components"][0]["files"][0]["symlinks"] = ["/usr/local/bin/tool"]
+    (files,) = _failed(_run(tmp_path, build(document)), "zarf.component.host-files")
+    assert files["files"][0]["target"] == "###ZARF_TEMP###/tool"
+    assert files["files"][0]["symlinks"] == ["/usr/local/bin/tool"]

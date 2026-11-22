@@ -124,6 +124,7 @@ class _Contents:
     # component tar -> inner file name -> (sha256, size, mode)
     components: dict[str, dict[str, tuple[str, int, int]]] = field(default_factory=dict)
     unreadable_components: dict[str, str] = field(default_factory=dict)
+    unsafe: set[str] = field(default_factory=set)  # recorded names that were escaped
 
 
 def _hash(stream: IO[bytes], keep: int = 0, json_only: bool = False) -> tuple[str, int, bytes]:
@@ -170,9 +171,11 @@ def _read(stream: IO[bytes]) -> _Contents:
     documents_left = _DOCUMENTS_TOTAL
     with tarfile.open(fileobj=stream, mode="r|") as archive:
         for member in archive:
-            name, _ = check_member_name(member.name)
+            name, issue = check_member_name(member.name)
             if not name or not member.isfile():
                 continue
+            if issue is not None:
+                contents.unsafe.add(name)
             handle = archive.extractfile(member)
             if handle is None:
                 continue
@@ -195,8 +198,8 @@ def _read(stream: IO[bytes]) -> _Contents:
                     contents.control_copies[name].append(kept)
                 continue
             contents.digests[name], contents.sizes[name] = sha, size
-            if kept and name in _CONTROL:
-                contents.control[name] = kept
+            if name in _CONTROL and size <= _CONTROL_LIMIT:
+                contents.control[name] = kept  # even when empty: an empty list is not a missing one
             elif kept:
                 contents.documents[name.removeprefix("images/")] = kept
     return contents
@@ -313,8 +316,9 @@ class _Package:
         self.findings_subject = Subject.of_artifact(self.view.ref)
 
     def ref(self, name: str) -> ArtifactRef:
-        _, issue = check_member_name(name)
-        return self.view.ref.child(name, unsafe=issue is not None)
+        """The reference the archive walk gives member ``name`` (already a recorded name: it is
+        not checked again, which would lose the unsafe flag of an escaped one)."""
+        return self.view.ref.child(name, unsafe=name in self.contents.unsafe)
 
     @property
     def build(self) -> dict[str, Any]:
@@ -563,13 +567,16 @@ class _Package:
             for index, entry in enumerate(_list(component.get("files"))):
                 entry = _map(entry)
                 target = _text(entry.get("target")) or _text(entry.get("destination")) or ""
-                if target and not target.startswith(_TEMP):
+                symlinks = [str(s)[:300] for s in _list(entry.get("symlinks"))][:20]
+                # A file in Zarf's temporary directory stays off the host, but its symlinks are
+                # host paths: either one places something on the deploying host.
+                if (target and not target.startswith(_TEMP)) or symlinks:
                     host.append(
                         {
                             "component": name,
                             "target": target[:300],
                             "executable": entry.get("executable") is True,
-                            "symlinks": [str(s)[:300] for s in _list(entry.get("symlinks"))][:20],
+                            "symlinks": symlinks,
                         }
                     )
                 if files is None:
@@ -742,6 +749,8 @@ class ZarfPackageHandler:
         try:
             if definition_bytes is None:
                 raise ValueError("zarf.yaml is too large to read")
+            if not definition_bytes.strip():
+                raise ValueError("zarf.yaml is empty")
             definition = load_untrusted_yaml(definition_bytes.decode("utf-8"))
         except (yaml.YAMLError, UnicodeDecodeError, ValueError, RecursionError) as exc:
             ctx.recorder.not_assessed(
