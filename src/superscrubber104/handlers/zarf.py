@@ -786,6 +786,9 @@ def _check(package: _Package) -> Inspection:
         )
         for name in sorted(vouched):
             package.verifications[package.ref(name)] = (via,)
+        # The package file itself, so that trust.minimum can require it ("zarf.package":
+        # signature): the chain reaches every listed member, the signature the definition.
+        package.verifications[package.view.ref] = (via,)
 
     meta, build = package.metadata, package.build
     summary: dict[str, object] = {

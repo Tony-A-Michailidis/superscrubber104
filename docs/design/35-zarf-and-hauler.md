@@ -135,7 +135,15 @@ Then, in order:
    * It holds for no key, CA or identity the policy pins, or the bundle cannot be read: `upstream.signature.untrusted`.
    * `build.signed: true` with no signature file: untrusted, with status `missing`.
 
-   A package whose signature and flag were both removed and whose checksums were recomputed is indistinguishable from an unsigned one. It is recorded as `unsigned` with checksum-level trust, so a site that needs signed packages says so with `trust.minimumLevels`.
+   A package whose signature and flag were both removed and whose checksums were recomputed is indistinguishable from an unsigned one. It is recorded as `unsigned` with checksum-level trust, so a site that needs signed packages says so with `trust.minimum`:
+
+   ```yaml
+   trust:
+     minimum:
+       zarf.package: signature
+   ```
+
+   The package file itself carries the trust its chain establishes: signature level when the signature is verified and the checksum chain holds, checksum level when only the chain holds, none when either is broken or the package holds conflicting copies. A Hauler haul carries none, because its cosign signatures are not verified yet, so `hauler.haul: signature` fails every haul.
 4. **Trust levels.** `zarf.yaml` gets a signature-level verification when the signature verifies. Every file the chain binds also gets one: the aggregate binds `checksums.txt`, which binds the rest. An unsigned but consistent package gives those files checksum level. A broken chain gives nothing.
 5. **Images.** The container checks run over `images/`. Their findings and the `container-image` unit are rooted at `images/index.json`.
 

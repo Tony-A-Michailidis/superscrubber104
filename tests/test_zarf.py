@@ -338,7 +338,7 @@ def test_stripped_signature_on_a_package_that_says_it_is_signed(tmp_path: Path) 
 
 def test_stripped_signature_and_flag_leave_an_unsigned_package(tmp_path: Path) -> None:
     """Without a pinned minimum trust level, nothing marks this: superscrubber104 records it as unsigned,
-    with checksum-level trust, so ``trust.minimumLevels`` can require more."""
+    with checksum-level trust, so ``trust.minimum`` can require more."""
     members = build(signer=KeySigner())
     del members["zarf.bundle.sig"]
     document = yaml.safe_load(members["zarf.yaml"])
@@ -401,3 +401,19 @@ def test_image_references_are_normalised() -> None:
     assert normalise_image("index.docker.io/library/x:1") == "docker.io/library/x:1"
     assert normalise_image("localhost:5000/x") == "localhost:5000/x:latest"
     assert normalise_image("x@sha256:" + "0" * 64) == "docker.io/library/x@sha256:" + "0" * 64
+
+
+@pytest.mark.parametrize("signed", [True, False])
+def test_a_minimum_trust_level_can_be_required_of_packages(tmp_path: Path, signed: bool) -> None:
+    signer = KeySigner()
+    policy = _policy(tmp_path / "keys", "x509", signer.public_pem)
+    policy += "  minimum:\n    zarf.package: signature\n"
+    result = _run(tmp_path, build(signer=signer if signed else None), policy)
+    package = artifact(result, NAME)
+    if signed:
+        assert [v.level for v in package.verifications] == [TrustLevel.SIGNATURE]
+        assert "trust.upstream.insufficient" not in findings_of(result)
+    else:
+        assert [v.level for v in package.verifications] == [TrustLevel.CHECKSUM]
+        (finding,) = _failed(result, "trust.upstream.insufficient")
+        assert (finding["required"], finding["established"]) == ("signature", "checksum")

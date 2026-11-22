@@ -115,7 +115,7 @@ A synthetic AlmaLinux 9.4 host against the real errata produced 128 gaps, 13 of 
 * The plan does not compare the bundle's packages with the inventory. Downgrade protection happens at staging ([34](34-staging.md)).
 * Ubuntu OVAL and Red Hat CSAF/VEX are not read; OSV covers the same advisories.
 * Windows: only the KB model (cumulative updates and supersedence within the documents given). Feature updates, Office click-to-run and driver updates are not planned, and WSUS metadata is not read.
-* Authenticode results are findings only. They do not feed `trust.minimumLevels`, because scanners run after the analysis.
+* Authenticode results are findings only. They do not feed `trust.minimum`, because scanners run after the analysis.
 * The `osslsigncode` and `qemu-img` plugins are tested with stand-ins for the binaries, as every scanner is. Their handling of each tool's real output has **not** been run against the real tools here: check `superscrubber104 plugins check` and one known-good and one altered file on your own build before relying on them.
 * Feeds are read as given. `patch plan` does not verify where a feed came from: check its publisher's checksum or signature as for any download, or take `updateinfo.xml` from a mirror whose chain `superscrubber104 verify` has checked ([28](28-package-mirrors.md)).
 * GPU driver, CUDA and firmware versions are in the inventory, but no advisory feed is matched against them yet.

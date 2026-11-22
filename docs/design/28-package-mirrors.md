@@ -26,7 +26,7 @@ The mirror handler (`superscrubber104/handlers/mirrors.py`) checks every link wh
 The repo-mirror assembler (`superscrubber104/units/repo_mirror.py`) joins the links per root:
 
 * An index is **chained** when metadata in the same mirror lists it and the hash matched. A dnf or apt index that nothing vouches for is `repo.metadata.unlisted`.
-* A package listed by a chained index under verified metadata gets a `repo-metadata` verification at **signature** level. It names the anchor and signer, so `trust.minimumLevels` can require it, exactly as it can for a signed RPM. Any other listed package whose hash matched gets `repo-index` at **checksum** level. Chained indexes and the metadata file get the signature level too.
+* A package listed by a chained index under verified metadata gets a `repo-metadata` verification at **signature** level. It names the anchor and signer, so `trust.minimum` can require it, exactly as it can for a signed RPM. Any other listed package whose hash matched gets `repo-index` at **checksum** level. Chained indexes and the metadata file get the signature level too.
 * Listed packages that are absent are `repo.content.missing` (low: normal for a curated subset; count and sample recorded). Entries with absolute URLs are `repo.content.external`.
 * Packages under the root that no index lists are `repo.content.unlisted`. This is decided in `analysis.finish`, once every artifact is known. A mirror nested inside another keeps its own packages: they are judged by the inner mirror only. Such packages are either dead weight (`dnf` and `apt` will not see them) or were added after the metadata was made.
 
