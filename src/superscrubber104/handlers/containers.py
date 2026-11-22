@@ -608,6 +608,16 @@ def inspect_store(
         for image in images
         if image.kind != "image"
     ]
+    signed = [o for o in others if o["kind"] in ("signature", "attestation")]
+    if signed:  # carried, never dropped, and never taken as verified
+        ctx.recorder.not_assessed(
+            ("upstream.signature.invalid", "upstream.signature.untrusted"),
+            subject,
+            tool=TOOL,
+            reason=f"the layout carries {len(signed)} cosign signatures or attestations; "
+            "superscrubber104 does not verify cosign signatures yet (Hauler verifies them when "
+            "it saves and loads a haul)",
+        )
     if root is None and isinstance(store, _TarStore):
         root = view.ref
     claims = tuple(

@@ -8,6 +8,7 @@ from superscrubber104.analyzer import TOOL, Analyzer
 from superscrubber104.checks.evals import check_evals
 from superscrubber104.checks.offline import check_offline
 from superscrubber104.checks.provenance import check_upstream_trust
+from superscrubber104.checks.renamed import check_renamed_packages
 from superscrubber104.core.interfaces import UnitAssembler
 from superscrubber104.core.model import (
     Analysis,
@@ -60,5 +61,6 @@ def finish(analyzer: Analyzer, assemblers: Sequence[UnitAssembler]) -> Analysis:
     check_mirror_content(analyzer.artifacts, units, ctx)
     check_extension_dependencies(analyzer.artifacts, ctx)
     check_superseded(analyzer.artifacts, ctx)
+    check_renamed_packages(analyzer.artifacts, ctx)
     check_upstream_trust(artifacts, ctx)
     return Analysis.create(TOOL, artifacts, units, components)

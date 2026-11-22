@@ -174,3 +174,15 @@ def test_a_compression_bomb_stops_at_the_ratio_not_at_500_gib(tmp_path: Path) ->
     (gap,) = findings_of(result)["container.layer.digest-mismatch"]
     assert gap.result is Result.NOT_ASSESSED
     assert "cannot be read" in str(gap.not_assessed_reason)
+
+
+@pytest.mark.parametrize(("name", "fmt"), [("export.tar", "tar"), ("export.tar.gz", "gzip")])
+def test_a_renamed_haul_is_never_silently_unchecked(tmp_path: Path, name: str, fmt: str) -> None:
+    found = findings_of(_run(tmp_path, haul(), name, fmt))
+    # Its cosign signature is recorded as not verified, whatever reads the layout ...
+    assert [f.result for f in found["upstream.signature.untrusted"]] == [Result.NOT_ASSESSED]
+    if fmt == "gzip":  # ... and a layout nothing recognised says so, with how to fix it
+        (gap,) = found["container.layer.digest-mismatch"]
+        assert gap.result is Result.NOT_ASSESSED and "haul.tar.zst" in str(gap.not_assessed_reason)
+    else:  # read as an image archive: its images are checked
+        assert "container.layer.digest-mismatch" not in found

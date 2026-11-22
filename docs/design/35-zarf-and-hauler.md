@@ -104,7 +104,7 @@ The default `limits.archive.maxDepth` rose from 4 to 5. A package holds image la
 
 ### The handler
 
-**Recognised** by name (`zarf-package-*.tar[.zst]`, `zarf-init-*.tar[.zst]`), with a tar or zstd header. It is a Zarf package only if `zarf.yaml` is in it; otherwise it is left to the other handlers.
+**Recognised** by name (`zarf-package-*.tar[.zst]`, `zarf-init-*.tar[.zst]`), with a tar or zstd header. It is a Zarf package only if `zarf.yaml` is in it; otherwise it is left to the other handlers. Content cannot decide earlier: Zarf writes `zarf.yaml` last, and packages are usually zstd. A package under another name is still walked and its content inspected, and after the walk any archive with `zarf.yaml` and `checksums.txt` at its root that no Zarf check covered gets every Zarf rule recorded as not assessed, with the name to give it (`checks/renamed.py`). A source tree with only a `zarf.yaml` is not a package and gets nothing.
 
 **One streaming pass** over the archive, decompressed through `archive.capped` within the archive limits: `maxRatio` (judged above `ratioMinBytes`) and `maxExpandedBytes`, the same rule as the archive walk. A package that would expand further is not assessed:
 * hashes every member, and every file inside each `components/<name>.tar`, with sha256;
@@ -206,7 +206,7 @@ With an identity the policy does not accept, the signature is `untrusted` (not `
 
 `handlers/hauler.py`, kind `hauler.haul`, unit `hauler-haul`.
 
-**Recognised** by Hauler's default name (`haul*.tar`, `haul*.tar.gz`, `haul*.tar.zst`), with a tar, gzip or zstd header. It is treated as a haul only if `oci-layout` and `index.json` are at its root. A haul with another name is walked as an ordinary archive, without the layout checks. Such a tar is not also read as a `docker save` archive by the container handler.
+**Recognised** by Hauler's default name (`haul*.tar`, `haul*.tar.gz`, `haul*.tar.zst`), with a tar, gzip or zstd header. It is treated as a haul only if `oci-layout` and `index.json` are at its root. A haul under another name is read as an OCI image archive when it is a plain tar, with every image check; compressed, nothing reads its layout, so its layout and signature rules are recorded as not assessed with the name to give it. Cosign signatures and attestations in any OCI layout (a haul, an image archive, a Zarf package's images) are recorded as not assessed, never as verified. A correctly named haul is not also read as a `docker save` archive by the container handler.
 
 **One streaming pass**, decompressed through `archive.capped` within the archive limits: `maxRatio` (judged above `ratioMinBytes`) and `maxExpandedBytes`, the same rule as the archive walk. A package that would expand further is not assessed, hashes every member and keeps the small JSON documents (`containers.MemoryStore`). Then:
 

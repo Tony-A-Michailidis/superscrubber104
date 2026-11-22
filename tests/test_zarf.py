@@ -518,3 +518,30 @@ def test_symlinks_of_a_temporary_file_are_host_paths(tmp_path: Path) -> None:
     (files,) = _failed(_run(tmp_path, build(document)), "zarf.component.host-files")
     assert files["files"][0]["target"] == "###ZARF_TEMP###/tool"
     assert files["files"][0]["symlinks"] == ["/usr/local/bin/tool"]
+
+
+@pytest.mark.parametrize(
+    "zstd", [False, pytest.param(True, marks=pytest.mark.skipif(not ZSTD, reason="zstd"))]
+)
+def test_a_renamed_package_is_not_assessed_rather_than_skipped(tmp_path: Path, zstd: bool) -> None:
+    name = "delivery-bundle.tar" + (".zst" if zstd else "")
+    root = write(tmp_path / "d", {name: package_bytes(build(), zstd=zstd)})
+    found = findings_of(inspect(root))
+    gaps = found["zarf.package.checksum-mismatch"]
+    assert [g.result for g in gaps] == [Result.NOT_ASSESSED]
+    assert "not named like one" in str(gaps[0].not_assessed_reason)
+    assert gaps[0].subject.display == name  # the walk reads a .tar.zst's members directly
+
+
+def test_a_project_source_tree_with_zarf_yaml_is_not_a_package(tmp_path: Path) -> None:
+    source = tar({"project/zarf.yaml": b"kind: ZarfPackageConfig\n", "zarf.yaml": b"kind: x\n"})
+    found = findings_of(inspect(write(tmp_path / "d", {"source.tar": source})))
+    assert "zarf.package.checksum-mismatch" not in found
+
+
+def test_a_correctly_named_package_gets_no_renamed_gap(tmp_path: Path) -> None:
+    found = findings_of(_run(tmp_path, build()))
+    assert all(
+        "not named like one" not in str(f.not_assessed_reason)
+        for f in found.get("zarf.package.checksum-mismatch", [])
+    )

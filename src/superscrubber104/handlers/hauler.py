@@ -51,7 +51,6 @@ LAYOUT_RULES = (
     "container.layer.digest-mismatch",
     "package.member.conflicting-copies",
 )
-SIGNATURE_RULES = ("upstream.signature.invalid", "upstream.signature.untrusted")
 
 
 @contextmanager
@@ -128,17 +127,7 @@ class HaulHandler:
         for entry in others:
             label = entry.get("title") or entry.get("name") or entry.get("manifestDigest")
             by_kind.setdefault(str(entry.get("kind")), []).append(str(label))
-        signed = by_kind.get("signature", []) + by_kind.get("attestation", [])
-        if signed:
-            ctx.recorder.not_assessed(
-                SIGNATURE_RULES,
-                subject,
-                tool=TOOL,
-                reason=f"the haul carries {len(signed)} cosign signatures or attestations; "
-                "superscrubber104 does not verify cosign signatures yet (Hauler verifies them when "
-                "it "
-                "saves and loads a haul)",
-            )
+        # Carried cosign signatures are recorded as not assessed by inspect_store.
         summary: dict[str, object] = {
             "images": [i.get("name") for i in images],
             "charts": by_kind.get("helm-chart", []),
