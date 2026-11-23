@@ -15,7 +15,7 @@ Working in /home/user/superscrubber104-demo
 == 1. Keys: the build pipeline's packing key ==
 
 $ superscrubber104 keygen -o keys --name pack --holder build-pipeline
-  key id: ed25519:abefe889b042dcb57215c281fa2cedb8052e3b1c17a83c3f163d88e6cd9b0015
+  key id: ed25519:306b01a0deb15121db27f210ed91069beaaeaa0dda7c1fad0791f412261efd00
   
   To trust this key, add it to the receiving side's policy (publicKey is relative to the policy file):
   ... (9 more lines)
@@ -30,13 +30,14 @@ $ superscrubber104 pack delivery --request request.yaml --key keys/pack.key --po
                   bundle: the check did not run: no malware scanner is configured (plugins.clamav)
   WARN            not assessed: sast.finding  [a1e2942baaf74d8e]
                   bundle: the check did not run: no static analysis scanner is configured (plugins.semgrep or plugins.bandit)
+  WARN            not assessed: skill.finding  [ea68ad2975feb1b6]
+                  bundle: the check did not run: no agent-skill scanner is configured (plugins.skillspector)
   WARN            not assessed: vuln.component.known  [0cd93b81a6d98aa3]
                   bundle: the check did not run: no vulnerability scanner is configured (plugins.trivy)
   
-  62 of 213 rules exercised, 255 checks passed; findings: 0 block, 0 need approval, 4 warn, 1 allowed
+  63 of 214 rules exercised, 255 checks passed; findings: 0 block, 0 need approval, 5 warn, 1 allowed
+  ... (3 more lines)
   verdict: PASSED
-  manifest: sha256:1c8d11df42dc26459e367a9bcf6f60f65f149fe31b2b076b55b4dbd448c61009
-  ... (1 more lines)
   [exit 0]
 
 == 3. High side: verify the bundle as it arrived ==
@@ -48,13 +49,14 @@ $ superscrubber104 verify bundle --policy high/policy.yaml --state high/state --
                   bundle: the check did not run: no malware scanner is configured (plugins.clamav)
   WARN            not assessed: sast.finding  [a1e2942baaf74d8e]
                   bundle: the check did not run: no static analysis scanner is configured (plugins.semgrep or plugins.bandit)
+  WARN            not assessed: skill.finding  [ea68ad2975feb1b6]
+                  bundle: the check did not run: no agent-skill scanner is configured (plugins.skillspector)
   WARN            not assessed: vuln.component.known  [0cd93b81a6d98aa3]
                   bundle: the check did not run: no vulnerability scanner is configured (plugins.trivy)
   
-  78 of 213 rules exercised, 314 checks passed; findings: 0 block, 0 need approval, 4 warn, 1 allowed
+  79 of 214 rules exercised, 314 checks passed; findings: 0 block, 0 need approval, 5 warn, 1 allowed
+  ... (5 more lines)
   verdict: PASSED
-  wrote:    import-1/assessment.verify.json
-  ... (3 more lines)
   [exit 0]
 
 $ superscrubber104 report import-1 --format html -o import-1/report.html
@@ -97,15 +99,17 @@ $ superscrubber104 verify bundle --policy high/policy.yaml --state high/state --
                   bundle: the check did not run: no malware scanner is configured (plugins.clamav)
   WARN            not assessed: sast.finding  [a1e2942baaf74d8e]
                   bundle: the check did not run: no static analysis scanner is configured (plugins.semgrep or plugins.bandit)
+  WARN            not assessed: skill.finding  [ea68ad2975feb1b6]
+                  bundle: the check did not run: no agent-skill scanner is configured (plugins.skillspector)
   WARN            not assessed: vuln.component.known  [0cd93b81a6d98aa3]
                   bundle: the check did not run: no vulnerability scanner is configured (plugins.trivy)
   
-  82 of 213 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+  83 of 214 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 5 warn, 2 allowed
   verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
   wrote:    import-2/assessment.verify.json
   wrote:    import-2/analysis.verify.json
   wrote:    import-2/request.yaml
-  wrote:    import-2/receipt.json
+  ... (1 more lines)
   [exit 3]
 
 $ superscrubber104 report import-2 --format md -o import-2/report.md

@@ -94,6 +94,27 @@ Static analysis looks at the delivery's **own** code: top-level source files, sc
 
 Files go to the tools in batches of 200, so command lines stay within Windows' limit. Each result is `sast.finding` on the file and line, with the rule, message, CWE and confidence, and the attributes `scanner`, `ruleId` and `category` for policy `where` clauses. Semgrep's ids lose the dotted rules-directory prefix Semgrep adds (it would put the operator's path in the evidence and give a rule a different id on every host); `category` is the rule's metadata category, and `security` for every Bandit test. [docs/scanners.md](../scanners.md#tuning) shows the policy a real trial needed. When neither tool is configured and the delivery holds first-party source, `sast.finding` is not assessed for the bundle.
 
+### SkillSpector (agent skills and MCP servers)
+
+[NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) (Apache-2.0) scans agent skills and MCP servers for instructions and code an agent would act on. Each agent skill (a folder with a `SKILL.md`) and each MCP server's package root (the nearest folder above the server code with a `package.json` or `pyproject.toml`) is scanned as a folder, outside dependency folders; a folder inside another chosen one is covered by it, and skills inside an archive are not assessed. The command is `skillspector scan <folder> --format json [--yara-rules-dir <database>] [args] --no-llm`, with the report read from standard output (SkillSpector refuses to write report files on Windows).
+
+* `--no-llm` is always last: its default mode sends file contents to a hosted model.
+* Each issue becomes `skill.finding` on the file and line, with the attributes `scanner`, `ruleId` and `category`, and the detail `rule`, `category`, `pattern`, `explanation`, `remediation`, `confidence`. The matched text (`finding`, `code_snippet`) is never recorded: it can be the secret a pattern found.
+* Severity is SkillSpector's, lowered one step below confidence 0.5. Findings in tests and examples (`TEST_PATH`) are low, as for secrets and MCP server capabilities.
+* What SkillSpector could not finish is not assessed on that file: every entry of its `analysis_completeness.ledger_exceptions`, and its `AE1` issues ("Incomplete referenced artifact analysis", which it calls "not proof of malicious evasion"). Its SC4 lookup asks OSV.dev, which the sandbox never reaches; the reason says only its built-in list was used.
+* Its own patterns and YARA rules are part of the program; `database`, when set, is a directory of site YARA rules, each pinned.
+
+**Real run.** SkillSpector 2.13.4 (installed from its tag, pinned by the hash of its launcher) through the plugin, on Anthropic's public skills (`anthropics/skills` at `e4bb5d9`, 20 skills) and the official MCP servers (`modelcontextprotocol/servers` at `c799c85`), offline: no errors, 13.5 minutes, 531 findings and 138 not assessed, and no matched text in the evidence. The first run had 280 blockers; 59 were `AE1` (now gaps) and most credential-access hits were in the servers' tests (now low), leaving 143, all on content published as benign: tool-misuse and credential patterns in documentation and examples, for instance. That is the scanner's precision on legitimate content, and a policy should say how much of it blocks:
+
+```yaml
+rules:
+  - rule: skill.finding          # what a skill tells the agent to do: always a stop
+    where: { category: "Prompt Injection" }
+    disposition: block
+  - rule: skill.finding          # everything else: a reviewer looks, the delivery does not stop
+    disposition: require-approval
+```
+
 ### Gaps are explicit
 
 If no malware scanner ran, `malware.detected` is not assessed for the bundle, with the reason "no malware scanner is configured (plugins.clamav)", or, when one is configured but did not run, which one and why ("clamav is configured but failed (see plugin.scan.error)"). The same goes for `vuln.component.known`. Defaults make that a warning; `notAssessed: block` on the rule makes scanning mandatory.
@@ -123,4 +144,5 @@ If no malware scanner ran, `malware.detected` is not assessed for the bundle, wi
 - **PDF:** streams other than object streams are not inflated, and encrypted PDFs are not decrypted; obfuscated JavaScript inside an ordinary content stream would be missed by the keyword search (ClamAV covers known samples).
 - **ClamAV** reports the archive that contains a detection, not the member.
 - **Trivy:** a root filesystem inside a non-image archive is not scanned; lockfile entries without a distribution in the delivery are not scanned (they are reported as unresolvable). Grype and OSV-Scanner are not wrapped yet; the `Scanner` protocol is where they would go.
+- **SkillSpector** runs static only (no LLM), and its SC4 vulnerability lookup uses only its built-in list offline. Its launcher is pinned, not every file of its environment. One run per skill folder is slow on large skills (13.5 minutes for 27 folders). Its findings on legitimate skills are numerous; see the real run above.
 - **Static analysis** sees only top-level first-party files. Semgrep's native Windows support is limited; run it on Linux, macOS or WSL. Neither tool was run in development (the same stand-in approach as the other scanners).

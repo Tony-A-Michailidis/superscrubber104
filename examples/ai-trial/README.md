@@ -29,7 +29,7 @@ From AlmaLinux 10 under WSL, Python 3.12, superscrubber104 after the fixes liste
 
 == 3. Inspect it in place ==
 [inspect exit 1]
-60 of 213 rules exercised, 4038 checks passed; findings: 5 block, 29 need approval, 89 warn, 123 allowed
+61 of 214 rules exercised, 4038 checks passed; findings: 5 block, 29 need approval, 90 warn, 123 allowed
      14 NEEDS APPROVAL offline.registry.external
       8 NEEDS APPROVAL mcp.server.capability
       3 BLOCK python.environment.unresolvable
@@ -49,7 +49,7 @@ delivery  512 files, 0 not declared
 == 5. Pack, then verify as the receiving side ==
 [pack exit 1]
 [verify exit 1]
-83 of 213 rules exercised, 8020 checks passed; findings: 5 block, 29 need approval, 93 warn, 123 allowed
+84 of 214 rules exercised, 8020 checks passed; findings: 5 block, 29 need approval, 94 warn, 123 allowed
 ```
 
 The verdict is `BLOCKED`, and each blocker is a reason the delivery would not work on a disconnected network:
@@ -86,5 +86,6 @@ With the fixes: 5 blockers and 29 approvals, all of them real. The same fixes ta
 ## Limits
 
 * The servers are delivered as source without their packages, so most of their dependencies are not scanned for vulnerabilities. Trivy, when configured, checks the five MCP server packages themselves and finds none; the unresolvable blockers say what is missing.
+* The run configures no scanners, so skills, malware, vulnerabilities and static analysis are recorded as not assessed (the extra warnings). [Doc 21](../../docs/design/21-scanners-and-basics.md) records the same MCP servers run through NVIDIA SkillSpector.
 * The run uses the default policy. A site policy would accept Apache-2.0 and decide the dataset's licence once.
 * Hugging Face revisions and the git commit are fixed, but the `hf` tool and pip are not: a later `huggingface_hub` could lay the files out differently.

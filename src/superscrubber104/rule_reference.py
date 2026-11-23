@@ -47,6 +47,7 @@ _DOMAINS: Mapping[str, str] = {
     "sast": "Static analysis",
     "secret": "Secrets",
     "size": "Size limits",
+    "skill": "Agent skills and MCP servers (SkillSpector)",
     "source": "Source code",
     "transfer": "Transfer binding",
     "trust": "Trust in publishers and signers",

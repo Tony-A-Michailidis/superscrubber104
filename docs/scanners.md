@@ -1,4 +1,4 @@
-# Scanners: ClamAV, Trivy, Semgrep, Bandit, qemu-img, osslsigncode and the CISA KEV feed
+# Scanners: ClamAV, Trivy, Semgrep, Bandit, SkillSpector, qemu-img, osslsigncode and the CISA KEV feed
 
 superscrubber104 works without any external scanner. Its own checks cover integrity, model formats, packages, agents, secrets and active content. Two questions need a scanner and a database that changes every day:
 
@@ -8,6 +8,7 @@ superscrubber104 works without any external scanner. Its own checks cover integr
 | Do the packages and images have known vulnerabilities? | **Trivy** | `vuln.component.known`: *not assessed* |
 | Which of those vulnerabilities are being exploited? | **CISA KEV** catalogue (a data file) | vulnerability findings carry `kev=unknown` |
 | Does the delivery's own code have weaknesses? | **Semgrep** and/or **Bandit** | `sast.finding`: *not assessed* (when there is source) |
+| Do its agent skills and MCP servers hide instructions or code an agent would act on? | **SkillSpector** (NVIDIA) | `skill.finding`: *not assessed* (when there are skills or MCP servers) |
 
 "Not assessed" is a recorded gap, never a silent pass. By default it is a warning. A site that requires scanning makes it a blocker in the policy:
 
@@ -225,6 +226,56 @@ Static-analysis findings are `sast.finding` at the severity the tool reports. Ma
 rules:
   - rule: sast.finding
     disposition: require-approval
+```
+
+## SkillSpector (agent skills and MCP servers)
+
+[SkillSpector](https://github.com/NVIDIA/SkillSpector) is NVIDIA's open-source scanner for agent skills (Claude Code, Codex, Gemini CLI) and MCP servers: prompt injection, data exfiltration, credential access, excessive agency, tool poisoning, supply-chain risks and YARA signatures, 71 patterns in 17 categories. superscrubber104 runs it as a pinned plugin, static only.
+
+### Get it (connected side)
+
+SkillSpector is a Python package (Python 3.12 or 3.13, for its YARA dependency's wheels). Install a tagged release into its own virtual environment, from a pinned, hash-checked requirements file if you can, and carry that environment across:
+
+```sh
+python3.12 -m venv tools/skillspector
+tools/skillspector/bin/pip install "git+https://github.com/NVIDIA/SkillSpector.git@v2.13.4"
+tools/skillspector/bin/skillspector --version
+```
+
+Its patterns and YARA rules are part of the package. A site's own YARA rules can go in a directory of their own, every file pinned (below).
+
+### Configure
+
+```yaml
+plugins:
+  skillspector:
+    path: tools/skillspector/bin/skillspector
+    binarySha256: "…"
+    minVersion: "2.13"
+    timeout: 30m
+    # database: tools/skillspector/site-rules   # optional: site YARA rules, each one pinned
+    # files: {exfiltration.yar: "…"}
+```
+
+What superscrubber104 scans, each as a folder: every agent skill (a folder with a `SKILL.md`), and every MCP server's package root (the nearest folder above the server code with a `package.json` or `pyproject.toml`). A folder inside another one being scanned is covered by it; dependencies (`node_modules`, virtual environments) are left out; skills inside an archive are recorded as not assessed. For each folder:
+
+```
+skillspector scan <folder> --format json [--yara-rules-dir <database>] [args...] --no-llm
+```
+
+Three things hold whatever `args` says:
+
+* **`--no-llm`, always, and last.** SkillSpector's default mode sends file contents to a hosted model. Nothing leaves the enclave, so only its static analysis runs.
+* **The matched text is never recorded.** SkillSpector reports the text each pattern matched, which can be the very secret it found. A `skill.finding` carries the rule id (`P1`, `E1`, `PE3`, ...), category, pattern, line, confidence, explanation and remediation.
+* **What it could not finish is not assessed.** SkillSpector reports files it analysed only in part. Each becomes `skill.finding` *not assessed* on that file, with its reason. Its known-vulnerability lookup (SC4) asks OSV.dev, which the sandbox never reaches; it then uses a small built-in list, and the evidence says so. Trivy is the vulnerability scanner.
+
+Severity is SkillSpector's (`CRITICAL` to `LOW`), lowered one step when its confidence is below 0.5. Each finding has the attributes `scanner`, `ruleId` and `category`, for policy `where` clauses:
+
+```yaml
+rules:
+  - rule: skill.finding
+    where: { category: "Prompt Injection" }
+    disposition: block
 ```
 
 ## qemu-img (VM disk images)

@@ -532,7 +532,7 @@ def test_example_policy_configures_every_plugin() -> None:
     from superscrubber104.core.policy import load_policy
 
     policy = load_policy(Path(__file__).parent.parent / "examples" / "policy.yaml")
-    assert set(policy.plugins) == {"clamav", "trivy", "kev", "semgrep", "bandit"}
+    assert set(policy.plugins) == {"clamav", "trivy", "kev", "semgrep", "bandit", "skillspector"}
     assert set(policy.runtimes) == {"llama-cpp"} and len(policy.compatibility) == 1
     assert policy.plugins["clamav"].database is not None
 

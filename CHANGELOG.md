@@ -10,6 +10,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Zarf completeness covers every part of a component: charts, values files, manifests, kustomizations, git repositories and data injections, which are also listed in the evidence.
 - `trust.minimum` can require signed Zarf packages (`zarf.package: signature`).
 - The analysis and the assessment record the Python version and whether zstd could be read.
+- NVIDIA SkillSpector as a pinned plugin for agent skills and MCP servers (`skill.finding`): static only (`--no-llm`, always), offline, the matched text never recorded, and what it could not finish recorded as not assessed. Run for real on Anthropic's public skills and the official MCP servers ([doc 21](docs/design/21-scanners-and-basics.md)).
 
 ### Fixed
 

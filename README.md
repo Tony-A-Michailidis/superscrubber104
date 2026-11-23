@@ -62,7 +62,7 @@ WARN            kb.embedding-model.unrecorded  [e63d460f69e659dc]
 WARN            not assessed: malware.detected  [f6490e189d646738]
                 bundle: the check did not run: no malware scanner is configured (plugins.clamav)
 ...
-82 of 213 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 4 warn, 2 allowed
+83 of 214 rules exercised, 316 checks passed; findings: 5 block, 1 need approval, 5 warn, 2 allowed
 verdict: REFUSED - an integrity or authenticity check failed; this cannot be overridden
 ```
 
@@ -114,7 +114,7 @@ BLOCK           model.pickle.unknown-import  [3f930721fb6da0fb]
                 hint: add trusted classes to the policy's 'pickle-globals' allowlist
                 approvals: 0 of 2 required
 ...
-32 of 213 rules exercised, 228 checks passed; findings: 1 block, 2 need approval, 2 warn, 35 allowed
+32 of 214 rules exercised, 228 checks passed; findings: 1 block, 2 need approval, 2 warn, 35 allowed
 verdict: BLOCKED - a policy blocker stands; it can be overridden by an approval quorum
 ```
 
@@ -187,7 +187,7 @@ WARN            not assessed: malware.detected  [f6490e189d646738]
 WARN            not assessed: replay.bundle.expired  [0d542c3bfff6f26f]
                 bundle: the check did not run: the policy does not set transfer.maxBundleAge
 ...
-32 of 213 rules exercised, 36 checks passed; findings: 0 block, 0 need approval, 4 warn, 0 allowed
+32 of 214 rules exercised, 36 checks passed; findings: 0 block, 0 need approval, 4 warn, 0 allowed
 verdict: PASSED
 $ superscrubber104 report import -f html -o import/report.html
 ```
@@ -226,7 +226,7 @@ One line per area; [docs/features.md](docs/features.md) has the detail and each 
 | [Java, Go, Rust, .NET](docs/design/29-more-ecosystems.md) | Gradle, Go, Cargo and NuGet lockfiles resolved with their hashes; build-time hooks |
 | [Vendor trust](docs/design/27-vendor-trust.md) | RPM signatures and digests, Debian packages, publishers' checksum lists and detached OpenPGP signatures, against keys pinned in the policy |
 | [Package mirrors](docs/design/28-package-mirrors.md) | dnf, apt, PyPI, npm and Helm repositories as signed chains; stale or rolled-back metadata |
-| [Secrets, executables, documents, scanners](docs/design/21-scanners-and-basics.md) | credentials in every text file; macros and PDF JavaScript; ClamAV, Trivy with CISA KEV, Semgrep and Bandit as pinned plugins |
+| [Secrets, executables, documents, scanners](docs/design/21-scanners-and-basics.md) | credentials in every text file; macros and PDF JavaScript; ClamAV, Trivy with CISA KEV, Semgrep, Bandit and NVIDIA SkillSpector (agent skills, MCP servers) as pinned plugins |
 | [Infrastructure code](docs/design/30-infrastructure-code.md) | Kubernetes, Compose, Helm, Terraform and Ansible: privileged workloads, unpinned images, unvendored dependencies |
 | [IDE extensions](docs/design/31-ide-extensions.md) | VS Code and JetBrains extensions: identity, telemetry, start-up activation |
 | [Zarf and Hauler](docs/design/35-zarf-and-hauler.md) | Zarf packages' checksum chain and signature, deploy actions; Hauler hauls' contents |

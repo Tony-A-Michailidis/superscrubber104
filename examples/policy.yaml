@@ -153,6 +153,10 @@ plugins:
   bandit:
     path: tools/bandit/bin/bandit
     binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  skillspector:                # NVIDIA's scanner for agent skills and MCP servers; static only
+    path: tools/skillspector/bin/skillspector
+    binarySha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    minVersion: "2.13"
 
 # Model runtimes for `superscrubber104 eval run` (docs/design/24). superscrubber104 never loads a model itself.
 runtimes:

@@ -100,6 +100,17 @@ SAST = (
         "the analyser, lowered one step when it reports low confidence.",
         remediation="Fix the code, or record why the pattern is safe here.",
     ),
+    _rule(
+        "skill.finding",
+        "Agent-skill scanner reports a risk in a skill or MCP server",
+        M,
+        ("SI-3", "SA-11", "CM-7"),
+        "An agent skill or MCP server holds an instruction or code that an agent would act on: "
+        "prompt injection, data exfiltration, credential access, excessive agency, tool "
+        "poisoning or a risky dependency (NVIDIA SkillSpector, run offline and static only). "
+        "Severity comes from the scanner, lowered one step when it reports low confidence.",
+        remediation="Remove or rewrite the instruction or code, or record why it is expected.",
+    ),
 )
 
 BASICS = (

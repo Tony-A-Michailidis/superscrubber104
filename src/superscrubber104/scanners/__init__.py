@@ -25,6 +25,7 @@ from superscrubber104.scanners.clamav import ClamAV
 from superscrubber104.scanners.kev import KevFeed
 from superscrubber104.scanners.qemu_img import QemuImg, has_disk_images
 from superscrubber104.scanners.sast import Bandit, Semgrep, has_source
+from superscrubber104.scanners.skillspector import SkillSpector, has_skills
 from superscrubber104.scanners.trivy import Trivy
 from superscrubber104.walker import FileView
 
@@ -46,6 +47,11 @@ CAPABILITIES: dict[str, tuple[tuple[str, ...], Callable[[Analysis], bool], str]]
         ("sast.finding",),
         has_source,
         "no static analysis scanner is configured (plugins.semgrep or plugins.bandit)",
+    ),
+    "agent-skills": (
+        ("skill.finding",),
+        has_skills,
+        "no agent-skill scanner is configured (plugins.skillspector)",
     ),
     "authenticode": (
         (
@@ -77,7 +83,16 @@ def targets(files: Iterable[FileView]) -> list[Target]:
 def default_scanners() -> tuple[Scanner, ...]:
     """In run order: the KEV feed first, so vulnerability findings can be marked."""
     kev = KevFeed()
-    return (kev, ClamAV(), Trivy(kev), Semgrep(), Bandit(), QemuImg(), Authenticode())
+    return (
+        kev,
+        ClamAV(),
+        Trivy(kev),
+        Semgrep(),
+        Bandit(),
+        SkillSpector(),
+        QemuImg(),
+        Authenticode(),
+    )
 
 
 def run_scanners(
