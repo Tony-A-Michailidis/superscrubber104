@@ -13,6 +13,12 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ### Fixed
 
+- A second real trial (DistilBERT SST-2 in five formats, its dataset, the official MCP servers) took blockers from 8 to 5 and approvals from 49 to 29 with these fixes:
+  - Hugging Face `verifyToken` evaluation receipts in model cards are not reported as secrets (only when the payload is just `hash` and `version`).
+  - Only an import of the MCP server SDK makes a file MCP server code, not a mention of the package in a comment or list.
+  - A format folder with its own config (`onnx/`) is one package, a variant of its repository; Keras `save_weights` files (`tf_model.h5`) and rust-bert's `rust_model.ot` count as weights.
+  - A variant's inherited licence is decided once, on its repository.
+  - Trivy with nothing at all to scan is recorded as not assessed, not as zero vulnerabilities.
 - Only the first copy of a duplicated archive member was inspected; every copy is now. Zarf packages and Hauler hauls holding two different copies of one file get `package.member.conflicting-copies` (critical, final).
 - A label (Hauler's `kind` annotation, a `.sig` tag) could turn a real image into a "signature" and switch off its image checks. Content now decides.
 - Zarf and Hauler decompression honours the archive ratio limit, not only the 500 GiB size limit.

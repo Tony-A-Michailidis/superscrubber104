@@ -112,11 +112,11 @@ BLOCK           model.pickle.unknown-import  [3f930721fb6da0fb]
                 hint: add trusted classes to the policy's 'pickle-globals' allowlist
                 approvals: 0 of 2 required
 ...
-32 of 213 rules exercised, 252 checks passed; findings: 1 block, 10 need approval, 2 warn, 35 allowed
+32 of 213 rules exercised, 228 checks passed; findings: 1 block, 2 need approval, 2 warn, 35 allowed
 verdict: BLOCKED - a policy blocker stands; it can be overridden by an approval quorum
 ```
 
-The 25 files verified are checked against the hashes Hugging Face's own download tool recorded. Of the 10 approvals, 9 are the Apache-2.0 licence of the model and its eight ONNX variants (the default policy asks for approval of every licence; a site policy lists the ones it accepts), and one is `training_args.bin`, a file that can run code when loaded.
+The 25 files verified are checked against the hashes Hugging Face's own download tool recorded. Of the 2 approvals, one is the model's Apache-2.0 licence, decided once for the model and its eight ONNX variants (the default policy asks for approval of every licence; a site policy lists the ones it accepts), and one is `training_args.bin`, a file that can run code when loaded.
 
 ## Quick start
 
