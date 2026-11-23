@@ -183,3 +183,42 @@ def test_javascript_test_files_are_test_paths(tmp_path: Path) -> None:
     found = findings_of(inspect(write(tmp_path / "d", files)))["secret.detected"]
     assert len(found) == 3
     assert all(f.severity is Severity.LOW for f in found)
+
+
+def _jwt(claims: dict[str, object]) -> str:
+    """A JWT-shaped string, assembled at run time (the repository never holds one)."""
+    import base64
+
+    def part(value: dict[str, object]) -> str:
+        raw = json.dumps(value, separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    return f"{part({'alg': 'EdDSA', 'typ': 'JWT'})}.{part(claims)}." + "s1gnaTure" * 4
+
+
+def test_hugging_face_evaluation_receipts_are_not_secrets(tmp_path: Path) -> None:
+    """Model cards carry signed, public verifyToken receipts (``{"hash", "version"}``)."""
+    receipt = _jwt({"hash": "7f28c1b66cba" * 5, "version": 1})
+    session = _jwt({"sub": "admin", "exp": 1999999999, "scope": "write"})
+    card = (
+        "---\nmodel-index:\n- results:\n  - metrics:\n    - type: accuracy\n"
+        f"      verified: true\n      verifyToken: {receipt}\n"
+        f"      verifyToken: {session}\n---\n"
+    )
+    result = inspect(
+        write(
+            tmp_path / "d",
+            {
+                "model/README.md": card,
+                "app/auth.yaml": f"token: {receipt}\nbearer: {session}\n",
+            },
+        )
+    )
+    found = _secrets(result)
+    # the receipt under verifyToken is quiet; a session token under the same key is not
+    assert set(found) == {
+        "model/README.md#line 8",
+        "app/auth.yaml#line 1",
+        "app/auth.yaml#line 2",
+    }
+    assert {s["type"] for v in found.values() for s in v} == {"jwt"}

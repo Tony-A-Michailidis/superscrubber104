@@ -10,6 +10,9 @@ under test, example and fixture paths are reported at low severity, because pack
 ship dummy keys for their own tests.
 """
 
+import base64
+import binascii
+import json
 import math
 import re
 from collections import Counter, defaultdict
@@ -108,6 +111,28 @@ def _plausible(kind: _Kind, match: re.Match[str]) -> bool:
         and not _VARIABLE_NAME.fullmatch(value)
         and _entropy(value) >= 3.0
     )
+
+
+_VERIFY_KEY = re.compile(r"""\bverifyToken["']?\s*:\s*["']?$""")
+_VERIFY_CLAIMS = frozenset({"hash", "version"})
+
+
+def _hf_verify_token(line: str, match: re.Match[str]) -> bool:
+    """A Hugging Face evaluation receipt, not a credential.
+
+    Model cards record verified evaluation results with a ``verifyToken``: a JWT Hugging Face
+    signs over the result's hash, public by design. Both must hold, so that a real token cannot
+    pass by being put under that key: it is the value of ``verifyToken``, and its payload holds
+    nothing but ``hash`` and ``version``.
+    """
+    if not _VERIFY_KEY.search(line[: match.start()]):
+        return False
+    payload = match.group(0).split(".")[1]
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except (ValueError, binascii.Error):
+        return False
+    return isinstance(claims, dict) and bool(claims) and set(claims) <= _VERIFY_CLAIMS
 
 
 def _blocks(view: ArtifactView) -> Iterator[bytes]:
@@ -259,6 +284,8 @@ class SecretsHandler:
                     found += self._record(ctx, view, number, kind, test_path)
                 elif rest.startswith("-----") and not rest[5:].strip(_PEM_END):
                     header = kind  # only a real key body counts
+                continue
+            if kind.name == "jwt" and _hf_verify_token(line, match):
                 continue
             if _plausible(kind, match):
                 found += self._record(ctx, view, number, kind, test_path, len(match[0]))
