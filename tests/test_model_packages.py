@@ -623,7 +623,30 @@ def test_a_hugging_face_repository_in_every_format(tmp_path: Path) -> None:
     assert variant.attributes["variantOf"] == "models/sst2"
     assert variant.attributes["weights"]["files"] == ["model.onnx"]
     assert variant.attributes["licence"]["expression"] == "Apache-2.0"
+    assert variant.attributes["licenceFrom"] == "models/sst2"
+    # the licence is decided once, on the repository: one approval, not one per format folder
+    approvals = findings_of(result)["licence.approval-required"]
+    assert [f.subject.unit for f in approvals] == ["model-package:models/sst2"]
     roots = {u.root.display for u in result.analysis.units if u.kind is UnitKind.MODEL_PACKAGE}
     assert roots == {"models/sst2", "models/sst2/onnx"}  # no third, one-file package
     # HDF5 is also a data format: a file without layer_names is not called weights
     assert artifact(result, "data/measurements.h5").kinds == ("unclassified",)
+
+
+def test_a_variant_with_its_own_licence_is_judged_on_its_own(tmp_path: Path) -> None:
+    from tests.model_fixtures import onnx_bytes
+
+    root = hf_package(tmp_path / "d" / "models" / "sst2", sharded=False)
+    write(
+        root,
+        {
+            "onnx/config.json": json.dumps({"model_type": "llama"}),
+            "onnx/model.onnx": onnx_bytes(),
+            "onnx/LICENSE": "MIT License\n\nPermission is hereby granted, free of charge\n",
+        },
+    )
+    result = inspect(tmp_path / "d")
+    variant = package(result, "models/sst2/onnx")
+    assert "licenceFrom" not in variant.attributes
+    units = sorted(f.subject.unit or "" for f in findings_of(result)["licence.approval-required"])
+    assert units == ["model-package:models/sst2", "model-package:models/sst2/onnx"]

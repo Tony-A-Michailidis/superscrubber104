@@ -43,7 +43,7 @@ from superscrubber104.core.model import (
 from superscrubber104.core.policy import AllowlistMode
 from superscrubber104.handlers.ai.common import name_of, parent_of
 from superscrubber104.handlers.common import relative_to
-from superscrubber104.licences import Declared, normalise_identifier
+from superscrubber104.licences import Declared, combine, normalise_identifier
 
 TOOL = ToolRef("superscrubber104.model-package", __version__)
 
@@ -619,7 +619,18 @@ class _Checks:
             facts = p.first(role)
             if "licenceIdentifier" in facts:
                 declared.append(Declared(source, _str(facts["licenceIdentifier"])))
-        p.licence = check_licences(p.subject, declared, self.ctx)
+        inherited = (
+            p.variant_of is not None
+            and all(c.root == p.variant_of for c in p.role("licence", "model-card"))
+            and not any(_dict(c.facts.get("licence")) for c in p.weights())
+        )
+        if inherited:
+            # Its only licence is the repository's: decided once, on the repository, so a site
+            # is not asked to approve the same licence for every format folder.
+            p.licence = combine(declared)[0]
+            p.attributes["licenceFrom"] = p.variant_of.display if p.variant_of else None
+        else:
+            p.licence = check_licences(p.subject, declared, self.ctx)
         p.attributes["licence"] = {
             "expression": p.licence,
             "declared": [
