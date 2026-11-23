@@ -142,10 +142,31 @@ def _group(claims: Sequence[UnitClaim]) -> list[_Package]:
         for root, cs in groups.items()
         if any(c.role in CORE_ROLES for c in cs)
     }
+
+    def is_file(root: ArtifactRef) -> bool:
+        return any(c.artifact == root for c in packages[root].claims)
+
+    # onnx/ with its own config and tokenizer but no weights (Optimum's export): the weight
+    # files in it, each a package on its own until now (onnx/model.onnx), are its weights.
+    for root in [r for r in packages if not is_file(r) and not packages[r].weights()]:
+        for inner in [r for r in packages if r != root and parent_of(r) == root and is_file(r)]:
+            packages[root].claims.extend(packages.pop(inner).claims)
+    for root, package in packages.items():
+        if is_file(root):
+            continue
+        owner = parent_of(root)
+        if (
+            owner != root
+            and owner in packages
+            and not is_file(owner)
+            and not package.role(*_SHARED_ROLES)
+        ):
+            # A format folder in a model repository: under its licence and model card.
+            package.variant_of = owner
+            package.claims.extend(c for c in groups[owner] if c.role in _SHARED_ROLES)
     for root, package in packages.items():
         directory = parent_of(root)
-        is_file = any(c.artifact == root for c in package.claims)
-        if not is_file or directory in packages:
+        if not is_file(root) or directory in packages:
             continue
         shared = [c for c in groups.get(directory, []) if c.role in _SHARED_ROLES]
         owner = parent_of(directory)

@@ -15,6 +15,7 @@ import zipfile
 from superscrubber104.core.interfaces import ArtifactView, Context, Detection, Inspection
 from superscrubber104.core.model import Subject
 from superscrubber104.handlers.ai.common import TOOL, claim, name_of
+from superscrubber104.handlers.ai.weights import shard_facts, weight_role
 
 _HDF5 = b"\x89HDF\r\n\x1a\n"
 _KERAS_MODULES = ("keras", "tensorflow", "tf_keras", "tf.keras")
@@ -71,7 +72,7 @@ def _report(
 class KerasHandler:
     name = "keras"
     version = "1"
-    kinds = frozenset({"model.keras", "model.keras.h5"})
+    kinds = frozenset({"model.keras", "model.keras.h5", "model.keras.weights"})
 
     def detect(self, artifact: ArtifactView) -> Detection | None:
         name = name_of(artifact.ref).lower()
@@ -121,7 +122,7 @@ class KerasHandler:
         )
 
     def _h5(self, artifact: ArtifactView, ctx: Context) -> Inspection:
-        found_config = False
+        found_config = found_layers = False
         lambdas: list[str] = []
         overlap = max(len(m) for m in _LAMBDA_MARKERS)
         tail = b""
@@ -129,12 +130,28 @@ class KerasHandler:
             while chunk := stream.read(_CHUNK):
                 window = tail + chunk
                 found_config = found_config or b"model_config" in window
+                found_layers = found_layers or b"layer_names" in window
                 if any(marker in window for marker in _LAMBDA_MARKERS):
                     lambdas.append("found by byte search")
                     found_config = True
                     break
                 tail = window[-overlap:]
-        if not found_config:
+        if not found_config and found_layers:
+            # Keras save_weights (Transformers' tf_model.h5): layer_names and weights, no model
+            # config, so nothing in it can run. Weights of the package in its directory.
+            name = name_of(artifact.ref)
+            return Inspection(
+                kind="model.keras.weights",
+                metadata={"keras": {"format": "keras-weights-h5", "modelConfig": False}},
+                claims=(
+                    claim(
+                        artifact,
+                        weight_role(name),
+                        {"format": "keras-weights-h5", "file": name, **shard_facts(name)},
+                    ),
+                ),
+            )
+        if not found_config:  # HDF5 is also a data format: not every .h5 is a model
             return Inspection(kind="unclassified", metadata={"hdf5": {"kerasModel": False}})
         _report(ctx, artifact, lambdas, [], "byte search of the HDF5 file; layer names unavailable")
         summary = {"format": "keras-h5", "lambdaLayers": len(lambdas)}

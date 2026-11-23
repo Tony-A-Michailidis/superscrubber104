@@ -152,7 +152,10 @@ def _summary(result: pickle_scan.PickleScan) -> dict[str, object]:
 def _weights_claim(view: ArtifactView, fmt: str) -> tuple[UnitClaim, ...]:
     """PyTorch weight files in a model directory belong to its package."""
     name = name_of(view.ref)
-    stem_ok = name.startswith(("pytorch_model", "adapter_model", "model", "consolidated"))
+    # rust_model.ot: the same weights for rust-bert, saved by tch (libtorch) as TorchScript
+    stem_ok = name.startswith(
+        ("pytorch_model", "adapter_model", "model", "consolidated", "rust_model")
+    )
     if not (stem_ok or SHARD.match(name) or name.endswith((".pt", ".pth", ".ckpt"))):
         return ()
     facts = {"format": fmt, "file": name, **shard_facts(name)}

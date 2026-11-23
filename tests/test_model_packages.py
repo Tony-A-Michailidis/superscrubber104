@@ -595,3 +595,35 @@ def test_model_inspect_command(tmp_path: Path) -> None:
     assert refused.exit_code == 1
     assert "model.pickle.dangerous-import" in refused.output
     assert hashlib.sha256(b"").hexdigest()  # keep hashlib referenced for readability of fixtures
+
+
+def test_a_hugging_face_repository_in_every_format(tmp_path: Path) -> None:
+    """distilbert-sst2's layout: safetensors, a pickle, Keras weights for TensorFlow, TorchScript
+    for rust-bert, and an Optimum onnx/ folder with its own config. One repository, two packages:
+    the repository, and onnx/ as its variant, under its licence."""
+    from tests.model_fixtures import onnx_bytes, torch_zip
+
+    root = hf_package(tmp_path / "d" / "models" / "sst2", sharded=False)
+    keras_weights = b"\x89HDF\r\n\x1a\n" + b"\0" * 64 + b"layer_names" + b"\0weight_names"
+    write(
+        root,
+        {
+            "tf_model.h5": keras_weights,
+            "rust_model.ot": torch_zip(torchscript=True),
+            "onnx/config.json": json.dumps({"model_type": "llama"}),
+            "onnx/model.onnx": onnx_bytes(),
+        },
+    )
+    write(tmp_path / "d" / "data", {"measurements.h5": b"\x89HDF\r\n\x1a\n" + b"\0" * 64})
+    result = inspect(tmp_path / "d")
+    repository = package(result, "models/sst2")
+    files = repository.attributes["weights"]["files"]
+    assert isinstance(files, list) and {"tf_model.h5", "rust_model.ot"} <= set(files)
+    variant = package(result, "models/sst2/onnx")
+    assert variant.attributes["variantOf"] == "models/sst2"
+    assert variant.attributes["weights"]["files"] == ["model.onnx"]
+    assert variant.attributes["licence"]["expression"] == "Apache-2.0"
+    roots = {u.root.display for u in result.analysis.units if u.kind is UnitKind.MODEL_PACKAGE}
+    assert roots == {"models/sst2", "models/sst2/onnx"}  # no third, one-file package
+    # HDF5 is also a data format: a file without layer_names is not called weights
+    assert artifact(result, "data/measurements.h5").kinds == ("unclassified",)
