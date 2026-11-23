@@ -466,6 +466,22 @@ def test_without_kev_findings_say_unknown(tmp_path: Path, monkeypatch: pytest.Mo
     assert {f.attributes["kev"] for f in found["vuln.component.known"]} == {"unknown"}
 
 
+def test_nothing_to_scan_is_not_a_clean_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MCP servers delivered without their packages: Trivy has nothing to read. That is a gap,
+    not zero vulnerabilities (a real run read as clean)."""
+    tools = FakeTools(monkeypatch)
+    tools.handlers["trivy"] = _trivy()
+    policy = _trivy_policy(tmp_path / "tools")
+    root = write(tmp_path / "d", {"server/requirements.txt": "httpx==0.28.1\n", "a.txt": "x"})
+    found = findings_of(inspect(root, policy_yaml=policy, plugins=True))
+    [gap] = found["vuln.component.known"]
+    assert gap.result is Result.NOT_ASSESSED and gap.subject.display == "bundle"
+    assert "no container image, root filesystem or package" in str(gap.not_assessed_reason)
+    assert [c for c in tools.commands("trivy") if c != ["--version"]] == []
+
+
 def test_a_failed_image_scan_is_not_a_clean_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

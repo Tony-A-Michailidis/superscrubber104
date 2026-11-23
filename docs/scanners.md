@@ -135,7 +135,7 @@ What superscrubber104 asks Trivy to scan, so that every finding lands on the fil
 | Each root filesystem that is a directory of the delivery (has `etc/os-release`) | `trivy rootfs <directory>` |
 | Every other package superscrubber104 identified (wheels, sdists, installed Python and npm packages, npm tarballs, ...) | `trivy sbom <CycloneDX file superscrubber104 writes>` |
 
-Each command also gets `--cache-dir <database> --skip-db-update --skip-java-db-update --offline-scan --scanners vuln --format json --quiet`. Packages appear in the SBOM only when they are in the delivery. A lockfile entry with no distribution beside it is reported as unresolvable instead (it would need the network on the high side).
+Each command also gets `--cache-dir <database> --skip-db-update --skip-java-db-update --offline-scan --scanners vuln --format json --quiet`. Packages appear in the SBOM only when they are in the delivery. When there is nothing at all for Trivy to read (no image, no root filesystem, no delivered package), `vuln.component.known` is recorded as *not assessed* with that reason, never as zero vulnerabilities. A lockfile entry with no distribution beside it is reported as unresolvable instead (it would need the network on the high side).
 
 Severity comes from Trivy's data (`CRITICAL` to `LOW`; `UNKNOWN` is treated as medium). Each finding has the attributes `id`, `severity`, `package`, `ecosystem`, `fixed` (`true` when a fixed version exists) and `kev`. A policy can select on any of these:
 

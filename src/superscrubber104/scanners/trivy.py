@@ -234,6 +234,16 @@ class Trivy:
             sbom = ready.workdir / "delivery.cdx.json"
             sbom.write_text(json.dumps(sbom_document(packages)), encoding="utf-8")
             jobs.append(_Job("packages", ("sbom", str(sbom)), None))
+        if not jobs:  # no result is not a clean result: say why nothing was scanned
+            ctx.recorder.not_assessed(
+                self.rules,
+                Subject.bundle(),
+                tool=ready.tool,
+                reason="the delivery holds no container image, root filesystem or package for "
+                "Trivy to scan; dependencies declared without their packages (see "
+                "*.environment.unresolvable) were not checked",
+            )
+            return
         failures = 0
         for job in jobs:
             output = ready.workdir / f"trivy-{len(list(ready.workdir.glob('trivy-*')))}.json"
