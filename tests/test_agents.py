@@ -261,6 +261,37 @@ def test_capability_inferred_from_tool_names(tmp_path: Path) -> None:
     assert capability.subject.display == "src/server.ts#tool names"
 
 
+def test_naming_the_sdk_is_not_being_a_server(tmp_path: Path) -> None:
+    """Release tooling names the packages and a client imports the client SDK: neither is a server
+    (the official MCP servers repository's scripts were blocked as server code)."""
+    tooling = (
+        "// watch `@modelcontextprotocol/sdk` and `@modelcontextprotocol/server` releases\n"
+        "import { execFileSync } from 'node:child_process';\n"
+        "const packages = ['@modelcontextprotocol/server', '@modelcontextprotocol/client'];\n"
+        "execFileSync('npm', ['view', packages[0], 'version']);\n"
+    )
+    client = (
+        'import { Client } from "@modelcontextprotocol/sdk/client/index.js";\n'
+        "import { execFileSync } from 'node:child_process';\n"
+        "execFileSync('ls');\n"
+    )
+    server = (
+        'import { McpServer } from "@modelcontextprotocol/server";\n'
+        "import { execFileSync } from 'node:child_process';\n"
+        "execFileSync('ls');\n"
+    )
+    result = inspect(
+        write(
+            tmp_path / "p",
+            {"scripts/sdk-watch.mjs": tooling, "app/client.ts": client, "src/server.ts": server},
+        )
+    )
+    capabilities = {
+        f.subject.display.split("#")[0] for f in findings_of(result)["mcp.server.capability"]
+    }
+    assert capabilities == {"src/server.ts"}
+
+
 def test_only_folders_with_a_skill_md_are_agent_skills(tmp_path: Path) -> None:
     # An application's own "skills" package is code, not an agent skill.
     write(

@@ -95,7 +95,13 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})  # no
 # --- MCP server source ------------------------------------------------------------------------
 
 _MCP_PY = re.compile(r"^\s*(?:from|import)\s+(?:mcp|fastmcp)\b", re.M)
-_MCP_JS = re.compile(r"@modelcontextprotocol/(?:sdk|server)\b")
+# An import of the server SDK, not a mention of it: release tooling names the packages in
+# comments and lists, and a client imports @modelcontextprotocol/sdk/client.
+_MCP_JS = re.compile(
+    r"""(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|^\s*import\s*)"""
+    r"""["']@modelcontextprotocol/(?:sdk(?!/client)|server)\b""",
+    re.M,
+)
 # @mcp.tool(...) [more decorators] def name(...): """docstring"""
 _PY_TOOL = re.compile(
     r"@(?:\w+\.)*tool\s*\((?P<args>(?:[^()]|\([^()]*\))*)\)[ \t]*\n(?:[ \t]*@[^\n]*\n)*"
