@@ -94,6 +94,8 @@ The demo's files are synthetic. superscrubber104 has also been tried on 3.5 GB o
 
 The first run also reported findings that were superscrubber104's mistakes: a multi-platform image saved for one platform was called incomplete, coreutils' `sha256sum` was taken for a checksum list, an application's `skills` package for agent skills. Each was fixed with a regression test built from the real layout. [The full account](examples/demo/real-delivery.md) and [the report itself](examples/demo/real-delivery-report.pdf) (PDF) are in `examples/demo/`.
 
+A second, smaller trial is pinned so that anyone can repeat it: [examples/ai-trial/](examples/ai-trial/README.md) builds a delivery from DistilBERT in five formats, its dataset and the official MCP servers, then inspects, packs and verifies it in about two minutes.
+
 One of the models, `HuggingFaceTB/SmolLM2-135M-Instruct` at revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, inspected in place:
 
 ```console
