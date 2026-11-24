@@ -177,6 +177,15 @@ Until an item is built, the tool records the gap: a check that could not run is 
 * Add the scanners, SkillSpector included, to the pinned [ai-trial](../examples/ai-trial/README.md) run, as a standing benchmark.
 * Pin the GitHub Actions in CI by commit hash rather than by tag.
 
+## Local setup and account housekeeping
+
+While the repository is private these are tracked here too. Before it goes public, review this section: the `CLAUDE.md` mentions below stay in git history unless the history is rewritten.
+
+* Correct the local `CLAUDE.md` (kept out of git): it still says the GitHub repository is named airlock; it was renamed to superscrubber104.
+* Install SkillSpector permanently in WSL under `~/scanners`, pin it in the tuned policy (`~/scanners/tuned-policy.yaml`), and delete the trial install in `/tmp/ss`.
+* Delete the old GitHub Actions runs for the commits that once contained `CLAUDE.md` (`e86bc4e`, `de86a27`); a full purge of those commits needs GitHub Support or a fresh repository.
+* Revoke each GitHub token once its pushes are done.
+
 ## Decided against, and why
 
 These are known and recorded, and stay out because a guardrail rules them out ([CONTRIBUTING.md](../CONTRIBUTING.md#guardrails)). Each is reconsidered only if the guardrail can be kept.
