@@ -286,7 +286,7 @@ superscrubber104 is pre-alpha: every command works end to end and is tested, but
 | 2 | controls-as-code | Control-mapped gap reports for coding-agent setups | planned |
 | 3 | MCP policy gateway | Runtime enforcement between agents and MCP servers | planned |
 
-The design documents are in [docs/design/](docs/design/README.md).
+What is not built yet, item by item, is in [docs/roadmap.md](docs/roadmap.md). The design documents are in [docs/design/](docs/design/README.md).
 
 ## Development
 
